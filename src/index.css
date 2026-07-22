@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Light mode: plain white background, black text. No gradients. */
+:root {
+  --bg: 255 255 255;
+  --surface: 250 250 250;
+  --border: 229 229 229;
+  --text: 17 17 17;
+  --muted: 115 115 115;
+  --primary: 16 163 127; /* emerald — neutral, not purple/blue */
+  --success: 22 163 74;
+  --warning: 202 138 4;
+  --danger: 220 38 38;
+}
+
+/* Dark mode: pure black background, white text. Not navy/purple-tinted. */
+.dark {
+  --bg: 0 0 0;
+  --surface: 10 10 10;
+  --border: 38 38 38;
+  --text: 255 255 255;
+  --muted: 161 161 161;
+  --primary: 52 211 153;
+  --success: 34 197 94;
+  --warning: 234 179 8;
+  --danger: 248 113 113;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  background-color: rgb(var(--bg));
+  color: rgb(var(--text));
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Thin, unobtrusive scrollbars to match the minimal aesthetic. */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: rgb(var(--border)); border-radius: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* Subtle fade-in for newly mounted panels. */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in { animation: fadeIn 0.25s ease-out; }
