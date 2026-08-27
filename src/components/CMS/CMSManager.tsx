@@ -38,6 +38,8 @@ export default function CMSManager() {
       <CMSViewer
         slug={selected.slug}
         onBack={() => { setView('list'); setSelected(null); }}
+        // Allow admin to view drafts by passing allowUnpublished
+        allowUnpublished={true}
       />
     );
   }

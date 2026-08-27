@@ -12,6 +12,8 @@ export function kellyCriterion(
   winProb: number,
   winLossRatio: number, // average win / average loss
 ): number {
+  // Guard against division by zero or invalid ratio
+  if (winLossRatio <= 0) return 0;
   const q = 1 - winProb;
   const kelly = (winLossRatio * winProb - q) / winLossRatio;
   // Use fractional Kelly (25%) for safety
@@ -71,10 +73,17 @@ export function calculatePositionSize(params: {
   // Adjust for volatility
   const adjustedSize = volatilityAdjustedSize(base.size, params.currentAtr, params.averageAtr);
 
+  // BUGFIX: Recompute riskAmount and riskPct from the adjusted size, since
+  // volatilityAdjustedSize may have scaled the base size up or down. The
+  // pre-adjustment base values understate/overstate real risk.
+  const priceRisk = Math.abs(params.entryPrice - params.stopLossPrice);
+  const adjRiskAmount = adjustedSize * priceRisk;
+  const adjRiskPct = params.portfolioValue > 0 ? adjRiskAmount / params.portfolioValue : 0;
+
   return {
     size: adjustedSize,
-    riskAmount: base.riskAmount,
-    riskPct,
+    riskAmount: adjRiskAmount,
+    riskPct: adjRiskPct,
   };
 }
 

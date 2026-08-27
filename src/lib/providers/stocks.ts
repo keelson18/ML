@@ -12,8 +12,8 @@ export const stocksProvider: DataProvider = {
 
   async fetchKlines(_symbol: string, _timeframe: Timeframe, _limit = 200): Promise<Candle[]> {
     // Placeholder: In production, call Polygon REST API
-    const tf = TIMEFRAME_MAP.polygon[timeframe] ?? timeframe;
-    const url = `https://api.polygon.io/v2/aggs/ticker/${symbol}/prev?adjusted=true&apiKey=${KEY}`;
+    //const tf = TIMEFRAME_MAP.polygon[timeframe] ?? timeframe;
+    //const url = `https://api.polygon.io/v2/aggs/ticker/${symbol}/prev?adjusted=true&apiKey=${KEY}`;
     console.warn('Stocks provider: using simulated data. Replace with real Polygon.io API.');
     return generateSimulatedCandles(200);
   },

@@ -44,13 +44,17 @@ CREATE POLICY "update_any_profile_admin" ON profiles FOR UPDATE
   ) WITH CHECK (true);
 
 -- Auto-create profile on user signup
+-- SECURITY: role is hardcoded to 'user' to prevent privilege escalation.
+-- The client can pass any role in raw_user_meta_data at signup, so we must
+-- never trust it. Admin promotion must happen via the update_any_profile_admin
+-- policy or a service-role script.
 CREATE OR REPLACE FUNCTION handle_new_user()
 RETURNS trigger AS $$
 BEGIN
   INSERT INTO public.profiles (id, role, display_name)
   VALUES (
     NEW.id,
-    COALESCE(NEW.raw_user_meta_data->>'role', 'user'),
+    'user',
     COALESCE(NEW.raw_user_meta_data->>'display_name', split_part(NEW.email, '@', 1))
   );
   RETURN NEW;
@@ -138,12 +142,10 @@ CREATE INDEX IF NOT EXISTS idx_market_active ON market_universe(is_active) WHERE
 DROP POLICY IF EXISTS "read_market_universe" ON market_universe;
 CREATE POLICY "read_market_universe" ON market_universe FOR SELECT
   TO anon, authenticated USING (true);
+-- SECURITY: No INSERT/UPDATE policies for authenticated users on market_universe.
+-- Written exclusively by edge functions or service role scripts.
 DROP POLICY IF EXISTS "insert_market_universe" ON market_universe;
-CREATE POLICY "insert_market_universe" ON market_universe FOR INSERT
-  TO authenticated WITH CHECK (true);
 DROP POLICY IF EXISTS "update_market_universe" ON market_universe;
-CREATE POLICY "update_market_universe" ON market_universe FOR UPDATE
-  TO authenticated USING (true) WITH CHECK (true);
 
 -- 4. Add market_type to positions
 ALTER TABLE positions ADD COLUMN IF NOT EXISTS market_type text DEFAULT 'crypto' CHECK (market_type IN ('crypto', 'forex', 'commodity', 'index', 'stock'));
@@ -170,7 +172,7 @@ CREATE POLICY "read_system_metrics_admin" ON system_metrics FOR SELECT
   TO authenticated USING (
     EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
   );
+-- SECURITY: No INSERT policy for authenticated users on system_metrics.
+-- Written exclusively by edge functions via service role.
 DROP POLICY IF EXISTS "insert_system_metrics" ON system_metrics;
-CREATE POLICY "insert_system_metrics" ON system_metrics FOR INSERT
-  TO authenticated WITH CHECK (true);
 

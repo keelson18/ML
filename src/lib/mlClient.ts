@@ -1,6 +1,11 @@
 import type { MLPrediction, Timeframe } from './types';
 import { supabase } from './supabase';
 
+// SECURITY: This hardcoded key does not gate real users — it only filters raw
+// internet traffic (obscurity). The real gate is the server-side check against
+// ML_SERVICE_API_KEY which must be configured (no silent fallback to this default).
+// A misconfigured deploy will fail loudly instead of silently running open.
+// See supabase/functions/ml-predict/index.ts for the server side.
 const ML_KEY = 'qi-ml-default-key';
 
 // Call the ML prediction edge function. Falls back gracefully on error.

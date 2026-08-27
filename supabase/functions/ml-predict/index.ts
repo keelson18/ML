@@ -14,7 +14,15 @@ const corsHeaders = {
 };
 
 // ---- Config ----
-const API_KEY = Deno.env.get("ML_SERVICE_API_KEY") ?? "qi-ml-default-key";
+// SECURITY: ML_SERVICE_API_KEY must be explicitly configured in the environment.
+// If missing, fail loudly rather than silently falling back to a default that
+// ships in the client-side bundle. This key does NOT gate real users — it only
+// filters raw internet traffic. Real auth comes from the Supabase JWT.
+const API_KEY = (() => {
+  const key = Deno.env.get("ML_SERVICE_API_KEY");
+  if (!key) throw new Error("ML_SERVICE_API_KEY environment variable is required");
+  return key;
+})();
 const BINANCE = "https://api.binance.com";
 const PRED_HORIZON = 5; // candles ahead to predict
 const TRAIN_FRACTION = 0.7; // chronological split, no shuffling

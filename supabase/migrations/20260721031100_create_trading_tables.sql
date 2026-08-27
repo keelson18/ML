@@ -135,15 +135,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_strat_unique ON strategy_results(symbol, s
 DROP POLICY IF EXISTS "read_strategy_results" ON strategy_results;
 CREATE POLICY "read_strategy_results" ON strategy_results FOR SELECT
   TO anon, authenticated USING (true);
-DROP POLICY IF EXISTS "insert_strategy_results" ON strategy_results;
-CREATE POLICY "insert_strategy_results" ON strategy_results FOR INSERT
-  TO authenticated WITH CHECK (true);
-DROP POLICY IF EXISTS "update_strategy_results" ON strategy_results;
-CREATE POLICY "update_strategy_results" ON strategy_results FOR UPDATE
-  TO authenticated USING (true) WITH CHECK (true);
-DROP POLICY IF EXISTS "delete_strategy_results" ON strategy_results;
-CREATE POLICY "delete_strategy_results" ON strategy_results FOR DELETE
-  TO authenticated USING (true);
+-- SECURITY: No INSERT/UPDATE/DELETE policies for authenticated users.
+-- strategy_results is written exclusively by the service role (edge functions
+-- bypass RLS by default). Client-side write access is not needed.
+-- Retained only for reference: removed write policies intentionally.
 
 CREATE TABLE IF NOT EXISTS ml_predictions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -164,12 +159,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_ml_unique ON ml_predictions(symbol, timefr
 DROP POLICY IF EXISTS "read_ml_predictions" ON ml_predictions;
 CREATE POLICY "read_ml_predictions" ON ml_predictions FOR SELECT
   TO anon, authenticated USING (true);
-DROP POLICY IF EXISTS "insert_ml_predictions" ON ml_predictions;
-CREATE POLICY "insert_ml_predictions" ON ml_predictions FOR INSERT
-  TO authenticated WITH CHECK (true);
-DROP POLICY IF EXISTS "update_ml_predictions" ON ml_predictions;
-CREATE POLICY "update_ml_predictions" ON ml_predictions FOR UPDATE
-  TO authenticated USING (true) WITH CHECK (true);
-DROP POLICY IF EXISTS "delete_ml_predictions" ON ml_predictions;
-CREATE POLICY "delete_ml_predictions" ON ml_predictions FOR DELETE
-  TO authenticated USING (true);
+-- SECURITY: No INSERT/UPDATE/DELETE policies for authenticated users on
+-- ml_predictions. Written exclusively by edge functions via service role.
+-- Client-side write access is not needed.

@@ -6,23 +6,25 @@ import { fetchContentBySlug } from '../../lib/cms';
 interface Props {
   slug: string;
   onBack?: () => void;
+  allowUnpublished?: boolean; // When true, fetches without published filter (admin use)
 }
 
-export default function CMSViewer({ slug, onBack }: Props) {
+export default function CMSViewer({ slug, onBack, allowUnpublished }: Props) {
   const [content, setContent] = useState<CMSContent | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const data = await fetchContentBySlug(slug);
+      // When allowUnpublished is true, fetch all content by slug (bypasses RLS published filter)
+      const data = await fetchContentBySlug(slug, allowUnpublished);
       if (!cancelled) {
         setContent(data);
         setLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [slug]);
+  }, [slug, allowUnpublished]);
 
   if (loading) {
     return (

@@ -46,19 +46,30 @@ export function analyzeMarketStructure(candles: Candle[], lookback = 50): Market
 
   const events: StructureEvent[] = [];
 
+  // Compute average swing move size for relative strength scaling (avoids saturation)
+  const avgSwingMove = (() => {
+    const moves: number[] = [];
+    for (let i = 1; i < highs.length; i++)
+      moves.push(Math.abs(highs[i].value - highs[i-1].value) / highs[i-1].value);
+    for (let i = 1; i < lows.length; i++)
+      moves.push(Math.abs(lows[i].value - lows[i-1].value) / lows[i-1].value);
+    return moves.length > 0 ? moves.reduce((a, b) => a + b, 0) / moves.length * 100 : 0.5;
+  })();
+  const refMove = Math.max(avgSwingMove, 0.1); // floor to avoid div-by-zero
+
   // Analyze swing high sequence
   for (let i = 1; i < highs.length; i++) {
     const prev = highs[i - 1];
     const curr = highs[i];
 
     if (curr.value > prev.value) {
-      // Higher High (HH)
+      // Higher High (HH) — strength relative to recent average swing move
       events.push({
         type: 'HH',
         index: curr.index,
         time: curr.time,
         value: curr.value,
-        strength: Math.min(1, (curr.value - prev.value) / prev.value * 100),
+        strength: Math.min(1, ((curr.value - prev.value) / prev.value * 100) / refMove),
         description: `Higher High: ${curr.value.toFixed(2)} > ${prev.value.toFixed(2)}`,
       });
     } else if (curr.value < prev.value) {
@@ -68,7 +79,7 @@ export function analyzeMarketStructure(candles: Candle[], lookback = 50): Market
         index: curr.index,
         time: curr.time,
         value: curr.value,
-        strength: Math.min(1, (prev.value - curr.value) / prev.value * 100),
+        strength: Math.min(1, ((prev.value - curr.value) / prev.value * 100) / refMove),
         description: `Lower High: ${curr.value.toFixed(2)} < ${prev.value.toFixed(2)}`,
       });
     }
@@ -92,13 +103,13 @@ export function analyzeMarketStructure(candles: Candle[], lookback = 50): Market
     const curr = lows[i];
 
     if (curr.value > prev.value) {
-      // Higher Low (HL)
+      // Higher Low (HL) — strength relative to recent average swing move
       events.push({
         type: 'HL',
         index: curr.index,
         time: curr.time,
         value: curr.value,
-        strength: Math.min(1, (curr.value - prev.value) / prev.value * 100),
+        strength: Math.min(1, ((curr.value - prev.value) / prev.value * 100) / refMove),
         description: `Higher Low: ${curr.value.toFixed(2)} > ${prev.value.toFixed(2)}`,
       });
     } else if (curr.value < prev.value) {
@@ -108,7 +119,7 @@ export function analyzeMarketStructure(candles: Candle[], lookback = 50): Market
         index: curr.index,
         time: curr.time,
         value: curr.value,
-        strength: Math.min(1, (prev.value - curr.value) / prev.value * 100),
+        strength: Math.min(1, ((prev.value - curr.value) / prev.value * 100) / refMove),
         description: `Lower Low: ${curr.value.toFixed(2)} < ${prev.value.toFixed(2)}`,
       });
     }
@@ -163,6 +174,7 @@ export function analyzeMarketStructure(candles: Candle[], lookback = 50): Market
     const rangePct = (rangeHigh - rangeLow) / rangeHigh;
     if (rangePct < 0.03) {
       state = 'consolidating';
+      trendStrength = 0; // BUGFIX: reset strength when consolidating — prior bullish/bearish value is stale
     }
   }
 

@@ -58,12 +58,13 @@ export function runBacktest(
     const pnlPct = side === 'buy' ? (exit - entry) / entry : (entry - exit) / entry;
     const pnl = capital * pnlPct;
 
+    const tradeSide = side === 'neutral' ? 'buy' : side as 'buy' | 'sell';
     trades.push({
       entryTime: candles[i].time,
       exitTime: candles[i + holdBars].time,
       entryPrice: entry,
       exitPrice: exit,
-      side,
+      side: tradeSide,
       size: capital / entry,
       pnl,
       pnlPct,

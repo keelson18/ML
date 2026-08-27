@@ -1,5 +1,5 @@
 import type { Candle, Signal, Side, Timeframe } from '../types';
-import { sma, ema, rsi, macd, bollinger, atr } from '../indicators';
+import { sma, ema, rsi, macd, bollinger, atr, findSwings } from '../indicators';
 import { detectCandlestickPatterns } from '../patterns/candlestick-patterns';
 import { detectExtendedChartPatterns } from '../patterns/chart-patterns';
 import { detectHeadShoulders, detectDoubleTopBottom, detectTriangleFlag } from './legacy-patterns';
@@ -50,7 +50,7 @@ const rsiDivStrategy: Strategy = {
   detect(candles: Candle[]): Signal[] {
     const closes = candles.map((c) => c.close);
     const r = rsi(closes, 14);
-    const { highs, lows } = require('../indicators').findSwings(candles, 3, 3);
+    const { highs, lows } = findSwings(candles, 3, 3);
     const signals: Signal[] = [];
     if (highs.length >= 2) {
       const [a, b] = highs.slice(-2);

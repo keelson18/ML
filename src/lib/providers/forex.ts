@@ -12,8 +12,8 @@ export const forexProvider: DataProvider = {
 
   async fetchKlines(_symbol: string, _timeframe: Timeframe, _limit = 200): Promise<Candle[]> {
     // Placeholder: In production, call OANDA REST API
-    const tf = TIMEFRAME_MAP.oanda[timeframe] ?? timeframe;
-    const url = `https://api-fxpractice.oanda.com/v3/instruments/${symbol}/candles?granularity=${tf}&count=${limit}`;
+    //const tf = TIMEFRAME_MAP.oanda[timeframe] ?? timeframe;
+   // const url = `https://api-fxpractice.oanda.com/v3/instruments/${symbol}/candles?granularity=${tf}&count=${limit}`;
     console.warn('Forex provider: using simulated data. Replace with real OANDA API.');
     return generateSimulatedCandles(200);
   },

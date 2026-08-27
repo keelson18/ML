@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity, Sun, Moon, LogOut, Wifi, WifiOff, TrendingUp, TrendingDown, Minus,
-  Target, Shield, Brain, Zap, RefreshCw, Shield as ShieldIcon, BookOpen, Info,
+  Target, Shield, Brain, Zap, RefreshCw, Menu, Info,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { TRACKED_PAIRS, TIMEFRAMES, MARKET_TYPES, type Candle, type Timeframe, type Signal, type Recommendation, type MLPrediction, type MarketType } from '../lib/types';
+import { TRACKED_PAIRS, TIMEFRAMES, MARKET_TYPES, type Candle, type Timeframe, type Signal, type Recommendation, type MLPrediction, type MarketType, type CMSContent } from '../lib/types';
 import { fetchKlines, subscribeKlines } from '../lib/binance';
 import { runStrategies, riskLevels } from '../lib/strategies';
 import { combineSignals } from '../lib/backtest';
@@ -14,13 +14,30 @@ import PriceChart from './PriceChart';
 import KineticCoach from './KineticCoach';
 import AdminPanel from './AdminPanel';
 import ExplainableTrade from './ExplainableTrade';
+import CMSManager from './CMS/CMSManager';
+import CMSViewer from './CMS/CMSViewer';
+import Sidebar, { type SidebarTab } from './Sidebar';
 import { getMarketsByType } from '../lib/markets';
+import { fetchPublishedContent } from '../lib/cms';
+import MarketsPage from './pages/MarketsPage';
+import AIAnalysis from './pages/AIAnalysis';
+import StrategyLab from './pages/StrategyLab';
+import PortfolioPage from './pages/PortfolioPage';
+import BacktestingCenter from './pages/BacktestingCenter';
+import WatchlistsPage from './pages/WatchlistsPage';
+import AlertsPage from './pages/AlertsPage';
+import NewsPage from './pages/NewsPage';
+import RiskManagement from './pages/RiskManagement';
+import AILearning from './pages/AILearning';
+import TradingTerminal from './TradingTerminal';
 
 type WsStatus = 'connecting' | 'open' | 'closed' | 'reconnecting';
 
 export default function Dashboard() {
   const { user, profile, signOut } = useAuth();
   const { theme, toggle } = useTheme();
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>('dashboard');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [marketType, setMarketType] = useState<MarketType>('crypto');
   const [symbol, setSymbol] = useState<string>('BTCUSDT');
   const [timeframe, setTimeframe] = useState<Timeframe>('1h');
@@ -30,11 +47,10 @@ export default function Dashboard() {
   const [livePrice, setLivePrice] = useState<number | null>(null);
   const [ml, setMl] = useState<MLPrediction | null>(null);
   const [mlLoading, setMlLoading] = useState(false);
-  const [showAdmin, setShowAdmin] = useState(false);
   const [showExplanation, setShowExplanation] = useState(false);
   const candlesRef = useRef<Candle[]>([]);
 
-  // Available markets based on selected market type
+  const isAdmin = profile?.role === 'admin';
   const availableMarkets = useMemo(() => getMarketsByType(marketType), [marketType]);
 
   // Keep a ref of latest candles so the kline update callback can merge without stale state.
@@ -60,7 +76,7 @@ export default function Dashboard() {
       }
     })();
 
-    const unsub = subscribeKlines(symbol, timeframe, (candle, closed) => {
+    const unsub = subscribeKlines(symbol, timeframe, (candle) => {
       setCandles((prev) => {
         const arr = [...prev];
         const last = arr[arr.length - 1];
@@ -73,7 +89,6 @@ export default function Dashboard() {
         return arr;
       });
       setLivePrice(candle.close);
-      void closed;
     }, (status) => setWsStatus(status));
 
     return () => { disposed = true; unsub(); };
@@ -108,7 +123,6 @@ export default function Dashboard() {
   // Collect all overlays from signals for the chart.
   const overlays = useMemo(() => {
     const all = signals.flatMap((s) => s.overlays ?? []);
-    // Add stop/target price lines if we have a recommendation.
     if (recommendation?.stopLoss && recommendation?.takeProfit && recommendation.entry) {
       all.push({ type: 'hline' as const, id: 'sl', price: recommendation.stopLoss, color: '#ef4444', label: 'SL' });
       all.push({ type: 'hline' as const, id: 'tp', price: recommendation.takeProfit, color: '#22c55e', label: 'TP' });
@@ -124,83 +138,176 @@ export default function Dashboard() {
     return ((last - first) / first) * 100;
   }, [candles]);
 
-  return (
-    <div className="min-h-screen bg-bg text-text">
-      {/* Header */}
-      <header className="border-b border-border sticky top-0 z-20 bg-bg/95 backdrop-blur">
-        <div className="px-4 lg:px-6 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-primary/15 flex items-center justify-center">
-              <Activity className="w-4 h-4 text-primary" />
+  // Render the appropriate page content based on sidebar tab
+  const renderContent = () => {
+    // Admin panel
+    if (sidebarTab === 'admin' && isAdmin) {
+      return (
+        <div className="p-4 lg:p-6">
+          <AdminPanel />
+        </div>
+      );
+    }
+
+    // CMS / Knowledge Base — role-aware: admin gets full editor, others get read-only article list
+    if (sidebarTab === 'cms') {
+      return (
+        <div className="p-4 lg:p-6">
+          {isAdmin ? <CMSManager /> : <PublishedArticles />}
+        </div>
+      );
+    }
+
+    // Settings tab — profile/theme/notifications panel
+    if (sidebarTab === 'settings') {
+      return (
+        <div className="p-4 lg:p-6 max-w-2xl">
+          <h2 className="text-sm font-semibold mb-4">Settings</h2>
+          <div className="bg-surface border border-border rounded-xl p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium">Theme</div>
+                <div className="text-xs text-muted">Toggle between light and dark mode</div>
+              </div>
+              <button
+                onClick={toggle}
+                className="px-3 py-1.5 rounded-lg bg-bg border border-border text-xs font-medium hover:bg-surface transition-colors"
+              >
+                {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+              </button>
             </div>
-            <span className="font-semibold tracking-tight">Quantum Intelligence</span>
-          </div>
-          <div className="flex items-center gap-3">
-            <WsIndicator status={wsStatus} />
-            <button onClick={toggle} className="p-2 rounded-lg hover:bg-surface transition-colors" title="Toggle theme">
-              {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-            </button>
-            {profile?.role === 'admin' && (
-              <button
-                onClick={() => setShowAdmin(!showAdmin)}
-                className={`p-2 rounded-lg transition-colors ${showAdmin ? 'bg-primary/15 text-primary' : 'hover:bg-surface text-muted'}`}
-                title="Admin Panel"
-              >
-                <ShieldIcon className="w-4 h-4" />
-              </button>
-            )}
-            {recommendation && (
-              <button
-                onClick={() => setShowExplanation(!showExplanation)}
-                className={`p-2 rounded-lg transition-colors ${showExplanation ? 'bg-primary/15 text-primary' : 'hover:bg-surface text-muted'}`}
-                title="Explain Trade"
-              >
-                <Info className="w-4 h-4" />
-              </button>
-            )}
-            <div className="hidden sm:block text-xs text-muted">{user?.email}</div>
-            <button onClick={signOut} className="p-2 rounded-lg hover:bg-surface transition-colors" title="Sign out">
-              <LogOut className="w-4 h-4" />
-            </button>
+            <div className="border-t border-border/50 pt-4">
+              <div className="text-sm font-medium mb-1">Account</div>
+              <div className="text-xs text-muted">{user?.email}</div>
+              <div className="text-xs text-muted mt-1">Role: {profile?.role ?? 'user'}</div>
+            </div>
+            <div className="border-t border-border/50 pt-4">
+              <div className="text-sm font-medium mb-1">Notifications</div>
+              <div className="text-xs text-muted">Notification preferences coming soon.</div>
+            </div>
           </div>
         </div>
-      </header>
+      );
+    }
 
+    // Markets tab — dedicated market overview with all market types
+    if (sidebarTab === 'markets') {
+      return <MarketsPage />;
+    }
+
+    // Trading Terminal — advanced chart for active trading
+    if (sidebarTab === 'terminal') {
+      return (
+        <div className="p-4 lg:p-6">
+          <div className="flex flex-wrap items-center gap-3 mb-4">
+            <select value={symbol} onChange={(e) => setSymbol(e.target.value)}
+              className="px-3 py-2 rounded-lg bg-surface border border-border text-text focus:outline-none focus:border-primary text-sm">
+              {availableMarkets.map((p) => <option key={p.symbol} value={p.symbol}>{p.label}</option>)}
+            </select>
+            <div className="flex gap-1 p-1 rounded-lg bg-surface border border-border">
+              {TIMEFRAMES.map((tf) => (
+                <button key={tf.value} onClick={() => setTimeframe(tf.value)}
+                  className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${timeframe === tf.value ? 'bg-primary text-black' : 'text-muted hover:text-text'}`}>{tf.label}</button>
+              ))}
+            </div>
+            <span className="text-lg font-semibold tabular-nums ml-auto">${livePrice?.toLocaleString(undefined, { maximumFractionDigits: 2 }) ?? '--'}</span>
+          </div>
+          <div className="bg-surface border border-border rounded-xl overflow-hidden h-[600px] relative">
+            {loading && <div className="absolute inset-0 flex items-center justify-center text-muted text-sm"><RefreshCw className="w-4 h-4 animate-spin mr-2" /> Loading…</div>}
+            {!loading && candles.length > 0 && <TradingTerminal symbol={symbol} marketType={marketType} candles={candles} overlays={overlays} timeframe={timeframe} theme={theme} wsStatus={wsStatus} />}
+            {!loading && candles.length === 0 && <div className="absolute inset-0 flex items-center justify-center text-muted text-sm">No data</div>}
+          </div>
+        </div>
+      );
+    }
+
+    // AI Analysis panel
+    if (sidebarTab === 'ai-analysis') {
+      return <AIAnalysis signals={signals} ml={ml} recommendation={recommendation} onRefreshML={refreshML} mlLoading={mlLoading} />;
+    }
+
+    // Strategy Lab
+    if (sidebarTab === 'strategies') {
+      return <StrategyLab signals={signals} candles={candles} timeframe={timeframe} />;
+    }
+
+    // Portfolio page
+    if (sidebarTab === 'portfolio') {
+      return <PortfolioPage />;
+    }
+
+    // Backtesting Center
+    if (sidebarTab === 'backtesting') {
+      return <BacktestingCenter candles={candles} timeframe={timeframe} />;
+    }
+
+    // Watchlists
+    if (sidebarTab === 'watchlists') {
+      return <WatchlistsPage />;
+    }
+
+    // Alerts
+    if (sidebarTab === 'alerts') {
+      return <AlertsPage />;
+    }
+
+    // News & Sentiment
+    if (sidebarTab === 'news') {
+      return <NewsPage />;
+    }
+
+    // Risk Management
+    if (sidebarTab === 'risk') {
+      return <RiskManagement />;
+    }
+
+    // AI Learning Center
+    if (sidebarTab === 'ai-learning') {
+      return <AILearning />;
+    }
+
+// Default: Dashboard
+    return (
       <div className="px-4 lg:px-6 py-4">
         {/* Controls */}
-        <div className="flex flex-wrap items-center gap-2 mb-4">
-          {/* Market type selector */}
-          <div className="flex gap-1 p-1 rounded-lg bg-surface border border-border">
+        <div className="flex flex-wrap items-center gap-3 mb-4">
+          {/* Market Type Selector */}
+          <select
+            value={marketType}
+            onChange={(e) => {
+              const newType = e.target.value as MarketType;
+              setMarketType(newType);
+              const markets = getMarketsByType(newType);
+              if (markets.length > 0 && !markets.find((m) => m.symbol === symbol)) {
+                setSymbol(markets[0].symbol);
+              }
+            }}
+            className="px-3 py-2 rounded-lg bg-surface border border-border text-text focus:outline-none focus:border-primary text-sm"
+          >
             {MARKET_TYPES.map((mt) => (
-              <button
-                key={mt.value}
-                onClick={() => { setMarketType(mt.value); setSymbol(getMarketsByType(mt.value)[0]?.symbol ?? symbol); }}
-                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-                  marketType === mt.value ? 'bg-primary text-black' : 'text-muted hover:text-text'
-                }`}
-              >
-                {mt.icon} {mt.label}
-              </button>
+              <option key={mt.value} value={mt.value}>{mt.icon} {mt.label}</option>
             ))}
-          </div>
-          {/* Symbol selector */}
+          </select>
+
+          {/* Symbol Selector */}
           <select
             value={symbol}
             onChange={(e) => setSymbol(e.target.value)}
             className="px-3 py-2 rounded-lg bg-surface border border-border text-text focus:outline-none focus:border-primary text-sm"
           >
             {availableMarkets.length > 0
-              ? availableMarkets.map((m) => <option key={m.symbol} value={m.symbol}>{m.label}</option>)
+              ? availableMarkets.map((p) => <option key={p.symbol} value={p.symbol}>{p.label}</option>)
               : TRACKED_PAIRS.map((p) => <option key={p.symbol} value={p.symbol}>{p.label}</option>)
             }
           </select>
-          {/* Timeframe selector */}
+
+          {/* Timeframe Selector */}
           <div className="flex gap-1 p-1 rounded-lg bg-surface border border-border">
             {TIMEFRAMES.map((tf) => (
               <button
                 key={tf.value}
                 onClick={() => setTimeframe(tf.value)}
-                className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
                   timeframe === tf.value ? 'bg-primary text-black' : 'text-muted hover:text-text'
                 }`}
               >
@@ -208,6 +315,7 @@ export default function Dashboard() {
               </button>
             ))}
           </div>
+
           {livePrice && (
             <div className="flex items-center gap-2 ml-auto">
               <span className="text-lg font-semibold tabular-nums">${livePrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
@@ -219,17 +327,21 @@ export default function Dashboard() {
               )}
             </div>
           )}
+
+          {/* Explainable Trade toggle */}
+          {recommendation && signals.length > 0 && (
+            <button
+              onClick={() => setShowExplanation(!showExplanation)}
+              className={`p-2 rounded-lg transition-colors ${showExplanation ? 'bg-primary/15 text-primary' : 'text-muted hover:text-text'}`}
+              title="Explain this trade"
+            >
+              <Info className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
-        {/* Admin Panel */}
-        {showAdmin && profile?.role === 'admin' && (
-          <div className="mb-4">
-            <AdminPanel />
-          </div>
-        )}
-
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Chart + recommendation + explanation */}
+          {/* Chart + recommendation */}
           <div className="lg:col-span-2 space-y-4">
             <div className="bg-surface border border-border rounded-xl overflow-hidden h-[420px] relative">
               {loading && (
@@ -247,16 +359,20 @@ export default function Dashboard() {
               )}
             </div>
 
-            {/* Recommendation */}
-            {recommendation && !showExplanation && <RecommendationCard rec={recommendation} risk={risk} />}
-
-            {/* Explainable Trade */}
-            {showExplanation && recommendation && (
-              <ExplainableTrade recommendation={recommendation} signals={signals} onClose={() => setShowExplanation(false)} />
+            {/* Explainable Trade card */}
+            {showExplanation && recommendation && signals.length > 0 && (
+              <ExplainableTrade
+                recommendation={recommendation}
+                signals={signals}
+                onClose={() => setShowExplanation(false)}
+              />
             )}
+
+            {/* Recommendation */}
+            {recommendation && <RecommendationCard rec={recommendation} risk={risk} />}
           </div>
 
-          {/* Right column: signals + ML + coach */}
+          {/* Right column: signals + ML */}
           <div className="space-y-4">
             <MLCard ml={ml} loading={mlLoading} onRefresh={refreshML} />
             <SignalsCard signals={signals} />
@@ -267,6 +383,55 @@ export default function Dashboard() {
         <div className="mt-4 bg-surface border border-border rounded-xl h-[400px] overflow-hidden">
           <KineticCoach />
         </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="h-full flex bg-bg text-text">
+      {/* Sidebar */}
+      <Sidebar
+        activeTab={sidebarTab}
+        onTabChange={setSidebarTab}
+        isAdmin={isAdmin}
+        collapsed={sidebarCollapsed}
+        onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+      />
+
+      {/* Main content area */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Header */}
+        <header className="h-14 border-b border-border bg-bg/95 backdrop-blur flex items-center justify-between px-4 lg:px-6 shrink-0">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              className="p-1.5 rounded-lg hover:bg-surface transition-colors text-muted hover:text-text lg:hidden"
+            >
+              <Menu className="w-4 h-4" />
+            </button>
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-primary/15 flex items-center justify-center">
+                <Activity className="w-4 h-4 text-primary" />
+              </div>
+              <span className="font-semibold tracking-tight hidden sm:inline">Quantum Intelligence</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <WsIndicator status={wsStatus} />
+            <button onClick={toggle} className="p-2 rounded-lg hover:bg-surface transition-colors" title="Toggle theme">
+              {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
+            <div className="hidden sm:block text-xs text-muted">{user?.email}</div>
+            <button onClick={signOut} className="p-2 rounded-lg hover:bg-surface transition-colors" title="Sign out">
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
+        </header>
+
+        {/* Content */}
+        <main className="flex-1 overflow-y-auto">
+          {renderContent()}
+        </main>
       </div>
     </div>
   );
@@ -326,7 +491,6 @@ function RecommendationCard({ rec, risk }: { rec: Recommendation; risk: { atr: n
         </div>
       </div>
 
-      {/* Risk levels */}
       {risk && (
         <div className="grid grid-cols-3 gap-2 mb-4">
           <RiskBox label="Entry" value={risk.entry} icon={Target} color="text-text" />
@@ -340,7 +504,6 @@ function RecommendationCard({ rec, risk }: { rec: Recommendation; risk: { atr: n
         </div>
       )}
 
-      {/* Contributors */}
       <div className="space-y-1.5">
         {rec.contributors.map((c, i) => (
           <div key={i} className="flex items-center justify-between text-xs py-1.5 px-2 rounded bg-bg/50">
@@ -431,3 +594,59 @@ function SignalsCard({ signals }: { signals: Signal[] }) {
     </div>
   );
 }
+
+// Published articles list — shown to non-admin users under the CMS/knowledge-base tab.
+// Fetches only published content via the read_published_cms RLS policy.
+function PublishedArticles() {
+  const [articles, setArticles] = useState<CMSContent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const data = await fetchPublishedContent();
+      if (!cancelled) { setArticles(data); setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (loading) {
+    return <div className="text-sm text-muted text-center py-12">Loading articles…</div>;
+  }
+
+  // If an article is selected, show CMSViewer for that slug
+  if (selectedSlug) {
+    return <CMSViewer slug={selectedSlug} onBack={() => setSelectedSlug(null)} />;
+  }
+
+  if (articles.length === 0) {
+    return <div className="text-sm text-muted text-center py-12">No published articles yet.</div>;
+  }
+
+  return (
+    <div className="animate-fade-in space-y-3">
+      <h2 className="text-sm font-semibold mb-4">Knowledge Base</h2>
+      {articles.map((a) => (
+        <button
+          key={a.id}
+          onClick={() => setSelectedSlug(a.slug)}
+          className="w-full text-left bg-surface border border-border rounded-xl p-4 hover:border-primary/30 transition-colors"
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary capitalize">{a.contentType}</span>
+            {a.tags.map((t: string) => (
+              <span key={t} className="text-[10px] text-muted">#{t}</span>
+            ))}
+          </div>
+          <div className="text-sm font-medium">{a.title}</div>
+          {a.excerpt && <div className="text-xs text-muted mt-1 line-clamp-2">{a.excerpt}</div>}
+          {a.publishedAt && (
+            <div className="text-[10px] text-muted mt-2">{new Date(a.publishedAt).toLocaleDateString()}</div>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+

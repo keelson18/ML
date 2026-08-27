@@ -2,6 +2,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import AuthScreen from './components/AuthScreen';
 import Dashboard from './components/Dashboard';
+import ErrorBoundary from './components/ErrorBoundary';
 
 // Root: providers wrap the app. Auth gate shows AuthScreen or Dashboard.
 function Gate() {
@@ -13,7 +14,11 @@ function Gate() {
       </div>
     );
   }
-  return session ? <Dashboard /> : <AuthScreen />;
+  return session ? (
+    <ErrorBoundary>
+      <Dashboard />
+    </ErrorBoundary>
+  ) : <AuthScreen />;
 }
 
 export default function App() {
