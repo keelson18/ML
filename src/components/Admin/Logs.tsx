@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { FileText, RefreshCw, AlertTriangle, Info, XCircle } from 'lucide-react';
+import { useState } from 'react';
+import { RefreshCw, AlertTriangle, Info, XCircle } from 'lucide-react';
 
 interface LogEntry {
   id: string;
@@ -30,7 +30,7 @@ const LEVEL_COLORS = {
 };
 
 export default function Logs() {
-  const [logs, setLogs] = useState<LogEntry[]>(mockLogs);
+  const logs = mockLogs;
   const [filter, setFilter] = useState<string>('all');
 
   const filtered = filter === 'all' ? logs : logs.filter((l) => l.level === filter);

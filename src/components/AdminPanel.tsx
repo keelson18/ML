@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Shield, Activity, Users, Brain, BookOpen, FileText, BarChart3, Settings } from 'lucide-react';
+import { Shield, Activity, Users, Brain, BookOpen, FileText, Settings } from 'lucide-react';
 import AdminRoute from './AdminRoute';
 import SystemMetrics from './Admin/SystemMetrics';
 import UserManagement from './Admin/UserManagement';

@@ -1,5 +1,4 @@
 import type { Candle, Timeframe } from '../types';
-import { TIMEFRAMES } from '../types';
 import { TIMEFRAME_MAP } from './types';
 import type { DataProvider } from './types';
 

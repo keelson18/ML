@@ -1,4 +1,4 @@
-import { Zap, TrendingUp, TrendingDown, Minus, Activity } from 'lucide-react';
+import { Zap, TrendingUp, TrendingDown, Activity } from 'lucide-react';
 import type { Signal, Candle, Timeframe } from '../../lib/types';
 
 interface Props {

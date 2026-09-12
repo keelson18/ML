@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { History, TrendingUp, TrendingDown, Activity } from 'lucide-react';
+import { History } from 'lucide-react';
 import type { Candle, Timeframe } from '../../lib/types';
 
 interface Props {

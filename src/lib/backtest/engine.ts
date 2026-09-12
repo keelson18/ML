@@ -1,4 +1,4 @@
-import type { Candle, Signal, Recommendation } from '../types';
+import type { Candle, Signal } from '../types';
 
 // Refactored backtest engine with portfolio tracking and multi-strategy support
 
@@ -73,7 +73,6 @@ export function runBacktest(
     });
 
     // Update equity
-    const wins = trades.filter((t) => t.pnl > 0);
     capital += pnl;
     equity.push(capital);
     peak = Math.max(peak, capital);

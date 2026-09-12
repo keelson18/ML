@@ -1,5 +1,5 @@
 import type { Candle, Signal, Side, Timeframe } from './types';
-import { sma, ema, rsi, macd, bollinger, atr, findSwings, correlation } from './indicators';
+import { sma, rsi, bollinger, atr, findSwings } from './indicators';
 
 // ---- Pattern detection helpers ----
 

@@ -51,7 +51,6 @@ export function detectOrderBlocks(candles: Candle[]): OrderBlock[] {
   if (candles.length < 10) return blocks;
 
   for (let i = 3; i < candles.length - 2; i++) {
-    const prev = candles[i - 1];
     const curr = candles[i];
     const next = candles[i + 1];
     const next2 = candles[i + 2];

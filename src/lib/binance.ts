@@ -119,6 +119,7 @@ export function subscribeKlines(
             low: parseFloat(k.l),
             close: parseFloat(k.c),
             volume: parseFloat(k.v),
+            
           },
           Boolean(k.x),
         );
@@ -126,7 +127,7 @@ export function subscribeKlines(
         // ignore
       }
     };
-
+    
     ws.onclose = () => {
       if (closed) return;
       onStatus?.('reconnecting', `closed, retry in ${Math.round(backoff / 1000)}s`);

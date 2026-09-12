@@ -441,7 +441,7 @@ For every trade signal, provide:
 - [ ] Add Forex data provider (OANDA / FXCM API)
 - [ ] Add Stocks/Indices/Commodities data provider (Polygon / IEX / Yahoo Finance)
 - [ ] Universal market type system (crypto, forex, stocks, indices, commodities)
-- [ ] Expanded timeframe support (3m, 5m, 30m, 1w, 1M)
+
 - [ ] Multi-exchange/multi-broker abstraction layer
 
 ### Phase 3: Pattern Recognition Expansion

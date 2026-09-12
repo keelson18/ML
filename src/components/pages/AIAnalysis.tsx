@@ -1,4 +1,4 @@
-import { Brain, TrendingUp, TrendingDown, Minus, Activity, BarChart3, Target, Zap } from 'lucide-react';
+import { Brain, TrendingUp, TrendingDown, Minus, Activity, BarChart3, Zap } from 'lucide-react';
 import type { Signal, MLPrediction, Recommendation } from '../../lib/types';
 
 interface Props {
@@ -9,7 +9,7 @@ interface Props {
   mlLoading: boolean;
 }
 
-export default function AIAnalysis({ signals, ml, recommendation, onRefreshML, mlLoading }: Props) {
+export default function AIAnalysis({ signals, ml, recommendation }: Props) {
   return (
     <div className="p-4 lg:p-6 space-y-6">
       <h2 className="text-sm font-semibold flex items-center gap-2">

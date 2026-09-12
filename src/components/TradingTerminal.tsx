@@ -1,11 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import {
   createChart,
   ColorType,
   CrosshairMode,
   type IChartApi,
   type ISeriesApi,
-  type LineData,
   type SeriesMarker,
   type Time,
 } from 'lightweight-charts';
@@ -21,7 +20,8 @@ interface Props {
   wsStatus: string;
 }
 
-export default function TradingTerminal({ symbol, marketType, candles, overlays, timeframe, theme, wsStatus }: Props) {
+export default function TradingTerminal(props: Props) {
+  const { candles, overlays, theme } = props;
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);

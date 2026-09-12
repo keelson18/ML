@@ -1,15 +1,19 @@
 // Quantum Intelligence — Kinetic Coach edge function.
 // Proxies Google Gemini for a trading-coaching chat. Keeps the API key server-side only.
-// NOTE: This function relies on Supabase's platform-level JWT verification, which
-// the public anon key satisfies for any client. It does NOT implement per-user auth.
+// Requests require an authenticated Supabase user.
 // Rate limiting: per-IP in-memory sliding window (60 req/min/IP). Resets on function cold start.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "npm:@supabase/supabase-js@2.57.4";
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": Deno.env.get("CORS_ORIGIN") ?? "null",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
+  "Access-Control-Max-Age": "600",
+  "Vary": "Origin",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "no-referrer",
 };
 
 const GEMINI_KEY = Deno.env.get("GEMINI_API_KEY") ?? "";
@@ -41,6 +45,19 @@ function checkRateLimit(ip: string): boolean {
   return true;
 }
 
+async function authenticatedUser(req: Request): Promise<boolean> {
+  const authorization = req.headers.get('Authorization');
+  if (!authorization?.startsWith('Bearer ')) return false;
+
+  const supabase = createClient(
+    Deno.env.get('SUPABASE_URL') ?? '',
+    Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+    { global: { headers: { Authorization: authorization } } },
+  );
+  const { data: { user }, error } = await supabase.auth.getUser();
+  return !error && user !== null;
+}
+
 const SYSTEM_PROMPT = `You are Kinetic Coach, an AI trading coach integrated into the Quantum Intelligence platform.
 You help users understand crypto trading concepts, interpret technical analysis signals (RSI, MACD, Bollinger Bands, Fibonacci, chart patterns), manage risk, and build disciplined trading psychology.
 Be concise, practical, and educational. Never give guaranteed-profit advice. Always remind users that trading carries risk.
@@ -50,6 +67,10 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: corsHeaders });
 
   try {
+    if (!(await authenticatedUser(req))) {
+      return jsonResponse({ error: "Authentication required" }, 401);
+    }
+
     // Rate limit by client IP
     const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
       ?? req.headers.get("x-real-ip")

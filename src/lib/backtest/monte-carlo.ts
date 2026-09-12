@@ -48,7 +48,6 @@ export function monteCarloSimulation(
   // Compute statistics
   const sorted = [...finalValues].sort((a, b) => a - b);
   const n = sorted.length;
-  const meanFinal = sorted.reduce((s, v) => s + v, 0) / n;
   const medianFinal = n % 2 === 0 ? (sorted[n / 2 - 1] + sorted[n / 2]) / 2 : sorted[Math.floor(n / 2)];
   const positiveCount = finalValues.filter((v) => v > initialCapital).length;
 

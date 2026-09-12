@@ -25,7 +25,6 @@ export default function PriceChart({ candles, overlays, theme }: Props) {
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   // Track created overlay series so we can clean them up on each render.
   const overlaySeriesRef = useRef<ISeriesApi<'Line'>[]>([]);
-  const markerRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
 
   // Create chart once.
   useEffect(() => {

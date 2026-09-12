@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Save, Eye, X } from 'lucide-react';
+import { Save, X } from 'lucide-react';
 import type { CMSContent, CMSContentType } from '../../lib/types';
 import { upsertContent } from '../../lib/cms';
 

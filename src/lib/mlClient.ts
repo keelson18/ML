@@ -1,23 +1,18 @@
 import type { MLPrediction, Timeframe } from './types';
 import { supabase } from './supabase';
 
-// SECURITY: This hardcoded key does not gate real users — it only filters raw
-// internet traffic (obscurity). The real gate is the server-side check against
-// ML_SERVICE_API_KEY which must be configured (no silent fallback to this default).
-// A misconfigured deploy will fail loudly instead of silently running open.
-// See supabase/functions/ml-predict/index.ts for the server side.
-const ML_KEY = 'qi-ml-default-key';
-
 // Call the ML prediction edge function. Falls back gracefully on error.
 export async function fetchMLPrediction(symbol: string, timeframe: Timeframe): Promise<MLPrediction | null> {
   try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return null;
+
     const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ml-predict/predict`;
     const res = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-        'x-api-key': ML_KEY,
+        Authorization: `Bearer ${session.access_token}`,
       },
       body: JSON.stringify({ pair: symbol, timeframe }),
     });
@@ -66,11 +61,14 @@ export interface CoachMessage { role: 'user' | 'assistant'; content: string }
 
 export async function askCoach(messages: CoachMessage[]): Promise<string> {
   const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/kinetic-coach`;
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Authentication required');
+
   const res = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token ?? import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+      Authorization: `Bearer ${session.access_token}`,
     },
     body: JSON.stringify({ messages }),
   });

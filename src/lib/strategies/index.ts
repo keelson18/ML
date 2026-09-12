@@ -1,5 +1,5 @@
 import type { Candle, Signal, Side, Timeframe } from '../types';
-import { sma, ema, rsi, macd, bollinger, atr, findSwings } from '../indicators';
+import { sma, rsi, bollinger, findSwings } from '../indicators';
 import { detectCandlestickPatterns } from '../patterns/candlestick-patterns';
 import { detectExtendedChartPatterns } from '../patterns/chart-patterns';
 import { detectHeadShoulders, detectDoubleTopBottom, detectTriangleFlag } from './legacy-patterns';
@@ -104,7 +104,7 @@ export const STRATEGY_REGISTRY: Strategy[] = [
 ];
 
 // Dynamic strategy selector based on market conditions
-export function selectBestStrategy(candles: Candle[], timeframe: Timeframe): Strategy {
+export function selectBestStrategy(candles: Candle[], _timeframe: Timeframe): Strategy {
   if (candles.length < 60) return STRATEGY_REGISTRY[0];
 
   const structure = analyzeMarketStructure(candles.slice(-100));

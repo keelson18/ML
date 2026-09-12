@@ -1,4 +1,4 @@
-import type { MLPrediction } from '../types';
+import type { MLPrediction, Timeframe } from '../types';
 
 // Ensemble voting system: combine multiple ML model predictions
 
@@ -77,7 +77,7 @@ export function ensembleToMLPrediction(
 ): MLPrediction {
   return {
     pair: symbol,
-    timeframe: timeframe as any,
+    timeframe: timeframe as Timeframe,
     prediction: ensemble.prediction,
     probability: ensemble.probability,
     expected_move_pct: expectedMovePct * (ensemble.prediction === 'up' ? 1 : ensemble.prediction === 'down' ? -1 : 0),

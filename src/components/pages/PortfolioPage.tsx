@@ -1,4 +1,4 @@
-import { Briefcase, TrendingUp, TrendingDown, DollarSign, Activity } from 'lucide-react';
+import { Briefcase, TrendingUp, DollarSign, Activity } from 'lucide-react';
 
 export default function PortfolioPage() {
   const stats = [

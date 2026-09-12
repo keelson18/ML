@@ -1,4 +1,4 @@
-import { Info, TrendingUp, TrendingDown, Shield, Target, AlertTriangle, BarChart3 } from 'lucide-react';
+import { Info, TrendingUp, Shield, Target, AlertTriangle, BarChart3, type LucideIcon } from 'lucide-react';
 import type { Recommendation, Signal } from '../lib/types';
 
 interface Props {
@@ -119,7 +119,7 @@ export default function ExplainableTrade({ recommendation, signals, onClose }: P
   );
 }
 
-function Section({ icon: Icon, title, color, children }: { icon: any; title: string; color: string; children: React.ReactNode }) {
+function Section({ icon: Icon, title, color, children }: { icon: LucideIcon; title: string; color: string; children: React.ReactNode }) {
   return (
     <div className="mb-4 pb-4 border-b border-border/50 last:border-b-0 last:mb-0 last:pb-0">
       <div className="flex items-center gap-1.5 mb-2">

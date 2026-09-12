@@ -2,22 +2,25 @@
 // Replaces the Python FastAPI service from the original spec with a Deno/TS equivalent.
 // Implements feature engineering + a logistic-regression classifier trained on OHLCV features,
 // exposed via the same contract: POST /predict, GET /model/status, POST /retrain.
-// All endpoints protected by a shared API key (ML_SERVICE_API_KEY env var).
+// Prediction requests require an authenticated Supabase user. Retraining is
+// restricted to the server-side service key.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "npm:@supabase/supabase-js@2.57.4";
+import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.57.4";
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": Deno.env.get("CORS_ORIGIN") ?? "null",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
+  "Access-Control-Max-Age": "600",
+  "Vary": "Origin",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "no-referrer",
 };
 
 // ---- Config ----
-// SECURITY: ML_SERVICE_API_KEY must be explicitly configured in the environment.
-// If missing, fail loudly rather than silently falling back to a default that
-// ships in the client-side bundle. This key does NOT gate real users — it only
-// filters raw internet traffic. Real auth comes from the Supabase JWT.
+// SECURITY: ML_SERVICE_API_KEY must be explicitly configured in the environment
+// for protected maintenance operations. It is never sent to the browser.
 const API_KEY = (() => {
   const key = Deno.env.get("ML_SERVICE_API_KEY");
   if (!key) throw new Error("ML_SERVICE_API_KEY environment variable is required");
@@ -36,6 +39,8 @@ let modelState: {
   trainedAt: string;
   dataRange: { start: number; end: number };
   version: string;
+  mean: number[];
+  std: number[];
 } | null = null;
 
 // ---- Feature engineering ----
@@ -178,7 +183,7 @@ async function fetchCandles(symbol: string, timeframe: string, limit = 1000): Pr
 }
 
 // ---- Rate limiting (durable via Supabase table) ----
-async function checkRate(supabase: any, key: string, maxPerMin: number): Promise<boolean> {
+async function checkRate(supabase: SupabaseClient, key: string, maxPerMin: number): Promise<boolean> {
   const now = Date.now();
   const windowStart = new Date(now - 60000).toISOString();
   const { data } = await supabase.from('ml_predictions').select('created_at').eq('symbol', `__rl__${key}`).gte('created_at', windowStart);
@@ -187,8 +192,21 @@ async function checkRate(supabase: any, key: string, maxPerMin: number): Promise
 
 // ---- Auth ----
 function authorized(req: Request): boolean {
-  const key = req.headers.get('x-api-key') ?? new URL(req.url).searchParams.get('key');
+  const key = req.headers.get('x-api-key');
   return key === API_KEY;
+}
+
+async function authenticatedUser(req: Request): Promise<boolean> {
+  const authorization = req.headers.get('Authorization');
+  if (!authorization?.startsWith('Bearer ')) return false;
+
+  const supabase = createClient(
+    Deno.env.get('SUPABASE_URL') ?? '',
+    Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+    { global: { headers: { Authorization: authorization } } },
+  );
+  const { data: { user }, error } = await supabase.auth.getUser();
+  return !error && user !== null;
 }
 
 // ---- Main handler ----
@@ -211,17 +229,16 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    if (!authorized(req)) {
-      console.warn(`[ml] unauthorized attempt from ${req.headers.get('x-forwarded-for') ?? 'unknown'}`);
-      return jsonResponse({ error: 'Unauthorized' }, 401);
-    }
-
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
     );
 
     if (path === 'predict' && req.method === 'POST') {
+      if (!(await authenticatedUser(req))) {
+        console.warn(`[ml] unauthenticated prediction attempt from ${req.headers.get('x-forwarded-for') ?? 'unknown'}`);
+        return jsonResponse({ error: 'Authentication required' }, 401);
+      }
       const { pair, timeframe } = await req.json();
       if (!pair || !timeframe) return jsonResponse({ error: 'pair and timeframe required' }, 400);
       // Rate limit: 30 predicts/min.
@@ -238,9 +255,8 @@ Deno.serve(async (req: Request) => {
       const { features, valid } = computeFeatures(candles);
       if (!valid || features.length === 0) return jsonResponse({ error: 'Insufficient data' }, 422);
       const last = features[features.length - 1];
-      const probUp = predictProba({ weights: modelState.weights, bias: modelState.bias, mean: (modelState as any).mean, std: (modelState as any).std }, last);
+      const probUp = predictProba(modelState, last);
       const prediction = probUp > 0.55 ? 'up' : probUp < 0.45 ? 'down' : 'flat';
-      const lastClose = candles[candles.length - 1].close;
       const expectedMovePct = (probUp - 0.5) * 2 * (modelState.metrics.accuracy * 5);
       const confidence = probUp > 0.7 || probUp < 0.3 ? 'high' : probUp > 0.6 || probUp < 0.4 ? 'medium' : 'low';
 
@@ -263,6 +279,9 @@ Deno.serve(async (req: Request) => {
     }
 
     if (path === 'retrain' && req.method === 'POST') {
+      if (!authorized(req)) {
+        return jsonResponse({ error: 'Unauthorized' }, 401);
+      }
       if (!(await checkRate(supabase, 'retrain', 2))) return jsonResponse({ error: 'Rate limit exceeded' }, 429);
       const { pair = 'BTCUSDT', timeframe = '1h' } = await req.json().catch(() => ({}));
       const result = await retrainInternal(supabase, pair, timeframe);
@@ -283,7 +302,9 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
-async function retrainInternal(supabase: any, symbol: string, timeframe: string): Promise<{ ok: boolean; metrics: any; version: string }> {
+interface ModelMetrics { accuracy: number; f1: number; samples: number }
+
+async function retrainInternal(supabase: SupabaseClient, symbol: string, timeframe: string): Promise<{ ok: boolean; metrics: ModelMetrics; version: string }> {
   const candles = await fetchCandles(symbol, timeframe, 1000);
   const { features, labels, valid } = computeFeatures(candles);
   if (!valid) throw new Error('Insufficient data for training');
@@ -321,8 +342,8 @@ async function retrainInternal(supabase: any, symbol: string, timeframe: string)
     trainedAt: new Date().toISOString(),
     dataRange: { start: candles[0].time, end: candles[candles.length - 1].time },
     version,
-    // stash mean/std for predict
-    ...({ mean: model.mean, std: model.std } as any),
+    mean: model.mean,
+    std: model.std,
   };
   console.log(`[ml] retrained on ${symbol} ${timeframe}: acc=${accuracy.toFixed(3)} f1=${f1.toFixed(3)} samples=${n}`);
   return { ok: true, metrics: modelState.metrics, version };

@@ -1,4 +1,4 @@
-import { Brain, Activity, TrendingUp, BarChart3 } from 'lucide-react';
+import { Brain } from 'lucide-react';
 
 export default function AILearning() {
   return (

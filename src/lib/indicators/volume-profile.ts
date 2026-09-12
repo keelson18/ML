@@ -51,7 +51,6 @@ export function calculateVolumeProfile(candles: Candle[], numBins = 20): VolumeP
   let maxVol = 0;
 
   const nodes: VolumeNode[] = [];
-  let cumulativeVol = 0;
   const sortedBins = Array.from(bins.entries()).sort((a, b) => a[0] - b[0]);
 
   for (const [binIndex, vol] of sortedBins) {
@@ -65,7 +64,6 @@ export function calculateVolumeProfile(candles: Candle[], numBins = 20): VolumeP
       pocVolume = vol;
     }
 
-    cumulativeVol += vol;
     nodes.push({
       priceLow,
       priceHigh,

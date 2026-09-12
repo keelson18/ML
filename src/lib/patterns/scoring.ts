@@ -33,21 +33,15 @@ export function detectTrend(candles: Candle[], lookback = 20): TrendInfo {
   // Calculate directional movement
   let upDays = 0;
   let downDays = 0;
-  let upVolume = 0;
-  let downVolume = 0;
 
   for (let i = 1; i < closes.length; i++) {
     const c = candles[candles.length - lookback + i];
     if (c.close > candles[candles.length - lookback + i - 1].close) {
       upDays++;
-      upVolume += c.volume;
     } else {
       downDays++;
-      downVolume += c.volume;
     }
   }
-
-  const totalVolume = upVolume + downVolume;
 
   const strength = Math.min(1, Math.abs(change) / 5);
   let direction: TrendInfo['direction'] = 'ranging';

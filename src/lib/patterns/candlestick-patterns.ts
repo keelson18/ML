@@ -1,4 +1,4 @@
-import type { Candle, Signal, Overlay } from '../types';
+import type { Candle, Signal } from '../types';
 
 // ---- Candlestick Pattern Detection Library ----
 // Detects 17+ individual candlestick patterns with context-aware scoring.

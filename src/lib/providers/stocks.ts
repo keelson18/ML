@@ -1,5 +1,5 @@
 import type { Candle, Timeframe } from '../types';
-import { TIMEFRAME_MAP, type DataProvider } from './types';
+import type { DataProvider } from './types';
 
 // Simulated Stocks/Indices data provider (Polygon.io-compatible interface)
 // In production, replace with actual Polygon/IEX/Yahoo Finance API calls

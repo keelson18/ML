@@ -1,5 +1,5 @@
 import type { Candle, Timeframe } from '../types';
-import { TIMEFRAME_MAP, type DataProvider } from './types';
+import type { DataProvider } from './types';
 
 // Simulated Forex data provider (OANDA-compatible interface)
 // In production, replace with actual OANDA/FXCM API calls

@@ -63,6 +63,11 @@ export function checkRiskLimits(
     allowed = false;
   }
 
+  if (state.currentLeverage > limits.maxLeverage) {
+    reasons.push(`Current leverage ${state.currentLeverage.toFixed(2)} exceeds ${limits.maxLeverage.toFixed(2)} limit`);
+    allowed = false;
+  }
+
   // Check risk/reward ratio
   const risk = Math.abs(trade.entryPrice - trade.stopLossPrice);
   const reward = Math.abs(trade.takeProfitPrice - trade.entryPrice);
