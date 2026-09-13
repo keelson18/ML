@@ -501,7 +501,6 @@ For every trade signal, provide:
 | **Database** | Supabase PostgreSQL |
 | **Cache** | Redis |
 | **Auth** | Supabase Auth (JWT) |
-| **ML/AI** | Python (XGBoost, PyTorch, TensorFlow), Deno (logistic regression) |
 | **Real-time** | WebSockets |
 | **Infrastructure** | Docker, Supabase |
 
