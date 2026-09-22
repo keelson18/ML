@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import type { CMSContent } from '../lib/types';
-import { fetchPublishedContent } from '../lib/cms';
+import type { CMSContent } from '../types';
+import { cmsApi } from '../api';
 
 interface CMSContextType {
   articles: CMSContent[];
@@ -29,11 +29,15 @@ export function CMSProvider({ children }: { children: ReactNode }) {
 
   const load = async () => {
     setLoading(true);
-    const all = await fetchPublishedContent();
-    setArticles(all.filter((c) => c.contentType === 'article'));
-    setGuides(all.filter((c) => c.contentType === 'guide'));
-    setAnnouncements(all.filter((c) => c.contentType === 'announcement'));
-    setFaqs(all.filter((c) => c.contentType === 'faq'));
+    try {
+      const { items } = await cmsApi.fetchPublished();
+      setArticles(items.filter((c) => c.contentType === 'article'));
+      setGuides(items.filter((c) => c.contentType === 'guide'));
+      setAnnouncements(items.filter((c) => c.contentType === 'announcement'));
+      setFaqs(items.filter((c) => c.contentType === 'faq'));
+    } catch {
+      // graceful empty state
+    }
     setLoading(false);
   };
 
@@ -47,4 +51,3 @@ export function CMSProvider({ children }: { children: ReactNode }) {
 }
 
 export const useCMS = () => useContext(Ctx);
-

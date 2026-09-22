@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { BookOpen, Plus, Edit2, Trash2, Eye, EyeOff, RefreshCw } from 'lucide-react';
-import type { CMSContent } from '../../lib/types';
-import { fetchAllContent, deleteContent, togglePublish } from '../../lib/cms';
+import type { CMSContent } from '../../types';
+import { cmsApi } from '../../api';
 import CMSViewer from './CMSViewer';
 import CMSEditor from './CMSEditor';
 
@@ -15,8 +15,12 @@ export default function CMSManager() {
 
   const load = async () => {
     setLoading(true);
-    const data = await fetchAllContent();
-    setContents(data);
+    try {
+      const { items } = await cmsApi.fetchAll();
+      setContents(items);
+    } catch {
+      setContents([]);
+    }
     setLoading(false);
   };
 
@@ -24,12 +28,12 @@ export default function CMSManager() {
 
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this content?')) return;
-    await deleteContent(id);
+    await cmsApi.delete(id);
     await load();
   };
 
   const handleToggle = async (id: string, published: boolean) => {
-    await togglePublish(id, published);
+    await cmsApi.togglePublish(id, published);
     await load();
   };
 
@@ -38,7 +42,6 @@ export default function CMSManager() {
       <CMSViewer
         slug={selected.slug}
         onBack={() => { setView('list'); setSelected(null); }}
-        // Allow admin to view drafts by passing allowUnpublished
         allowUnpublished={true}
       />
     );
@@ -140,4 +143,3 @@ export default function CMSManager() {
     </div>
   );
 }
-

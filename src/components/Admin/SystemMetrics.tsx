@@ -1,13 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BarChart3, TrendingUp, Users, Cpu, Activity, Zap } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
-
-interface Metric {
-  metric_name: string;
-  metric_value: number;
-  metric_unit: string;
-  recorded_at: string;
-}
+import { metricsApi, type SystemMetric } from '../../api';
 
 const METRIC_CARDS = [
   { name: 'total_users', label: 'Total Users', icon: Users, unit: '', color: 'text-primary' },
@@ -19,24 +12,24 @@ const METRIC_CARDS = [
 ];
 
 export default function SystemMetrics() {
-  const [metrics, setMetrics] = useState<Record<string, Metric>>({});
+  const [metrics, setMetrics] = useState<Record<string, SystemMetric>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data } = await supabase
-        .from('system_metrics')
-        .select('*')
-        .order('recorded_at', { ascending: false })
-        .limit(50);
-      if (cancelled || !data) return;
-      const map: Record<string, Metric> = {};
-      for (const m of data) {
-        if (!map[m.metric_name]) map[m.metric_name] = m;
+      try {
+        const { metrics: data } = await metricsApi.getMetrics();
+        if (cancelled || !data) return;
+        const map: Record<string, SystemMetric> = {};
+        for (const m of data) {
+          if (!map[m.metric_name]) map[m.metric_name] = m;
+        }
+        setMetrics(map);
+      } catch {
+        // graceful empty state
       }
-      setMetrics(map);
-      setLoading(false);
+      if (!cancelled) setLoading(false);
     })();
     return () => { cancelled = true; };
   }, []);
@@ -74,4 +67,3 @@ export default function SystemMetrics() {
     </div>
   );
 }
-

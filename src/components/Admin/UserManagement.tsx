@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Shield, ShieldOff, RefreshCw } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
-import type { UserProfile } from '../../lib/types';
+import { authApi } from '../../api';
+import type { UserProfile } from '../../types';
 
 export default function UserManagement() {
   const [users, setUsers] = useState<UserProfile[]>([]);
@@ -9,18 +9,11 @@ export default function UserManagement() {
 
   const fetchUsers = async () => {
     setLoading(true);
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .order('created_at', { ascending: false });
-    if (data) {
-      setUsers(data.map((u) => ({
-        id: u.id,
-        role: u.role,
-        displayName: u.display_name,
-        avatarUrl: u.avatar_url,
-        createdAt: u.created_at,
-      })));
+    try {
+      const { profiles } = await authApi.getAllProfiles();
+      setUsers(profiles);
+    } catch {
+      setUsers([]);
     }
     setLoading(false);
   };
@@ -29,10 +22,7 @@ export default function UserManagement() {
 
   const toggleRole = async (userId: string, currentRole: string) => {
     const newRole = currentRole === 'admin' ? 'user' : 'admin';
-    await supabase
-      .from('profiles')
-      .update({ role: newRole })
-      .eq('id', userId);
+    await authApi.updateProfileRole(userId, newRole);
     await fetchUsers();
   };
 
@@ -80,4 +70,3 @@ export default function UserManagement() {
     </div>
   );
 }
-

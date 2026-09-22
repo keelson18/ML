@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { BookOpen, ChevronLeft } from 'lucide-react';
-import type { CMSContent } from '../../lib/types';
-import { fetchContentBySlug } from '../../lib/cms';
+import type { CMSContent } from '../../types';
+import { cmsApi } from '../../api';
 
 interface Props {
   slug: string;
   onBack?: () => void;
-  allowUnpublished?: boolean; // When true, fetches without published filter (admin use)
+  allowUnpublished?: boolean;
 }
 
 export default function CMSViewer({ slug, onBack, allowUnpublished }: Props) {
@@ -16,11 +16,14 @@ export default function CMSViewer({ slug, onBack, allowUnpublished }: Props) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      // When allowUnpublished is true, fetch all content by slug (bypasses RLS published filter)
-      const data = await fetchContentBySlug(slug, allowUnpublished);
-      if (!cancelled) {
-        setContent(data);
-        setLoading(false);
+      try {
+        const { item } = await cmsApi.fetchBySlug(slug, allowUnpublished);
+        if (!cancelled) {
+          setContent(item);
+          setLoading(false);
+        }
+      } catch {
+        if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
@@ -82,4 +85,3 @@ export default function CMSViewer({ slug, onBack, allowUnpublished }: Props) {
     </div>
   );
 }
-

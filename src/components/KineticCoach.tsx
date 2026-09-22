@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { MessageSquare, Send, Loader2 } from 'lucide-react';
-import { askCoach, type CoachMessage } from '../lib/mlClient';
+import { coachApi, type CoachMessage } from '../api';
 
-// Kinetic Coach — Gemini-powered trading coaching chat.
 export default function KineticCoach() {
   const [messages, setMessages] = useState<CoachMessage[]>([
     { role: 'assistant', content: "Hi, I'm Kinetic Coach. Ask me about any signal you're seeing, risk management, or trading psychology." },
@@ -23,7 +22,7 @@ export default function KineticCoach() {
     setInput('');
     setLoading(true);
     try {
-      const reply = await askCoach(next);
+      const { reply } = await coachApi.ask(next);
       setMessages((m) => [...m, { role: 'assistant', content: reply }]);
     } catch {
       setMessages((m) => [...m, { role: 'assistant', content: 'Sorry, I had trouble reaching the coaching service. Please try again.' }]);

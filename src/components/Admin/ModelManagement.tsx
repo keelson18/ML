@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Brain, RefreshCw, Play, StopCircle } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import { mlApi } from '../../api';
 
 interface ModelRecord {
   id: string;
@@ -17,14 +17,10 @@ export default function ModelManagement() {
 
   const fetchModels = async () => {
     setLoading(true);
-    const { data } = await supabase
-      .from('ml_predictions')
-      .select('model_version, created_at')
-      .order('created_at', { ascending: false })
-      .limit(20);
-    if (data) {
+    try {
+      const { versions } = await mlApi.getVersions();
       const uniqueVersions = new Map<string, ModelRecord>();
-      for (const m of data) {
+      for (const m of versions) {
         if (!uniqueVersions.has(m.model_version)) {
           uniqueVersions.set(m.model_version, {
             id: m.model_version,
@@ -37,6 +33,8 @@ export default function ModelManagement() {
         }
       }
       setModels(Array.from(uniqueVersions.values()));
+    } catch {
+      setModels([]);
     }
     setLoading(false);
   };
@@ -94,4 +92,3 @@ export default function ModelManagement() {
     </div>
   );
 }
-
