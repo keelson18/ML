@@ -1,4 +1,4 @@
-import { supabase } from '../supabase';
+import { api } from '../../api';
 import { DomainError } from '../errors';
 import { createCorrelationId, createLogEvent, writeLog } from '../observability';
 import type { KnowledgeNode } from './knowledge-engine';
@@ -26,58 +26,36 @@ export interface RegisterModelInput {
 
 export async function createDraftKnowledge(input: CreateKnowledgeInput): Promise<string> {
   const correlationId = input.correlationId ?? createCorrelationId();
-  const { data, error } = await supabase
-    .from('knowledge_nodes')
-    .insert({
+  try {
+    const result = await api.post<{ id: string }>('/knowledge/nodes', {
       id: input.node.id,
-      node_type: input.node.nodeType,
+      nodeType: input.node.nodeType,
       title: input.node.title,
       content: input.node.content,
       tags: input.node.tags,
       confidence: input.node.confidence,
-      status: 'draft',
       version: input.node.version,
-      created_by: input.createdBy,
-    })
-    .select('id')
-    .single();
-
-  if (error) throw new DomainError('DATA_ERROR', `Knowledge persistence failed: ${error.message}`, { resource: 'knowledge_node' }, correlationId);
-  const row = data as { id: string } | null;
-  if (!row?.id) throw new DomainError('DATA_ERROR', 'Knowledge persistence failed: database returned no node ID.', { resource: 'knowledge_node' }, correlationId);
-  writeLog(createLogEvent('info', 'knowledge.node.persisted', correlationId, { nodeId: row.id, createdBy: input.createdBy }));
-  return row.id;
+      createdBy: input.createdBy,
+    });
+    writeLog(createLogEvent('info', 'knowledge.node.persisted', correlationId, { nodeId: result.id, createdBy: input.createdBy }));
+    return result.id;
+  } catch (e) {
+    throw new DomainError('DATA_ERROR', `Knowledge persistence failed: ${e instanceof Error ? e.message : 'unknown'}`, { resource: 'knowledge_node' }, correlationId);
+  }
 }
 
 export async function registerResearchModel(input: RegisterModelInput): Promise<{ modelId: string; versionId: string }> {
   const correlationId = input.correlationId ?? createCorrelationId();
-  const { data: modelData, error: modelError } = await supabase
-    .from('models')
-    .insert({ name: input.name, description: input.description, created_by: input.createdBy })
-    .select('id')
-    .single();
-  if (modelError) throw new DomainError('DATA_ERROR', `Model persistence failed: ${modelError.message}`, { resource: 'model' }, correlationId);
-  const model = modelData as { id: string } | null;
-  if (!model?.id) throw new DomainError('DATA_ERROR', 'Model persistence failed: database returned no model ID.', { resource: 'model' }, correlationId);
-
-  const { data: versionData, error: versionError } = await supabase
-    .from('model_versions')
-    .insert({
-      model_id: model.id,
-      version: input.version.version,
-      artifact_reference: input.version.artifactReference,
-      training_dataset: input.version.trainingDataset,
-      feature_set: input.version.featureSet,
-      algorithm: input.version.algorithm,
-      metrics: input.version.metrics,
-      status: 'research',
-      created_by: input.createdBy,
-    })
-    .select('id')
-    .single();
-  if (versionError) throw new DomainError('DATA_ERROR', `Model version persistence failed: ${versionError.message}`, { resource: 'model_version' }, correlationId);
-  const version = versionData as { id: string } | null;
-  if (!version?.id) throw new DomainError('DATA_ERROR', 'Model version persistence failed: database returned no version ID.', { resource: 'model_version' }, correlationId);
-  writeLog(createLogEvent('info', 'model.version.persisted', correlationId, { modelId: model.id, versionId: version.id }));
-  return { modelId: model.id, versionId: version.id };
+  try {
+    const result = await api.post<{ modelId: string; versionId: string }>('/knowledge/models', {
+      name: input.name,
+      description: input.description,
+      createdBy: input.createdBy,
+      version: input.version,
+    });
+    writeLog(createLogEvent('info', 'model.version.persisted', correlationId, { modelId: result.modelId, versionId: result.versionId }));
+    return result;
+  } catch (e) {
+    throw new DomainError('DATA_ERROR', `Model persistence failed: ${e instanceof Error ? e.message : 'unknown'}`, { resource: 'model' }, correlationId);
+  }
 }

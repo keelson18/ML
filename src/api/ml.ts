@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { MLPrediction, Timeframe } from '../types';
+import type { MLPrediction, Timeframe } from '../lib/types';
 
 export interface CoachMessage { role: 'user' | 'assistant'; content: string }
 

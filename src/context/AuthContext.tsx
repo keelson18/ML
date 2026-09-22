@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { authApi, type AuthSession, setAuthToken, getAuthToken } from '../api';
-import type { UserProfile, UserRole } from '../types';
+import type { UserProfile, UserRole } from '../lib/types';
 
 interface AuthCtx {
   session: AuthSession['session'] | null;

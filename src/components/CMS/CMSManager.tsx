@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BookOpen, Plus, Edit2, Trash2, Eye, EyeOff, RefreshCw } from 'lucide-react';
-import type { CMSContent } from '../../types';
+import type { CMSContent } from '../../lib/types';
 import { cmsApi } from '../../api';
 import CMSViewer from './CMSViewer';
 import CMSEditor from './CMSEditor';

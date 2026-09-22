@@ -1,78 +1,30 @@
 import type { MLPrediction, Timeframe } from './types';
-import { supabase } from './supabase';
+import { mlApi, coachApi, type CoachMessage } from '../api';
 
-// Call the ML prediction edge function. Falls back gracefully on error.
+// Fetch a fresh ML prediction from the backend.
 export async function fetchMLPrediction(symbol: string, timeframe: Timeframe): Promise<MLPrediction | null> {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return null;
-
-    const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ml-predict/predict`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify({ pair: symbol, timeframe }),
-    });
-    if (!res.ok) {
-      console.warn('ML predict failed', res.status);
-      return null;
-    }
-    const data = await res.json();
-    if (!data || data.error) return null;
-    return {
-      pair: data.pair,
-      timeframe: data.timeframe,
-      prediction: data.prediction,
-      probability: data.probability,
-      expected_move_pct: data.expected_move_pct,
-      model_version: data.model_version,
-      confidence: data.confidence,
-    };
+    const { prediction } = await mlApi.predict(symbol, timeframe);
+    return prediction;
   } catch (e) {
     console.warn('ML predict error', e);
     return null;
   }
 }
 
-// Fetch the most recent cached ML prediction from the database (for instant UI load).
+// Fetch the most recent cached ML prediction (for instant UI load).
 export async function fetchCachedMLPrediction(symbol: string, timeframe: Timeframe): Promise<MLPrediction | null> {
-  const { data } = await supabase
-    .from('ml_predictions')
-    .select('*')
-    .eq('symbol', symbol)
-    .eq('timeframe', timeframe)
-    .maybeSingle();
-  if (!data) return null;
-  return {
-    pair: data.symbol,
-    timeframe: data.timeframe,
-    prediction: data.prediction,
-    probability: Number(data.probability),
-    expected_move_pct: Number(data.expected_move_pct),
-    model_version: data.model_version,
-    confidence: data.confidence,
-  };
+  try {
+    const { prediction } = await mlApi.getCachedPrediction(symbol, timeframe);
+    return prediction;
+  } catch {
+    return null;
+  }
 }
 
-export interface CoachMessage { role: 'user' | 'assistant'; content: string }
+export type { CoachMessage };
 
 export async function askCoach(messages: CoachMessage[]): Promise<string> {
-  const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/kinetic-coach`;
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error('Authentication required');
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${session.access_token}`,
-    },
-    body: JSON.stringify({ messages }),
-  });
-  if (!res.ok) throw new Error(`Coach failed (${res.status})`);
-  const data = await res.json();
-  return data.reply ?? data.error ?? 'No response.';
+  const { reply } = await coachApi.ask(messages);
+  return reply;
 }

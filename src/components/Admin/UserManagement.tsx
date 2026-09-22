@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Shield, ShieldOff, RefreshCw } from 'lucide-react';
 import { authApi } from '../../api';
-import type { UserProfile } from '../../types';
+import type { UserProfile } from '../../lib/types';
 
 export default function UserManagement() {
   const [users, setUsers] = useState<UserProfile[]>([]);

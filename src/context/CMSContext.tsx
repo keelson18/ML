@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import type { CMSContent } from '../types';
+import type { CMSContent } from '../lib/types';
 import { cmsApi } from '../api';
 
 interface CMSContextType {

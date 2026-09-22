@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { CMSContent, CMSContentType } from '../types';
+import type { CMSContent, CMSContentType } from '../lib/types';
 
 export const cmsApi = {
   fetchPublished: (type?: CMSContentType) =>

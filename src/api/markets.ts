@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { Candle, Timeframe } from '../types';
+import type { Candle, Timeframe } from '../lib/types';
 
 export const marketApi = {
   getKlines: (symbol: string, timeframe: Timeframe, limit = 1000) =>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BookOpen, ChevronLeft } from 'lucide-react';
-import type { CMSContent } from '../../types';
+import type { CMSContent } from '../../lib/types';
 import { cmsApi } from '../../api';
 
 interface Props {

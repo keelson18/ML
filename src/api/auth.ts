@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { UserProfile, UserRole } from '../types';
+import type { UserProfile, UserRole } from '../lib/types';
 
 export interface AuthSession {
   session: { access_token: string; refresh_token: string; expires_at: number };

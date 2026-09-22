@@ -1,29 +1,17 @@
 import type { Candle, Timeframe } from './types';
 import { TIMEFRAMES } from './types';
+import { marketApi } from '../api';
 
-const REST = 'https://api.binance.com';
 const WS = 'wss://stream.binance.com:9443/ws';
 
-// Fetch historical klines from Binance REST for a symbol+timeframe.
-// Binance returns newest-first; we reverse to oldest-first for charting/indicators.
+// Fetch historical klines via the backend API (which proxies Binance).
 export async function fetchKlines(
   symbol: string,
   timeframe: Timeframe,
   limit = 1000,
 ): Promise<Candle[]> {
-  const tf = TIMEFRAMES.find((t) => t.value === timeframe)?.binance ?? timeframe;
-  const url = `${REST}/api/v3/klines?symbol=${symbol}&interval=${tf}&limit=${limit}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Binance klines ${res.status}`);
-  const raw = (await res.json()) as unknown[][];
-  return raw.map((k) => ({
-    time: Math.floor((k[0] as number) / 1000),
-    open: parseFloat(k[1] as string),
-    high: parseFloat(k[2] as string),
-    low: parseFloat(k[3] as string),
-    close: parseFloat(k[4] as string),
-    volume: parseFloat(k[5] as string),
-  }));
+  const { candles } = await marketApi.getKlines(symbol, timeframe, limit);
+  return candles;
 }
 
 // Live price ticker via combined WebSocket stream. Calls onPrice on each tick.
