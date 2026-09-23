@@ -17,31 +17,28 @@ interface Props {
   theme: 'light' | 'dark';
 }
 
-// Candlestick chart with live overlays: lines (MAs, Bollinger, trendlines),
-// horizontal lines (Fibonacci, S/R), markers (patterns), and price lines (stop/target).
 export default function PriceChart({ candles, overlays, theme }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
-  // Track created overlay series so we can clean them up on each render.
   const overlaySeriesRef = useRef<ISeriesApi<'Line'>[]>([]);
 
-  // Create chart once.
   useEffect(() => {
     if (!containerRef.current) return;
     const chart = createChart(containerRef.current, {
       layout: {
-        background: { type: ColorType.Solid, color: theme === 'dark' ? '#000000' : '#ffffff' },
-        textColor: theme === 'dark' ? '#e5e5e5' : '#171717',
+        background: { type: ColorType.Solid, color: theme === 'dark' ? '#14141a' : '#ffffff' },
+        textColor: theme === 'dark' ? '#9696a5' : '#787887',
         fontFamily: '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif',
+        fontSize: 11,
       },
       grid: {
-        vertLines: { color: theme === 'dark' ? '#1a1a1a' : '#f0f0f0' },
-        horzLines: { color: theme === 'dark' ? '#1a1a1a' : '#f0f0f0' },
+        vertLines: { color: theme === 'dark' ? '#1e1e26' : '#f0f0f4', style: 1 },
+        horzLines: { color: theme === 'dark' ? '#1e1e26' : '#f0f0f4', style: 1 },
       },
       crosshair: { mode: CrosshairMode.Normal },
-      rightPriceScale: { borderColor: theme === 'dark' ? '#262626' : '#e5e5e5' },
-      timeScale: { borderColor: theme === 'dark' ? '#262626' : '#e5e5e5', timeVisible: true },
+      rightPriceScale: { borderColor: theme === 'dark' ? '#2a2a34' : '#eaeaef' },
+      timeScale: { borderColor: theme === 'dark' ? '#2a2a34' : '#eaeaef', timeVisible: true },
     });
     chartRef.current = chart;
     candleSeriesRef.current = chart.addCandlestickSeries({
@@ -68,7 +65,6 @@ export default function PriceChart({ candles, overlays, theme }: Props) {
     };
   }, [theme]);
 
-  // Update candle data.
   useEffect(() => {
     if (!candleSeriesRef.current || candles.length === 0) return;
     candleSeriesRef.current.setData(
@@ -79,12 +75,10 @@ export default function PriceChart({ candles, overlays, theme }: Props) {
     );
   }, [candles]);
 
-  // Update overlays: clear previous, then add lines/markers/hlines.
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart || !candleSeriesRef.current) return;
 
-    // Remove old overlay line series.
     for (const s of overlaySeriesRef.current) {
       try { chart.removeSeries(s); } catch { /* noop */ }
     }
@@ -109,12 +103,11 @@ export default function PriceChart({ candles, overlays, theme }: Props) {
         const line = chart.addLineSeries({
           color: ov.color ?? '#9ca3af',
           lineWidth: 1,
-          lineStyle: 2, // dashed
+          lineStyle: 2,
           priceLineVisible: false,
           lastValueVisible: true,
           title: ov.label,
         });
-        // Draw the hline across the visible range using first and last candle times.
         const first = candles[0]?.time as Time | undefined;
         const last = candles[candles.length - 1]?.time as Time | undefined;
         if (first && last) {
@@ -137,8 +130,6 @@ export default function PriceChart({ candles, overlays, theme }: Props) {
       }
     }
 
-    // Apply all collected markers to the candle series.
-    // lightweight-charts requires markers to be sorted by time in ascending order.
     if (candleSeriesRef.current) {
       allMarkers.sort((a, b) => {
         const aTime = typeof a.time === 'number' ? a.time : parseInt(a.time as string);

@@ -2,27 +2,31 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Light mode: plain white background, black text. No gradients. */
+/* Light mode: clean whites with warm gray accents */
 :root {
-  --bg: 255 255 255;
-  --surface: 250 250 250;
-  --border: 229 229 229;
-  --text: 17 17 17;
-  --muted: 115 115 115;
-  --primary: 16 163 127; /* emerald — neutral, not purple/blue */
+  --bg: 250 250 252;
+  --surface: 255 255 255;
+  --surface-elevated: 255 255 255;
+  --border: 234 234 240;
+  --text: 23 23 35;
+  --muted: 120 120 135;
+  --primary: 16 163 127;
+  --primary-soft: 16 163 127;
   --success: 22 163 74;
   --warning: 202 138 4;
   --danger: 220 38 38;
 }
 
-/* Dark mode: pure black background, white text. Not navy/purple-tinted. */
+/* Dark mode: deep charcoal, not pure black */
 .dark {
-  --bg: 0 0 0;
-  --surface: 10 10 10;
-  --border: 38 38 38;
-  --text: 255 255 255;
-  --muted: 161 161 161;
+  --bg: 12 12 16;
+  --surface: 20 20 26;
+  --surface-elevated: 28 28 36;
+  --border: 42 42 52;
+  --text: 240 240 248;
+  --muted: 150 150 165;
   --primary: 52 211 153;
+  --primary-soft: 52 211 153;
   --success: 34 197 94;
   --warning: 234 179 8;
   --danger: 248 113 113;
@@ -36,16 +40,50 @@ body {
   background-color: rgb(var(--bg));
   color: rgb(var(--text));
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
 }
 
-/* Thin, unobtrusive scrollbars to match the minimal aesthetic. */
-::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: rgb(var(--border)); border-radius: 4px; }
+/* Refined scrollbars */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: rgb(var(--border)); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgb(var(--muted) / 0.5); }
 ::-webkit-scrollbar-track { background: transparent; }
 
-/* Subtle fade-in for newly mounted panels. */
+/* Animations */
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(4px); }
+  from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
 }
-.animate-fade-in { animation: fadeIn 0.25s ease-out; }
+.animate-fade-in { animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.animate-slide-in { animation: slideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1); }
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.shimmer {
+  background: linear-gradient(90deg, rgb(var(--border) / 0.3) 25%, rgb(var(--border) / 0.6) 50%, rgb(var(--border) / 0.3) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
+
+/* Card hover effect */
+.card-hover {
+  transition: box-shadow 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+.card-hover:hover {
+  box-shadow: 0 2px 12px rgb(0 0 0 / 0.04);
+  border-color: rgb(var(--primary) / 0.2);
+}
