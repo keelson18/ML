@@ -15,6 +15,10 @@ app.use(morgan('dev'));
 
 app.use('/api', routes);
 
+app.use((_req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
 app.use(errorHandler);
 
 app.listen(config.port, () => {

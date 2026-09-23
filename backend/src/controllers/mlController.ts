@@ -13,8 +13,9 @@ export async function getCachedPrediction(req: AuthenticatedRequest, res: Respon
 
 export async function predict(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
   try {
-    const symbol = (req.query.symbol as string) ?? 'BTCUSDT';
-    const timeframe = (req.query.timeframe as string) ?? '1h';
+    const body = req.body as { symbol?: string; timeframe?: string } | null;
+    const symbol = body?.symbol ?? (req.query.symbol as string) ?? 'BTCUSDT';
+    const timeframe = body?.timeframe ?? (req.query.timeframe as string) ?? '1h';
     const prediction = await mlService.predict(symbol, timeframe);
     res.json({ prediction });
   } catch (e) { next(e); }

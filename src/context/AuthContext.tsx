@@ -21,20 +21,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchProfile = async () => {
-    try {
-      const { profile } = await authApi.getProfile();
-      if (profile) {
-        setProfile({
-          id: profile.id,
-          role: profile.role as UserRole,
-          displayName: profile.displayName,
-          avatarUrl: profile.avatarUrl,
-          createdAt: profile.createdAt,
-        });
-      }
-    } catch {
-      // Profile may not exist yet
+  const applyProfile = (p: UserProfile | null) => {
+    if (p) {
+      setProfile({
+        id: p.id,
+        role: p.role as UserRole,
+        displayName: p.displayName,
+        avatarUrl: p.avatarUrl,
+        createdAt: p.createdAt,
+      });
     }
   };
 
@@ -44,13 +39,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       return;
     }
+    let cancelled = false;
     (async () => {
       try {
-        await fetchProfile();
+        const { profile: fetched } = await authApi.getProfile();
+        if (cancelled) return;
+        if (fetched) {
+          applyProfile(fetched);
+          setUser({ id: fetched.id, email: '' });
+          setSession({ access_token: token, refresh_token: '', expires_at: 0 });
+        } else {
+          setAuthToken(null);
+        }
+      } catch {
+        if (!cancelled) setAuthToken(null);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
+    return () => { cancelled = true; };
   }, []);
 
   const signUp = async (
@@ -73,15 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(result.session);
       setUser(result.user);
       setAuthToken(result.session.access_token);
-      if (result.profile) {
-        setProfile({
-          id: result.profile.id,
-          role: result.profile.role as UserRole,
-          displayName: result.profile.displayName,
-          avatarUrl: result.profile.avatarUrl,
-          createdAt: result.profile.createdAt,
-        });
-      }
+      applyProfile(result.profile);
       return { error: null };
     } catch (e) {
       return { error: e instanceof Error ? e.message : 'Sign in failed' };
@@ -96,7 +95,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const refreshProfile = async () => {
-    await fetchProfile();
+    try {
+      const { profile: fetched } = await authApi.getProfile();
+      applyProfile(fetched);
+    } catch {
+      // ignore
+    }
   };
 
   return (

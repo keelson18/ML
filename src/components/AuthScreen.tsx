@@ -38,7 +38,7 @@ export default function AuthScreen() {
         return;
       }
       if (password.length < 8) {
-        setError('Password must be at least 6 characters.');
+        setError('Password must be at least 8 characters.');
         return;
       }
       if (password !== confirmPassword) {
@@ -61,7 +61,7 @@ export default function AuthScreen() {
       if (error) {
         setError(error);
       } else {
-        setError('Account created! Check your email for confirmation link.');
+        setError('Account created successfully. You can now sign in.');
       }
     }
     setLoading(false);
@@ -149,7 +149,7 @@ export default function AuthScreen() {
                   <input
                     type={showPassword ? 'text' : 'password'}
                     required
-                    minLength={6}
+                    minLength={8}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className={inputClass}
@@ -173,7 +173,7 @@ export default function AuthScreen() {
                   <input
                     type={showConfirmPassword ? 'text' : 'password'}
                     required
-                    minLength={6}
+                    minLength={8}
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     className={inputClass}

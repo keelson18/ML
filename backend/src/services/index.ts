@@ -45,9 +45,11 @@ export const cmsService = {
   },
 
   async upsert(accessToken: string, userId: string, payload: Record<string, unknown>): Promise<CMSContent | null> {
-    if (!payload.id) payload.author_id = userId;
-    payload.published_at = payload.published ? new Date().toISOString() : null;
-    return cmsRepository.upsert(accessToken, payload);
+    const record: Record<string, unknown> = { ...payload, author_id: userId };
+    if (payload.published) {
+      record.published_at = new Date().toISOString();
+    }
+    return cmsRepository.upsert(accessToken, record);
   },
 
   async delete(accessToken: string, id: string): Promise<void> {
@@ -69,8 +71,7 @@ export const mlService = {
   },
 
   async predict(symbol: string, timeframe: string): Promise<MLPrediction | null> {
-    const cached = await mlRepository.fetchCachedPrediction(symbol, timeframe);
-    return cached;
+    return mlRepository.fetchCachedPrediction(symbol, timeframe);
   },
 };
 
@@ -100,7 +101,9 @@ export const metricsService = {
 
 export const coachService = {
   async ask(messages: CoachMessage[]): Promise<string> {
-    if (!config.geminiApiKey) throw new Error('Gemini API key not configured');
+    if (!config.geminiApiKey) {
+      return 'Kinetic Coach is not configured. Please set GEMINI_API_KEY in the server environment to enable AI coaching.';
+    }
     const GEMINI_MODEL = 'gemini-1.5-flash';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${config.geminiApiKey}`;
     const SYSTEM_PROMPT = `You are Kinetic Coach, an AI trading coach. Be concise, practical, and educational. Never give guaranteed-profit advice.`;
@@ -115,7 +118,9 @@ export const coachService = {
       body: JSON.stringify({ contents, generationConfig: { temperature: 0.7, maxOutputTokens: 1024 } }),
     });
     if (!res.ok) throw new Error('Gemini request failed');
-    const data = await res.json();
+    const data = (await res.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
     return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? 'No response generated.';
   },
 };

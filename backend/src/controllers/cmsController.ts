@@ -12,7 +12,7 @@ export async function fetchPublished(req: AuthenticatedRequest, res: Response, n
 
 export async function fetchBySlug(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { slug } = req.params;
+    const slug = String(req.params.slug);
     const allowUnpublished = Boolean(req.query.draft);
     const item = await cmsService.fetchBySlug(slug, allowUnpublished);
     if (!item) { res.status(404).json({ error: 'Not found' }); return; }
@@ -40,7 +40,7 @@ export async function upsert(req: AuthenticatedRequest, res: Response, next: Nex
 export async function remove(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
   try {
     if (!req.accessToken) { res.status(401).json({ error: 'Unauthorized' }); return; }
-    const { id } = req.params;
+    const id = String(req.params.id);
     await cmsService.delete(req.accessToken, id);
     res.json({ success: true });
   } catch (e) { next(e); }
@@ -49,7 +49,7 @@ export async function remove(req: AuthenticatedRequest, res: Response, next: Nex
 export async function togglePublish(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
   try {
     if (!req.accessToken) { res.status(401).json({ error: 'Unauthorized' }); return; }
-    const { id } = req.params;
+    const id = String(req.params.id);
     const { published } = req.body as { published: boolean };
     await cmsService.togglePublish(req.accessToken, id, published);
     res.json({ success: true });

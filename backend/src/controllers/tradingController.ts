@@ -21,7 +21,7 @@ export async function createPosition(req: AuthenticatedRequest, res: Response, n
 export async function closePosition(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
   try {
     if (!req.accessToken) { res.status(401).json({ error: 'Unauthorized' }); return; }
-    const { id } = req.params;
+    const id = String(req.params.id);
     await tradingService.closePosition(req.accessToken, id);
     res.json({ success: true });
   } catch (e) { next(e); }
