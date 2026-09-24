@@ -1,10 +1,11 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import { authApi, type AuthSession, setAuthToken, getAuthToken } from '../api';
+import { supabase, type Session } from '../lib/supabase';
+import { authApi } from '../api';
 import type { UserProfile, UserRole } from '../lib/types';
 
 interface AuthCtx {
-  session: AuthSession['session'] | null;
-  user: AuthSession['user'] | null;
+  session: Session | null;
+  user: { id: string; email: string } | null;
   profile: UserProfile | null;
   loading: boolean;
   signUp: (email: string, password: string, role?: UserRole, metadata?: { first_name?: string; last_name?: string; phone?: string }) => Promise<{ error: string | null }>;
@@ -16,12 +17,13 @@ interface AuthCtx {
 const Ctx = createContext<AuthCtx>({} as AuthCtx);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<AuthSession['session'] | null>(null);
-  const [user, setUser] = useState<AuthSession['user'] | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
+  const [user, setUser] = useState<{ id: string; email: string } | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const applyProfile = (p: UserProfile | null) => {
+  const loadProfile = async (userId: string) => {
+    const p = await authApi.fetchProfile(userId);
     if (p) {
       setProfile({
         id: p.id,
@@ -30,44 +32,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         avatarUrl: p.avatarUrl,
         createdAt: p.createdAt,
       });
+    } else {
+      setProfile(null);
     }
   };
 
   useEffect(() => {
-    const token = getAuthToken();
-    if (!token) {
-      setLoading(false);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const { profile: fetched } = await authApi.getProfile();
-        if (cancelled) return;
-        if (fetched) {
-          applyProfile(fetched);
-          setUser({ id: fetched.id, email: '' });
-          setSession({ access_token: token, refresh_token: '', expires_at: 0 });
-        } else {
-          setAuthToken(null);
-        }
-      } catch {
-        if (!cancelled) setAuthToken(null);
-      } finally {
-        if (!cancelled) setLoading(false);
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session) {
+        setSession(data.session);
+        setUser({ id: data.session.user.id, email: data.session.user.email ?? '' });
+        (async () => {
+          await loadProfile(data.session!.user.id);
+          setLoading(false);
+        })();
+      } else {
+        setLoading(false);
       }
-    })();
-    return () => { cancelled = true; };
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      (async () => {
+        setSession(newSession);
+        if (newSession) {
+          setUser({ id: newSession.user.id, email: newSession.user.email ?? '' });
+          await loadProfile(newSession.user.id);
+        } else {
+          setUser(null);
+          setProfile(null);
+        }
+        setLoading(false);
+      })();
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   const signUp = async (
     email: string,
     password: string,
-    role: UserRole = 'user',
+    _role: UserRole = 'user',
     metadata?: { first_name?: string; last_name?: string; phone?: string },
   ) => {
     try {
-      await authApi.signUp(email, password, role, metadata);
+      await authApi.signUp(email, password, _role, metadata);
       return { error: null };
     } catch (e) {
       return { error: e instanceof Error ? e.message : 'Sign up failed' };
@@ -79,8 +87,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const result = await authApi.signIn(email, password);
       setSession(result.session);
       setUser(result.user);
-      setAuthToken(result.session.access_token);
-      applyProfile(result.profile);
+      if (result.profile) {
+        setProfile({
+          id: result.profile.id,
+          role: result.profile.role as UserRole,
+          displayName: result.profile.displayName,
+          avatarUrl: result.profile.avatarUrl,
+          createdAt: result.profile.createdAt,
+        });
+      }
       return { error: null };
     } catch (e) {
       return { error: e instanceof Error ? e.message : 'Sign in failed' };
@@ -88,19 +103,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
-    setAuthToken(null);
+    await supabase.auth.signOut();
     setSession(null);
     setUser(null);
     setProfile(null);
   };
 
   const refreshProfile = async () => {
-    try {
-      const { profile: fetched } = await authApi.getProfile();
-      applyProfile(fetched);
-    } catch {
-      // ignore
-    }
+    if (user) await loadProfile(user.id);
   };
 
   return (
