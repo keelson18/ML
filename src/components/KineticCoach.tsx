@@ -35,15 +35,15 @@ export default function KineticCoach() {
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
         <MessageSquare className="w-4 h-4 text-primary" />
-        <h3 className="text-sm font-medium">Kinetic Coach</h3>
+        <h3 className="text-sm font-medium text-text">Kinetic Coach</h3>
       </div>
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
         {messages.map((m, i) => (
-          <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[85%] px-3 py-2 rounded-lg text-sm leading-relaxed ${
+          <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`}>
+            <div className={`max-w-[85%] px-3.5 py-2 rounded-2xl text-sm leading-relaxed ${
               m.role === 'user'
-                ? 'bg-primary text-black'
-                : 'bg-surface border border-border text-text'
+                ? 'bg-primary text-white'
+                : 'bg-bg/60 border border-border text-text'
             }`}>
               {m.content}
             </div>
@@ -51,7 +51,7 @@ export default function KineticCoach() {
         ))}
         {loading && (
           <div className="flex justify-start">
-            <div className="bg-surface border border-border rounded-lg px-3 py-2">
+            <div className="bg-bg/60 border border-border rounded-2xl px-3.5 py-2.5">
               <Loader2 className="w-4 h-4 animate-spin text-muted" />
             </div>
           </div>
@@ -64,12 +64,12 @@ export default function KineticCoach() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && send()}
             placeholder="Ask about a signal, risk, or strategy…"
-            className="flex-1 px-3 py-2 rounded-lg bg-surface border border-border text-text placeholder:text-muted/60 focus:outline-none focus:border-primary text-sm"
+            className="flex-1 px-3.5 py-2 rounded-lg bg-bg border border-border text-text placeholder:text-muted/50 focus:outline-none focus:border-primary/40 text-sm transition-colors"
           />
           <button
             onClick={send}
             disabled={loading || !input.trim()}
-            className="px-3 py-2 rounded-lg bg-primary text-black disabled:opacity-40 hover:opacity-90 transition-opacity"
+            className="px-3 py-2 rounded-lg bg-primary text-white disabled:opacity-40 hover:opacity-90 transition-opacity"
           >
             <Send className="w-4 h-4" />
           </button>
