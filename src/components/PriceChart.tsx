@@ -31,17 +31,18 @@ export default function PriceChart({ candles, overlays, theme }: Props) {
       width: Math.max(container.clientWidth, 1),
       height: Math.max(container.clientHeight, 1),
       layout: {
-        background: { type: ColorType.Solid, color: theme === 'dark' ? '#000000' : '#ffffff' },
-        textColor: theme === 'dark' ? '#e5e5e5' : '#171717',
+        background: { type: ColorType.Solid, color: theme === 'dark' ? '#14141a' : '#ffffff' },
+        textColor: theme === 'dark' ? '#9696a5' : '#787887',
         fontFamily: '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif',
+        fontSize: 11,
       },
       grid: {
-        vertLines: { color: theme === 'dark' ? '#1a1a1a' : '#f0f0f0' },
-        horzLines: { color: theme === 'dark' ? '#1a1a1a' : '#f0f0f0' },
+        vertLines: { color: theme === 'dark' ? '#1e1e26' : '#f0f0f4', style: 1 },
+        horzLines: { color: theme === 'dark' ? '#1e1e26' : '#f0f0f4', style: 1 },
       },
       crosshair: { mode: CrosshairMode.Normal },
-      rightPriceScale: { borderColor: theme === 'dark' ? '#262626' : '#e5e5e5' },
-      timeScale: { borderColor: theme === 'dark' ? '#262626' : '#e5e5e5', timeVisible: true },
+      rightPriceScale: { borderColor: theme === 'dark' ? '#2a2a34' : '#eaeaef' },
+      timeScale: { borderColor: theme === 'dark' ? '#2a2a34' : '#eaeaef', timeVisible: true },
     });
     const candleSeries = chart.addCandlestickSeries({
       upColor: '#22c55e',

@@ -4,7 +4,7 @@ import { TIMEFRAMES } from './types';
 const REST = 'https://api.binance.com';
 const WS = 'wss://stream.binance.com:9443/ws';
 
-// Fetch historical klines from Binance REST for a symbol+timeframe.
+// Fetch historical klines directly from Binance REST API.
 // Binance returns newest-first; we reverse to oldest-first for charting/indicators.
 export async function fetchKlines(
   symbol: string,
@@ -32,8 +32,7 @@ export async function fetchKlines(
   }
 }
 
-// Live price ticker via combined WebSocket stream. Calls onPrice on each tick.
-// Auto-reconnects with exponential backoff. Returns a disposer.
+// Live price ticker via combined WebSocket stream.
 export function subscribeLivePrice(
   symbols: string[],
   onPrice: (symbol: string, price: number) => void,
@@ -50,46 +49,26 @@ export function subscribeLivePrice(
     const streams = symbols.map((s) => `${s.toLowerCase()}@miniTicker`).join('/');
     ws = new WebSocket(`${WS}/${streams}`);
 
-    ws.onopen = () => {
-      backoff = 1000;
-      onStatus?.('open');
-    };
-
+    ws.onopen = () => { backoff = 1000; onStatus?.('open'); };
     ws.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data);
         if (msg.s && msg.c) onPrice(msg.s, parseFloat(msg.c));
-      } catch {
-        // ignore malformed frames
-      }
+      } catch { /* ignore */ }
     };
-
     ws.onclose = () => {
       if (closed) return;
       onStatus?.('reconnecting', `closed, retry in ${Math.round(backoff / 1000)}s`);
-      timer = setTimeout(() => {
-        backoff = Math.min(backoff * 2, 30000);
-        connect();
-      }, backoff);
+      timer = setTimeout(() => { backoff = Math.min(backoff * 2, 30000); connect(); }, backoff);
     };
-
-    ws.onerror = () => {
-      // onclose will follow and trigger reconnect.
-      try { ws?.close(); } catch { /* noop */ }
-    };
+    ws.onerror = () => { try { ws?.close(); } catch { /* noop */ } };
   };
 
   connect();
-
-  return () => {
-    closed = true;
-    if (timer) clearTimeout(timer);
-    try { ws?.close(); } catch { /* noop */ }
-  };
+  return () => { closed = true; if (timer) clearTimeout(timer); try { ws?.close(); } catch { /* noop */ } };
 }
 
-// Live kline stream for a single symbol+timeframe. Emulates candle updates.
-// onCandle receives the latest (possibly unclosed) candle on each tick.
+// Live kline stream for a single symbol+timeframe.
 export function subscribeKlines(
   symbol: string,
   timeframe: Timeframe,
@@ -107,52 +86,26 @@ export function subscribeKlines(
     onStatus?.('connecting');
     ws = new WebSocket(`${WS}/${symbol.toLowerCase()}@kline_${tf}`);
 
-    ws.onopen = () => {
-      backoff = 1000;
-      onStatus?.('open');
-    };
-
+    ws.onopen = () => { backoff = 1000; onStatus?.('open'); };
     ws.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data);
         const k = msg.k;
         if (!k) return;
         onCandle(
-          {
-            time: Math.floor(k.t / 1000),
-            open: parseFloat(k.o),
-            high: parseFloat(k.h),
-            low: parseFloat(k.l),
-            close: parseFloat(k.c),
-            volume: parseFloat(k.v),
-            
-          },
+          { time: Math.floor(k.t / 1000), open: parseFloat(k.o), high: parseFloat(k.h), low: parseFloat(k.l), close: parseFloat(k.c), volume: parseFloat(k.v) },
           Boolean(k.x),
         );
-      } catch {
-        // ignore
-      }
+      } catch { /* ignore */ }
     };
-    
     ws.onclose = () => {
       if (closed) return;
       onStatus?.('reconnecting', `closed, retry in ${Math.round(backoff / 1000)}s`);
-      timer = setTimeout(() => {
-        backoff = Math.min(backoff * 2, 30000);
-        connect();
-      }, backoff);
+      timer = setTimeout(() => { backoff = Math.min(backoff * 2, 30000); connect(); }, backoff);
     };
-
-    ws.onerror = () => {
-      try { ws?.close(); } catch { /* noop */ }
-    };
+    ws.onerror = () => { try { ws?.close(); } catch { /* noop */ } };
   };
 
   connect();
-
-  return () => {
-    closed = true;
-    if (timer) clearTimeout(timer);
-    try { ws?.close(); } catch { /* noop */ }
-  };
+  return () => { closed = true; if (timer) clearTimeout(timer); try { ws?.close(); } catch { /* noop */ } };
 }

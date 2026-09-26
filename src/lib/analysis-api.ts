@@ -7,8 +7,8 @@ import type { DecisionServiceResult } from './application/decision-service';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
 export async function requestDecisionAnalysis(context: DecisionEngineContext): Promise<DecisionServiceResult> {
-  const { data: { session } } = await supabase.auth.getSession();
   const correlationId = createCorrelationId();
+  const { data: { session } } = await supabase.auth.getSession();
   if (!session) {
     throw new DomainError('AUTHENTICATION_ERROR', 'Authentication is required for decision analysis.', {}, correlationId);
   }
@@ -17,21 +17,20 @@ export async function requestDecisionAnalysis(context: DecisionEngineContext): P
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      apikey: supabaseAnonKey ?? '',
       Authorization: `Bearer ${session.access_token}`,
-      ...(supabaseAnonKey ? { apikey: supabaseAnonKey } : {}),
       'x-correlation-id': correlationId,
     },
     body: JSON.stringify(context),
   });
 
-  const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new DomainError(
-      response.status === 401 ? 'AUTHENTICATION_ERROR' : response.status === 403 ? 'AUTHORIZATION_ERROR' : 'INTELLIGENCE_ERROR',
-      payload.error ?? 'Decision analysis failed.',
+      'INTELLIGENCE_ERROR',
+      `Decision analysis failed (${response.status}).`,
       { status: response.status },
-      payload.correlationId ?? correlationId,
+      correlationId,
     );
   }
-  return payload as DecisionServiceResult;
+  return await response.json() as DecisionServiceResult;
 }

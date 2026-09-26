@@ -1,11 +1,11 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import type { Session, User } from '@supabase/supabase-js';
-import { supabase } from '../lib/supabase';
+import { supabase, type Session } from '../lib/supabase';
+import { authApi } from '../api';
 import type { UserProfile, UserRole } from '../lib/types';
 
 interface AuthCtx {
   session: Session | null;
-  user: User | null;
+  user: { id: string; email: string } | null;
   profile: UserProfile | null;
   loading: boolean;
   signUp: (email: string, password: string, role?: UserRole, metadata?: { first_name?: string; last_name?: string; phone?: string }) => Promise<{ error: string | null }>;
@@ -18,6 +18,7 @@ const Ctx = createContext<AuthCtx>({} as AuthCtx);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
+  const [user, setUser] = useState<{ id: string; email: string } | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -27,7 +28,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .from('profiles')
         .select('*')
         .eq('id', userId)
-        .maybeSingle();
+        .single();
       if (data) {
         setProfile({
           id: data.id,
@@ -43,88 +44,81 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    let disposed = false;
-    const timeout = setTimeout(() => {
-      if (!disposed) {
-        setSession(null);
-        setProfile(null);
-        setLoading(false);
+    supabase.auth.getSession().then(({ data }) => {
+      const sess = data.session;
+      setSession(sess);
+      if (sess?.user) {
+        setUser({ id: sess.user.id, email: sess.user.email ?? '' });
+        fetchProfile(sess.user.id);
       }
-    }, 10000);
-
-    supabase.auth.getSession()
-      .then(({ data }) => {
-        if (disposed) return;
-        const sess = data.session;
-        setSession(sess);
-        if (sess?.user) {
-          fetchProfile(sess.user.id);
-        }
-      })
-      .catch(() => {
-        if (disposed) return;
-        setSession(null);
-        setProfile(null);
-      })
-      .finally(() => {
-        clearTimeout(timeout);
-        if (!disposed) setLoading(false);
-      });
+      setLoading(false);
+    });
     // onAuthStateChange: wrap async work to avoid deadlock (per Supabase guidance).
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
       (async () => {
-        setSession(sess);
-        if (sess?.user) {
-          await fetchProfile(sess.user.id);
+        setSession(newSession);
+        if (newSession) {
+          setUser({ id: newSession.user.id, email: newSession.user.email ?? '' });
+          await fetchProfile(newSession.user.id);
         } else {
+          setUser(null);
           setProfile(null);
         }
+        setLoading(false);
       })();
     });
-    return () => {
-      disposed = true;
-      clearTimeout(timeout);
-      sub.subscription.unsubscribe();
-    };
+    return () => sub.subscription.unsubscribe();
   }, []);
 
   const signUp = async (
     email: string,
     password: string,
-    role: UserRole = 'user',
+    _role: UserRole = 'user',
     metadata?: { first_name?: string; last_name?: string; phone?: string },
   ) => {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: { role, ...metadata },
-      },
-    });
-    return { error: error ? (error.message ?? 'Sign up failed') : null };
+    try {
+      await authApi.signUp(email, password, _role, metadata);
+      return { error: null };
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : 'Sign up failed' };
+    }
   };
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return { error: error ? (error.message ?? 'Sign in failed') : null };
+    try {
+      const result = await authApi.signIn(email, password);
+      setSession(result.session);
+      setUser(result.user);
+      if (result.profile) {
+        setProfile({
+          id: result.profile.id,
+          role: result.profile.role as UserRole,
+          displayName: result.profile.displayName,
+          avatarUrl: result.profile.avatarUrl,
+          createdAt: result.profile.createdAt,
+        });
+      }
+      return { error: null };
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : 'Sign in failed' };
+    }
   };
 
   const signOut = async () => {
     await supabase.auth.signOut();
     setSession(null);
+    setUser(null);
     setProfile(null);
   };
 
   const refreshProfile = async () => {
-    if (session?.user) {
-      await fetchProfile(session.user.id);
-    }
+    if (user) await fetchProfile(user.id);
   };
 
   return (
     <Ctx.Provider value={{
       session,
-      user: session?.user ?? null,
+      user,
       profile,
       loading,
       signUp,
