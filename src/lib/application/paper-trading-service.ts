@@ -1,6 +1,6 @@
-import type { PaperAccountState, PaperOrderRequest } from '../intelligence/paper-execution';
-import { closePaperPosition, simulatePaperOrder } from '../intelligence/paper-execution';
-import { persistPaperOrder, persistPaperPosition, persistPaperTrade } from '../intelligence/paper-persistence';
+import type { PaperAccountState, PaperOrderRequest } from '../../../backend/src/engines/paper-execution';
+import { closePaperPosition, simulatePaperOrder } from '../../../backend/src/engines/paper-execution';
+import { persistPaperOrder, persistPaperPosition, persistPaperTrade } from '../persistence/paper-persistence';
 
 export interface ExecutePaperOrderInput {
   account: PaperAccountState;

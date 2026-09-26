@@ -1,7 +1,7 @@
-import type { EngineResult } from '../intelligence/contracts';
-import { masterDecisionEngine, type DecisionEngineContext, type TradeDecision } from '../intelligence/decision-engine';
-import { explainabilityEngine, type DecisionExplanation } from '../intelligence/explainability-engine';
-import { persistTradeDecision, type DecisionPersistenceInput, type PersistedDecision } from '../intelligence/persistence';
+import type { EngineResult } from '../../../backend/src/engines/contracts';
+import { masterDecisionEngine, type DecisionEngineContext, type TradeDecision } from '../../../backend/src/engines/decision-engine';
+import { explainabilityEngine, type DecisionExplanation } from '../../../backend/src/engines/explainability-engine';
+import { persistTradeDecision, type DecisionPersistenceInput, type PersistedDecision } from '../persistence/persistence';
 
 export interface DecisionServiceInput extends DecisionEngineContext {
   persistence?: Omit<DecisionPersistenceInput, 'decision'>;

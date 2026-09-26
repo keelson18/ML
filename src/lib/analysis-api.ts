@@ -1,8 +1,10 @@
 import { DomainError } from './errors';
 import { createCorrelationId } from './observability';
 import { supabase } from './supabase';
-import type { DecisionEngineContext } from './intelligence/decision-engine';
+import type { DecisionEngineContext } from '../../backend/src/engines/decision-engine';
 import type { DecisionServiceResult } from './application/decision-service';
+
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
 export async function requestDecisionAnalysis(context: DecisionEngineContext): Promise<DecisionServiceResult> {
   const { data: { session } } = await supabase.auth.getSession();
@@ -16,6 +18,7 @@ export async function requestDecisionAnalysis(context: DecisionEngineContext): P
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${session.access_token}`,
+      ...(supabaseAnonKey ? { apikey: supabaseAnonKey } : {}),
       'x-correlation-id': correlationId,
     },
     body: JSON.stringify(context),

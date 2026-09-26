@@ -12,6 +12,8 @@ export interface BacktestTrade {
   pnl: number;
   pnlPct: number;
   strategy: string;
+  strategyId?: string;
+  strategyVersion?: string;
   reason: string;
 }
 
@@ -42,8 +44,6 @@ export function runBacktest(
     return { trades, equity, metrics: { totalReturn: 0, maxDrawdown: 0, sharpe: 0, winRate: 0, totalTrades: 0 } };
   }
 
-  let peak = capital;
-
   for (let i = minCandles; i < candles.length - holdBars; i++) {
     const slice = candles.slice(0, i + 1);
     const signals = signalFn(slice);
@@ -69,13 +69,15 @@ export function runBacktest(
       pnl,
       pnlPct,
       strategy: activeSignal.strategy,
+      strategyId: activeSignal.strategyId,
+      strategyVersion: activeSignal.strategyVersion,
       reason: activeSignal.reason,
     });
 
     // Update equity
     capital += pnl;
     equity.push(capital);
-    peak = Math.max(peak, capital);
+
   }
 
   // Calculate metrics
@@ -111,4 +113,3 @@ export function runBacktest(
     },
   };
 }
-

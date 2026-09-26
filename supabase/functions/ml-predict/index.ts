@@ -9,7 +9,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.57.4";
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": Deno.env.get("CORS_ORIGIN") ?? "null",
+  "Access-Control-Allow-Origin": Deno.env.get("CORS_ORIGIN") ?? "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
   "Access-Control-Max-Age": "600",
@@ -21,11 +21,9 @@ const corsHeaders = {
 // ---- Config ----
 // SECURITY: ML_SERVICE_API_KEY must be explicitly configured in the environment
 // for protected maintenance operations. It is never sent to the browser.
-const API_KEY = (() => {
-  const key = Deno.env.get("ML_SERVICE_API_KEY");
-  if (!key) throw new Error("ML_SERVICE_API_KEY environment variable is required");
-  return key;
-})();
+function maintenanceApiKey(): string | null {
+  return Deno.env.get("ML_SERVICE_API_KEY") ?? null;
+}
 const BINANCE = "https://api.binance.com";
 const PRED_HORIZON = 5; // candles ahead to predict
 const TRAIN_FRACTION = 0.7; // chronological split, no shuffling
@@ -193,7 +191,8 @@ async function checkRate(supabase: SupabaseClient, key: string, maxPerMin: numbe
 // ---- Auth ----
 function authorized(req: Request): boolean {
   const key = req.headers.get('x-api-key');
-  return key === API_KEY;
+  const configuredKey = maintenanceApiKey();
+  return configuredKey !== null && key === configuredKey;
 }
 
 async function authenticatedUser(req: Request): Promise<boolean> {

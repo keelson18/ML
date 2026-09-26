@@ -1,17 +1,18 @@
-import { Brain, TrendingUp, TrendingDown, Minus, Activity, BarChart3, Zap } from 'lucide-react';
+import { Brain, TrendingUp, TrendingDown, Minus, Activity, BarChart3, Zap, RefreshCw } from 'lucide-react';
 import type { Signal, MLPrediction, Recommendation } from '../../lib/types';
 
 interface Props {
   signals: Signal[];
   ml: MLPrediction | null;
+  mlStatus: 'idle' | 'loading' | 'ready' | 'unavailable';
   recommendation: Recommendation | null;
   onRefreshML: () => void;
   mlLoading: boolean;
 }
 
-export default function AIAnalysis({ signals, ml, recommendation }: Props) {
+export default function AIAnalysis({ signals, ml, mlStatus, recommendation, onRefreshML, mlLoading }: Props) {
   return (
-    <div className="p-4 lg:p-6 space-y-6">
+    <div className="page-frame space-y-6">
       <h2 className="text-sm font-semibold flex items-center gap-2">
         <Brain className="w-4 h-4 text-primary" /> AI Analysis Panel
       </h2>
@@ -19,7 +20,7 @@ export default function AIAnalysis({ signals, ml, recommendation }: Props) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* AI Confidence Gauge */}
         <div className="bg-surface border border-border rounded-xl p-4">
-          <h3 className="text-xs font-medium text-muted mb-3">AI Confidence Gauge</h3>
+          <div className="flex items-center justify-between mb-3"><h3 className="text-xs font-medium text-muted">AI Confidence Gauge</h3><button onClick={onRefreshML} disabled={mlLoading} className="p-1.5 rounded hover:bg-bg text-muted disabled:opacity-50" title="Refresh ML prediction"><RefreshCw className={`w-3.5 h-3.5 ${mlLoading ? 'animate-spin' : ''}`} /></button></div>
           <div className="flex items-center gap-4">
             <div className="relative w-20 h-20">
               <svg viewBox="0 0 36 36" className="w-20 h-20 -rotate-90">
@@ -37,7 +38,7 @@ export default function AIAnalysis({ signals, ml, recommendation }: Props) {
                   <div>Move: <span className="text-text font-medium">{ml.expected_move_pct >= 0 ? '+' : ''}{ml.expected_move_pct.toFixed(2)}%</span></div>
                   <div>Confidence: <span className="text-text font-medium capitalize">{ml.confidence}</span></div>
                 </div>
-              ) : 'No ML prediction available'}
+              ) : mlStatus === 'loading' ? 'Loading ML prediction…' : mlStatus === 'unavailable' ? 'ML service unavailable. Local strategy evidence remains active.' : 'No ML prediction available'}
             </div>
           </div>
         </div>

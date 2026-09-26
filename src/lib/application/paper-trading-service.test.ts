@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { closePaperTrade, executePaperOrder } from './paper-trading-service';
-import type { PaperAccountState } from '../intelligence/paper-execution';
+import type { PaperAccountState } from '../../../backend/src/engines/paper-execution';
 
 const account: PaperAccountState = { accountId: 'paper-1', cash: 1000, positions: [], trades: [] };
 const decision = {

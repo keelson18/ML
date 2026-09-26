@@ -23,9 +23,12 @@ export const TIMEFRAME_MAP: Record<string, Record<string, string>> = {
     '1m': 'M1', '3m': 'M3', '5m': 'M5', '15m': 'M15', '30m': 'M30',
     '1h': 'H1', '4h': 'H4', '1d': 'D', '1w': 'W', '1M': 'M',
   },
+  twelvedata: {
+    '1m': '1min', '3m': '3min', '5m': '5min', '15m': '15min', '30m': '30min',
+    '1h': '1h', '4h': '4h', '1d': '1day', '1w': '1week', '1M': '1month',
+  },
   polygon: {
     '1m': '1', '5m': '5', '15m': '15', '30m': '30',
     '1h': '60', '4h': '240', '1d': 'day', '1w': 'week', '1M': 'month',
   },
 };
-

@@ -1,22 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Activity, Sun, Moon, LogOut, Wifi, WifiOff, TrendingUp, TrendingDown, Minus,
-  Target, Shield, Brain, Zap, RefreshCw, Menu, Info,
+  Activity, Sun, Moon, LogOut, Wifi, WifiOff, TrendingUp, TrendingDown,
+  Menu,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { TRACKED_PAIRS, TIMEFRAMES, MARKET_TYPES, type Candle, type Timeframe, type Signal, type Recommendation, type MLPrediction, type MarketType, type CMSContent } from '../lib/types';
-import { fetchKlines, subscribeKlines } from '../lib/binance';
-import { runStrategies, riskLevels } from '../lib/strategies';
+import { getDataProvider } from '../lib/providers';
+import { riskLevels } from '../lib/strategies';
+import { runAllStrategies } from '../lib/strategies/index';
 import { combineSignals } from '../lib/backtest';
 import { fetchMLPrediction, fetchCachedMLPrediction } from '../lib/mlClient';
-import PriceChart from './PriceChart';
-import KineticCoach from './KineticCoach';
 import AdminPanel from './AdminPanel';
-import ExplainableTrade from './ExplainableTrade';
 import CMSManager from './CMS/CMSManager';
 import CMSViewer from './CMS/CMSViewer';
-import Sidebar, { type SidebarTab } from './Sidebar';
+import Sidebar from './Sidebar';
+import { pathForSidebarTab, sidebarTabFromPath, type SidebarTab } from '../lib/routes';
 import { getMarketsByType } from '../lib/markets';
 import { fetchPublishedContent } from '../lib/cms';
 import MarketsPage from './pages/MarketsPage';
@@ -29,29 +28,57 @@ import AlertsPage from './pages/AlertsPage';
 import NewsPage from './pages/NewsPage';
 import RiskManagement from './pages/RiskManagement';
 import AILearning from './pages/AILearning';
-import TradingTerminal from './TradingTerminal';
+import MultiTimeframeTerminal from './MultiTimeframeTerminal';
+import AutonomousCommandCenter from './AutonomousCommandCenter';
+import { requestBackendDecision, type BackendDecision } from '../lib/backend-api';
 
 type WsStatus = 'connecting' | 'open' | 'closed' | 'reconnecting';
 
 export default function Dashboard() {
   const { user, profile, signOut } = useAuth();
   const { theme, toggle } = useTheme();
-  const [sidebarTab, setSidebarTab] = useState<SidebarTab>('dashboard');
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>(() => sidebarTabFromPath(window.location.pathname));
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [marketType, setMarketType] = useState<MarketType>('crypto');
   const [symbol, setSymbol] = useState<string>('BTCUSDT');
   const [timeframe, setTimeframe] = useState<Timeframe>('1h');
   const [candles, setCandles] = useState<Candle[]>([]);
+  const [serverDecision, setServerDecision] = useState<BackendDecision | null>(null);
   const [loading, setLoading] = useState(true);
+  const [dataError, setDataError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const [wsStatus, setWsStatus] = useState<WsStatus>('connecting');
   const [livePrice, setLivePrice] = useState<number | null>(null);
   const [ml, setMl] = useState<MLPrediction | null>(null);
   const [mlLoading, setMlLoading] = useState(false);
-  const [showExplanation, setShowExplanation] = useState(false);
+  const [mlStatus, setMlStatus] = useState<'idle' | 'loading' | 'ready' | 'unavailable'>('idle');
   const candlesRef = useRef<Candle[]>([]);
 
   const isAdmin = profile?.role === 'admin';
+  const navigateToTab = (tab: SidebarTab, replace = false) => {
+    const nextTab = tab === 'admin' && !isAdmin ? 'dashboard' : tab;
+    const path = pathForSidebarTab(nextTab);
+    if (window.location.pathname !== path) {
+      window.history[replace ? 'replaceState' : 'pushState']({}, '', path);
+    }
+    setSidebarTab(nextTab);
+    setMobileSidebarOpen(false);
+  };
+
+  useEffect(() => {
+    const handlePopState = () => setSidebarTab(sidebarTabFromPath(window.location.pathname));
+    window.addEventListener('popstate', handlePopState);
+    const requestedTab = sidebarTabFromPath(window.location.pathname);
+    if ((requestedTab === 'admin' && profile && !isAdmin) || (requestedTab === 'dashboard' && window.location.pathname !== '/')) {
+      window.history.replaceState({}, '', pathForSidebarTab('dashboard'));
+      setSidebarTab('dashboard');
+    }
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [isAdmin, profile]);
+
   const availableMarkets = useMemo(() => getMarketsByType(marketType), [marketType]);
+  const dataProvider = useMemo(() => getDataProvider(marketType), [marketType]);
 
   // Keep a ref of latest candles so the kline update callback can merge without stale state.
   useEffect(() => { candlesRef.current = candles; }, [candles]);
@@ -61,22 +88,29 @@ export default function Dashboard() {
     let disposed = false;
     setLoading(true);
     setCandles([]);
+    setLivePrice(null);
+    setDataError(null);
+    setWsStatus('connecting');
     setMl(null);
+    setMlStatus('idle');
 
     (async () => {
       try {
-        const data = await fetchKlines(symbol, timeframe, 1000);
+        const data = await dataProvider.fetchKlines(symbol, timeframe, 1000);
         if (disposed) return;
         setCandles(data);
         setLivePrice(data.length ? data[data.length - 1].close : null);
-      } catch {
-        if (!disposed) setCandles([]);
+      } catch (error) {
+        if (!disposed) {
+          setCandles([]);
+          setDataError(error instanceof Error ? error.message : 'Market data could not be loaded.');
+        }
       } finally {
         if (!disposed) setLoading(false);
       }
     })();
 
-    const unsub = subscribeKlines(symbol, timeframe, (candle) => {
+    const unsub = dataProvider.subscribeKlines(symbol, timeframe, (candle) => {
       setCandles((prev) => {
         const arr = [...prev];
         const last = arr[arr.length - 1];
@@ -92,29 +126,59 @@ export default function Dashboard() {
     }, (status) => setWsStatus(status));
 
     return () => { disposed = true; unsub(); };
-  }, [symbol, timeframe]);
+  }, [dataProvider, symbol, timeframe, reloadKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setServerDecision(null);
+    if (candles.length < 60) return () => { cancelled = true; };
+    requestBackendDecision(symbol, timeframe, candles)
+      .then((decision) => { if (!cancelled) setServerDecision(decision); })
+      .catch(() => { if (!cancelled) setServerDecision(null); });
+    return () => { cancelled = true; };
+  }, [candles, symbol, timeframe]);
 
   // Fetch cached ML prediction instantly, then request a fresh one.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const cached = await fetchCachedMLPrediction(symbol, timeframe);
-      if (!cancelled && cached) setMl(cached);
+      if (!cancelled && cached) {
+        setMl(cached);
+        setMlStatus('ready');
+      }
+      if (candles.length >= 60) {
+        if (!cancelled) setMlStatus('loading');
+        const fresh = await fetchMLPrediction(symbol, timeframe);
+        if (!cancelled) {
+          if (fresh) {
+            setMl(fresh);
+            setMlStatus('ready');
+          } else if (!cached) {
+            setMlStatus('unavailable');
+          }
+        }
+      }
     })();
     return () => { cancelled = true; };
-  }, [symbol, timeframe]);
+  }, [symbol, timeframe, candles.length]);
 
   const refreshML = async () => {
     setMlLoading(true);
     const pred = await fetchMLPrediction(symbol, timeframe);
-    if (pred) setMl(pred);
+    if (pred) {
+      setMl(pred);
+      setMlStatus('ready');
+    } else {
+      setMlStatus('unavailable');
+    }
     setMlLoading(false);
   };
 
   // Run strategies + compute recommendation.
   const { signals, recommendation, risk } = useMemo(() => {
     if (candles.length < 60) return { signals: [] as Signal[], recommendation: null as Recommendation | null, risk: null };
-    const sigs = runStrategies(candles, timeframe);
+    const sigs = runAllStrategies(candles, timeframe);
     const rec = combineSignals(sigs, ml, candles, symbol, timeframe);
     const r = riskLevels(candles);
     return { signals: sigs, recommendation: rec, risk: r };
@@ -204,18 +268,13 @@ export default function Dashboard() {
               className="px-3 py-2 rounded-lg bg-surface border border-border text-text focus:outline-none focus:border-primary text-sm">
               {availableMarkets.map((p) => <option key={p.symbol} value={p.symbol}>{p.label}</option>)}
             </select>
-            <div className="flex gap-1 p-1 rounded-lg bg-surface border border-border">
-              {TIMEFRAMES.map((tf) => (
-                <button key={tf.value} onClick={() => setTimeframe(tf.value)}
-                  className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${timeframe === tf.value ? 'bg-primary text-black' : 'text-muted hover:text-text'}`}>{tf.label}</button>
-              ))}
+            <div className="flex items-center gap-1 px-3 py-2 rounded-lg bg-surface border border-border text-xs text-muted">
+              <span className="text-text font-medium">1D</span><span>·</span><span>4H</span><span>·</span><span>15M</span><span>·</span><span>5M</span>
             </div>
             <span className="text-lg font-semibold tabular-nums ml-auto">${livePrice?.toLocaleString(undefined, { maximumFractionDigits: 2 }) ?? '--'}</span>
           </div>
           <div className="bg-surface border border-border rounded-xl overflow-hidden h-[600px] relative">
-            {loading && <div className="absolute inset-0 flex items-center justify-center text-muted text-sm"><RefreshCw className="w-4 h-4 animate-spin mr-2" /> Loading…</div>}
-            {!loading && candles.length > 0 && <TradingTerminal symbol={symbol} marketType={marketType} candles={candles} overlays={overlays} timeframe={timeframe} theme={theme} wsStatus={wsStatus} />}
-            {!loading && candles.length === 0 && <div className="absolute inset-0 flex items-center justify-center text-muted text-sm">No data</div>}
+            <MultiTimeframeTerminal symbol={symbol} marketType={marketType} theme={theme} wsStatus={wsStatus} />
           </div>
         </div>
       );
@@ -223,7 +282,7 @@ export default function Dashboard() {
 
     // AI Analysis panel
     if (sidebarTab === 'ai-analysis') {
-      return <AIAnalysis signals={signals} ml={ml} recommendation={recommendation} onRefreshML={refreshML} mlLoading={mlLoading} />;
+      return <AIAnalysis signals={signals} ml={ml} mlStatus={mlStatus} recommendation={recommendation} onRefreshML={refreshML} mlLoading={mlLoading} />;
     }
 
     // Strategy Lab
@@ -238,17 +297,17 @@ export default function Dashboard() {
 
     // Backtesting Center
     if (sidebarTab === 'backtesting') {
-      return <BacktestingCenter candles={candles} timeframe={timeframe} />;
+      return <BacktestingCenter candles={candles} timeframe={timeframe} symbol={symbol} theme={theme} />;
     }
 
     // Watchlists
     if (sidebarTab === 'watchlists') {
-      return <WatchlistsPage />;
+      return <WatchlistsPage userId={user?.id} />;
     }
 
     // Alerts
     if (sidebarTab === 'alerts') {
-      return <AlertsPage />;
+      return <AlertsPage userId={user?.id} />;
     }
 
     // News & Sentiment
@@ -268,9 +327,10 @@ export default function Dashboard() {
 
 // Default: Dashboard
     return (
-      <div className="px-4 lg:px-6 py-4">
+      <div className="dashboard-home">
         {/* Controls */}
-        <div className="flex flex-wrap items-center gap-3 mb-4">
+        <div className="dashboard-toolbar">
+          <div className="dashboard-toolbar-title"><span className="page-eyebrow">LIVE OVERSIGHT</span><h1>Autonomous desk</h1><p>Market intelligence, evidence, and paper execution in one view.</p></div>
           {/* Market Type Selector */}
           <select
             value={marketType}
@@ -317,7 +377,7 @@ export default function Dashboard() {
           </div>
 
           {livePrice && (
-            <div className="flex items-center gap-2 ml-auto">
+            <div className="dashboard-price-block">
               <span className="text-lg font-semibold tabular-nums">${livePrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
               {priceChange !== null && (
                 <span className={`text-sm flex items-center gap-0.5 ${priceChange >= 0 ? 'text-success' : 'text-danger'}`}>
@@ -328,61 +388,15 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* Explainable Trade toggle */}
-          {recommendation && signals.length > 0 && (
-            <button
-              onClick={() => setShowExplanation(!showExplanation)}
-              className={`p-2 rounded-lg transition-colors ${showExplanation ? 'bg-primary/15 text-primary' : 'text-muted hover:text-text'}`}
-              title="Explain this trade"
-            >
-              <Info className="w-4 h-4" />
-            </button>
-          )}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Chart + recommendation */}
-          <div className="lg:col-span-2 space-y-4">
-            <div className="bg-surface border border-border rounded-xl overflow-hidden h-[420px] relative">
-              {loading && (
-                <div className="absolute inset-0 flex items-center justify-center text-muted text-sm z-10">
-                  <RefreshCw className="w-4 h-4 animate-spin mr-2" /> Loading market data…
-                </div>
-              )}
-              {!loading && candles.length > 0 && (
-                <PriceChart candles={candles} overlays={overlays} theme={theme} />
-              )}
-              {!loading && candles.length === 0 && (
-                <div className="absolute inset-0 flex items-center justify-center text-muted text-sm">
-                  No data available
-                </div>
-              )}
-            </div>
-
-            {/* Explainable Trade card */}
-            {showExplanation && recommendation && signals.length > 0 && (
-              <ExplainableTrade
-                recommendation={recommendation}
-                signals={signals}
-                onClose={() => setShowExplanation(false)}
-              />
-            )}
-
-            {/* Recommendation */}
-            {recommendation && <RecommendationCard rec={recommendation} risk={risk} />}
+        {dataError && (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning" role="alert">
+            <span>Market data unavailable: {dataError}</span>
+            <button type="button" onClick={() => setReloadKey((key) => key + 1)} className="rounded border border-warning/40 px-2 py-1 font-medium hover:bg-warning/10">Retry</button>
           </div>
-
-          {/* Right column: signals + ML */}
-          <div className="space-y-4">
-            <MLCard ml={ml} loading={mlLoading} onRefresh={refreshML} />
-            <SignalsCard signals={signals} />
-          </div>
-        </div>
-
-        {/* Coach — full width below */}
-        <div className="mt-4 bg-surface border border-border rounded-xl h-[400px] overflow-hidden">
-          <KineticCoach />
-        </div>
+        )}
+        <AutonomousCommandCenter symbol={symbol} timeframe={timeframe} marketType={marketType} wsStatus={wsStatus} candles={candles} overlays={overlays} recommendation={recommendation} serverDecision={serverDecision} signals={signals} markets={availableMarkets} onSymbolChange={setSymbol} theme={theme} risk={risk} livePrice={livePrice} loading={loading} />
       </div>
     );
   };
@@ -392,10 +406,14 @@ export default function Dashboard() {
       {/* Sidebar */}
       <Sidebar
         activeTab={sidebarTab}
-        onTabChange={setSidebarTab}
+        onTabChange={navigateToTab}
         isAdmin={isAdmin}
         collapsed={sidebarCollapsed}
-        onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+        mobileOpen={mobileSidebarOpen}
+        onToggle={() => {
+          if (window.matchMedia('(max-width: 700px)').matches) setMobileSidebarOpen((open) => !open);
+          else setSidebarCollapsed((collapsed) => !collapsed);
+        }}
       />
 
       {/* Main content area */}
@@ -404,7 +422,7 @@ export default function Dashboard() {
         <header className="h-14 border-b border-border bg-bg/95 backdrop-blur flex items-center justify-between px-4 lg:px-6 shrink-0">
           <div className="flex items-center gap-3">
             <button
-              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              onClick={() => setMobileSidebarOpen((open) => !open)}
               className="p-1.5 rounded-lg hover:bg-surface transition-colors text-muted hover:text-text lg:hidden"
             >
               <Menu className="w-4 h-4" />
@@ -451,146 +469,6 @@ function WsIndicator({ status }: { status: WsStatus }) {
     <div className={`flex items-center gap-1.5 text-xs ${color}`} title={label}>
       <Icon className="w-3.5 h-3.5" />
       <span className="hidden sm:inline">{label}</span>
-    </div>
-  );
-}
-
-function SideBadge({ side }: { side: string }) {
-  const cfg = side === 'buy'
-    ? { color: 'bg-success/15 text-success', icon: TrendingUp, label: 'BUY' }
-    : side === 'sell'
-    ? { color: 'bg-danger/15 text-danger', icon: TrendingDown, label: 'SELL' }
-    : { color: 'bg-muted/15 text-muted', icon: Minus, label: 'NEUTRAL' };
-  const Icon = cfg.icon;
-  return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold ${cfg.color}`}>
-      <Icon className="w-3 h-3" /> {cfg.label}
-    </span>
-  );
-}
-
-function RecommendationCard({ rec, risk }: { rec: Recommendation; risk: { atr: number; stopLoss: number; takeProfit: number; entry: number } | null }) {
-  return (
-    <div className="bg-surface border border-border rounded-xl p-4 animate-fade-in">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold flex items-center gap-2">
-          <Zap className="w-4 h-4 text-primary" /> Combined Recommendation
-        </h3>
-        <SideBadge side={rec.side} />
-      </div>
-      <div className="flex items-center gap-3 mb-4">
-        <div className="flex-1">
-          <div className="text-xs text-muted mb-1">Signal Score</div>
-          <div className="h-2 bg-border rounded-full overflow-hidden">
-            <div
-              className={`h-full transition-all ${rec.score >= 0 ? 'bg-success' : 'bg-danger'}`}
-              style={{ width: `${Math.abs(rec.score) * 100}%`, marginLeft: rec.score < 0 ? 'auto' : 0 }}
-            />
-          </div>
-          <div className="text-xs text-muted mt-1 tabular-nums">{rec.score.toFixed(3)}</div>
-        </div>
-      </div>
-
-      {risk && (
-        <div className="grid grid-cols-3 gap-2 mb-4">
-          <RiskBox label="Entry" value={risk.entry} icon={Target} color="text-text" />
-          <RiskBox label="Stop Loss" value={risk.stopLoss} icon={Shield} color="text-danger" />
-          <RiskBox label="Take Profit" value={risk.takeProfit} icon={Target} color="text-success" />
-        </div>
-      )}
-      {risk && (
-        <div className="text-xs text-muted mb-4">
-          ATR: <span className="tabular-nums">{risk.atr.toFixed(2)}</span> · Risk:Reward 1:2 · SL = 1.5×ATR
-        </div>
-      )}
-
-      <div className="space-y-1.5">
-        {rec.contributors.map((c, i) => (
-          <div key={i} className="flex items-center justify-between text-xs py-1.5 px-2 rounded bg-bg/50">
-            <div className="flex items-center gap-2 min-w-0">
-              <SideBadge side={c.side} />
-              <span className="truncate text-muted">{c.source}</span>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <span className="text-muted tabular-nums">{(c.weight * 100).toFixed(0)}%</span>
-              <span className="text-muted tabular-nums w-12 text-right">{(c.confidence * 100).toFixed(0)}%</span>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function RiskBox({ label, value, icon: Icon, color }: { label: string; value: number; icon: typeof Target; color: string }) {
-  return (
-    <div className="bg-bg/50 rounded-lg p-2.5 border border-border/50">
-      <div className={`flex items-center gap-1 text-xs ${color} mb-1`}>
-        <Icon className="w-3 h-3" /> {label}
-      </div>
-      <div className="text-sm font-medium tabular-nums">{value.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
-    </div>
-  );
-}
-
-function MLCard({ ml, loading, onRefresh }: { ml: MLPrediction | null; loading: boolean; onRefresh: () => void }) {
-  return (
-    <div className="bg-surface border border-border rounded-xl p-4">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold flex items-center gap-2">
-          <Brain className="w-4 h-4 text-primary" /> ML Prediction
-        </h3>
-        <button onClick={onRefresh} disabled={loading} className="p-1.5 rounded hover:bg-bg transition-colors disabled:opacity-40">
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-        </button>
-      </div>
-      {!ml && !loading && <div className="text-xs text-muted">No prediction yet — click refresh to run the model.</div>}
-      {loading && <div className="text-xs text-muted flex items-center gap-2"><RefreshCw className="w-3 h-3 animate-spin" /> Running model…</div>}
-      {ml && (
-        <div className="space-y-2 animate-fade-in">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-muted">Direction</span>
-            <SideBadge side={ml.prediction === 'up' ? 'buy' : ml.prediction === 'down' ? 'sell' : 'neutral'} />
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-muted">Probability</span>
-            <span className="text-sm font-medium tabular-nums">{(ml.probability * 100).toFixed(1)}%</span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-muted">Expected Move</span>
-            <span className="text-sm font-medium tabular-nums">{ml.expected_move_pct >= 0 ? '+' : ''}{ml.expected_move_pct.toFixed(2)}%</span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-muted">Confidence</span>
-            <span className="text-sm font-medium capitalize">{ml.confidence}</span>
-          </div>
-          <div className="flex items-center justify-between pt-1 border-t border-border/50">
-            <span className="text-xs text-muted">Model</span>
-            <span className="text-xs text-muted tabular-nums">v{ml.model_version}</span>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function SignalsCard({ signals }: { signals: Signal[] }) {
-  return (
-    <div className="bg-surface border border-border rounded-xl p-4">
-      <h3 className="text-sm font-semibold mb-3">Strategy Signals</h3>
-      {signals.length === 0 && <div className="text-xs text-muted">No active signals.</div>}
-      <div className="space-y-2">
-        {signals.map((s, i) => (
-          <div key={i} className="flex items-start gap-2 py-1.5">
-            <SideBadge side={s.side} />
-            <div className="min-w-0 flex-1">
-              <div className="text-xs font-medium">{s.strategy}</div>
-              <div className="text-xs text-muted truncate">{s.reason}</div>
-            </div>
-            <div className="text-xs text-muted tabular-nums shrink-0">{(s.confidence * 100).toFixed(0)}%</div>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
@@ -649,4 +527,3 @@ function PublishedArticles() {
     </div>
   );
 }
-

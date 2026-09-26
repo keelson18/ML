@@ -7,10 +7,14 @@ const MIN_CANDLES = 100;
 
 // Trend Following Strategy: strong ADX + trend structure alignment
 export const trendFollowingStrategy = {
+  id: 'trend-following',
+  version: '1.0.0',
   name: 'Trend Following',
   type: 'trend' as const,
+  description: 'Combines ADX, directional movement, moving averages, and structure.',
   timeframes: ['1h', '4h', '1d', '1w'] as Timeframe[],
   minCandles: MIN_CANDLES,
+  defaultParameters: { adxPeriod: 14, minimumAdx: 25, fastPeriod: 20, slowPeriod: 50 },
 
   detect(candles: Candle[], _timeframe: Timeframe): Signal[] {
     if (candles.length < MIN_CANDLES) return [];
@@ -32,6 +36,8 @@ export const trendFollowingStrategy = {
       if (sma20[i] > sma50[i]) {
         signals.push({
           strategy: 'Trend Following',
+          strategyId: 'trend-following',
+          strategyVersion: '1.0.0',
           side: 'buy',
           confidence: Math.min(0.7, 0.4 + adxVals[i] / 200),
           reason: `Strong uptrend (ADX: ${adxVals[i].toFixed(1)})`,
@@ -46,6 +52,8 @@ export const trendFollowingStrategy = {
       if (sma20[i] < sma50[i]) {
         signals.push({
           strategy: 'Trend Following',
+          strategyId: 'trend-following',
+          strategyVersion: '1.0.0',
           side: 'sell',
           confidence: Math.min(0.7, 0.4 + adxVals[i] / 200),
           reason: `Strong downtrend (ADX: ${adxVals[i].toFixed(1)})`,
@@ -56,4 +64,3 @@ export const trendFollowingStrategy = {
     return signals;
   },
 };
-

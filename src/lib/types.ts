@@ -17,6 +17,8 @@ export interface Candle {
 
 export interface Signal {
   strategy: string;
+  strategyId?: string;
+  strategyVersion?: string;
   side: Side;
   confidence: number; // 0..1
   reason: string;

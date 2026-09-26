@@ -1,14 +1,16 @@
-import { Activity, BarChart3, Shield, BookOpen, Settings, X, TrendingUp, Brain, Zap, Briefcase, History, Star, Bell, Newspaper, AlertTriangle } from 'lucide-react';
-
-export type SidebarTab = 'dashboard' | 'markets' | 'terminal' | 'ai-analysis' | 'strategies' | 'portfolio' | 'backtesting' | 'watchlists' | 'alerts' | 'news' | 'risk' | 'ai-learning' | 'admin' | 'cms' | 'settings';
+import { Activity, BarChart3, Shield, BookOpen, Settings, PanelLeftClose, PanelLeftOpen, TrendingUp, Brain, Zap, Briefcase, History, Star, Bell, Newspaper, AlertTriangle } from 'lucide-react';
+import type { SidebarTab } from '../lib/routes';
+export type { SidebarTab } from '../lib/routes';
 
 interface Props {
   activeTab: SidebarTab;
   onTabChange: (tab: SidebarTab) => void;
   isAdmin: boolean;
   collapsed?: boolean;
+  mobileOpen?: boolean;
   onToggle?: () => void;
 }
+
 
 const NAV_ITEMS: { key: SidebarTab; label: string; icon: typeof Activity; adminOnly?: boolean }[] = [
   { key: 'dashboard', label: 'Dashboard', icon: Activity },
@@ -28,63 +30,72 @@ const NAV_ITEMS: { key: SidebarTab; label: string; icon: typeof Activity; adminO
   { key: 'settings', label: 'Settings', icon: Settings },
 ];
 
-export default function Sidebar({ activeTab, onTabChange, isAdmin, collapsed, onToggle }: Props) {
+const NAV_GROUPS = [
+  { label: 'Operate', keys: ['dashboard', 'markets', 'terminal', 'portfolio', 'watchlists'] as SidebarTab[] },
+  { label: 'Research', keys: ['ai-analysis', 'strategies', 'backtesting', 'news', 'ai-learning'] as SidebarTab[] },
+  { label: 'Control', keys: ['alerts', 'risk', 'admin', 'cms', 'settings'] as SidebarTab[] },
+];
+
+export default function Sidebar({ activeTab, onTabChange, isAdmin, collapsed, mobileOpen = true, onToggle }: Props) {
   return (
-    <aside className={`${collapsed ? 'w-16' : 'w-56'} bg-surface border-r border-border flex flex-col transition-all duration-200 shrink-0`}>
+    <aside className={`app-sidebar ${collapsed ? 'is-collapsed' : ''} ${mobileOpen ? 'is-mobile-open' : ''}`}>
       {/* Logo area */}
-      <div className="h-14 flex items-center justify-between px-4 border-b border-border">
+      <div className="sidebar-brand">
         {!collapsed && (
           <div className="flex items-center gap-2 min-w-0">
-            <div className="w-7 h-7 rounded-lg bg-primary/15 flex items-center justify-center shrink-0">
+            <div className="sidebar-mark">
               <Activity className="w-3.5 h-3.5 text-primary" />
             </div>
-            <span className="text-sm font-semibold tracking-tight truncate">Quantum</span>
+            <span className="sidebar-wordmark">Quantum <small>INTELLIGENCE</small></span>
           </div>
         )}
         {collapsed && (
           <div className="w-full flex justify-center">
-            <div className="w-7 h-7 rounded-lg bg-primary/15 flex items-center justify-center">
+            <div className="sidebar-mark">
               <Activity className="w-3.5 h-3.5 text-primary" />
             </div>
           </div>
         )}
         {onToggle && (
-          <button onClick={onToggle} className="p-1 rounded hover:bg-bg transition-colors text-muted hover:text-text">
-            <X className="w-3.5 h-3.5" />
+            <button onClick={onToggle} className="sidebar-toggle" title={collapsed ? 'Expand navigation' : 'Collapse navigation'}>
+            {collapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
           </button>
         )}
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 py-3 px-2 space-y-1 overflow-y-auto">
-        {NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin).map((item) => {
+      <nav className="sidebar-nav">
+        {NAV_GROUPS.map((group) => <div className="sidebar-group" key={group.label}>
+          {!collapsed && <div className="sidebar-group-label">{group.label}</div>}
+          {NAV_ITEMS.filter((item) => group.keys.includes(item.key) && (!item.adminOnly || isAdmin)).map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.key;
           return (
             <button
               key={item.key}
               onClick={() => onTabChange(item.key)}
-              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
+              className={`sidebar-link ${isActive ? 'is-active' : ''} ${collapsed ? 'is-icon-only' : ''} ${
                 isActive
                   ? 'bg-primary/10 text-primary'
                   : 'text-muted hover:text-text hover:bg-bg/50'
               }`}
               title={collapsed ? item.label : undefined}
             >
-              <Icon className="w-4 h-4 shrink-0" />
+              <Icon className="sidebar-link-icon" />
               {!collapsed && <span className="truncate">{item.label}</span>}
             </button>
           );
-        })}
+          })}
+        </div>)}
       </nav>
 
       {/* Footer */}
       {!collapsed && (
-        <div className="px-4 py-3 border-t border-border">
-          <p className="text-[10px] text-muted">Quantum Intelligence v2.0</p>
+        <div className="sidebar-footer">
+          <div className="sidebar-system"><span /> SYSTEM NOMINAL</div>
+          <p>Quantum Intelligence <b>v2.0</b></p>
         </div>
       )}
     </aside>
   );
 }
-

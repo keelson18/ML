@@ -1,12 +1,12 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.57.4";
-import { masterDecisionEngine, type DecisionEngineContext } from "../../../src/lib/intelligence/decision-engine.ts";
-import { explainabilityEngine } from "../../../src/lib/intelligence/explainability-engine.ts";
+import { masterDecisionEngine, type DecisionEngineContext } from "../../../backend/src/engines/decision-engine.ts";
+import { explainabilityEngine } from "../../../backend/src/engines/explainability-engine.ts";
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": Deno.env.get("CORS_ORIGIN") ?? "null",
+  "Access-Control-Allow-Origin": Deno.env.get("CORS_ORIGIN") ?? "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey, X-Correlation-Id",
   "Access-Control-Max-Age": "600",
   "Vary": "Origin",
   "X-Content-Type-Options": "nosniff",

@@ -4,7 +4,7 @@
  * Per: GreenHill_AI_Engine_Specification_v1.0.md
  */
 
-import type { Candle, CandleSequence } from '../domain/MarketData';
+import type { CandleSequence } from '../domain/MarketData';
 import type { Asset } from '../domain/Asset';
 import type { TradeDecision } from '../domain/TradeDecision';
 

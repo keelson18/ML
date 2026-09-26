@@ -1,6 +1,16 @@
 import type { MLPrediction, Timeframe } from './types';
 import { supabase } from './supabase';
 
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+
+function functionHeaders(accessToken: string): Record<string, string> {
+  return {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${accessToken}`,
+    ...(supabaseAnonKey ? { apikey: supabaseAnonKey } : {}),
+  };
+}
+
 // Call the ML prediction edge function. Falls back gracefully on error.
 export async function fetchMLPrediction(symbol: string, timeframe: Timeframe): Promise<MLPrediction | null> {
   try {
@@ -10,10 +20,7 @@ export async function fetchMLPrediction(symbol: string, timeframe: Timeframe): P
     const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ml-predict/predict`;
     const res = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${session.access_token}`,
-      },
+      headers: functionHeaders(session.access_token),
       body: JSON.stringify({ pair: symbol, timeframe }),
     });
     if (!res.ok) {
@@ -21,7 +28,7 @@ export async function fetchMLPrediction(symbol: string, timeframe: Timeframe): P
       return null;
     }
     const data = await res.json();
-    if (!data || data.error) return null;
+    if (!data || data.error || !data.prediction || typeof data.probability !== 'number') return null;
     return {
       pair: data.pair,
       timeframe: data.timeframe,
@@ -39,13 +46,13 @@ export async function fetchMLPrediction(symbol: string, timeframe: Timeframe): P
 
 // Fetch the most recent cached ML prediction from the database (for instant UI load).
 export async function fetchCachedMLPrediction(symbol: string, timeframe: Timeframe): Promise<MLPrediction | null> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('ml_predictions')
     .select('*')
     .eq('symbol', symbol)
     .eq('timeframe', timeframe)
     .maybeSingle();
-  if (!data) return null;
+  if (error || !data) return null;
   return {
     pair: data.symbol,
     timeframe: data.timeframe,
@@ -66,10 +73,7 @@ export async function askCoach(messages: CoachMessage[]): Promise<string> {
 
   const res = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${session.access_token}`,
-    },
+    headers: functionHeaders(session.access_token),
     body: JSON.stringify({ messages }),
   });
   if (!res.ok) throw new Error(`Coach failed (${res.status})`);

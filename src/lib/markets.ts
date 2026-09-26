@@ -3,8 +3,8 @@ import type { Market, MarketType } from './types';
 // Full market universe definition
 export const MARKET_UNIVERSE: Market[] = [
   // ---- Crypto ----
-  { symbol: 'BTCUSD', baseAsset: 'BTC', quoteAsset: 'USDT', marketType: 'crypto', exchange: 'Binance', label: 'BTC/USDT', provider: 'binance', category: 'Major', isActive: true },
-  { symbol: 'ETHUSD', baseAsset: 'ETH', quoteAsset: 'USDT', marketType: 'crypto', exchange: 'Binance', label: 'ETH/USDT', provider: 'binance', category: 'Major', isActive: true },
+  { symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', marketType: 'crypto', exchange: 'Binance', label: 'BTC/USDT', provider: 'binance', category: 'Major', isActive: true },
+  { symbol: 'ETHUSDT', baseAsset: 'ETH', quoteAsset: 'USDT', marketType: 'crypto', exchange: 'Binance', label: 'ETH/USDT', provider: 'binance', category: 'Major', isActive: true },
   { symbol: 'SOLUSDT', baseAsset: 'SOL', quoteAsset: 'USDT', marketType: 'crypto', exchange: 'Binance', label: 'SOL/USDT', provider: 'binance', category: 'Major', isActive: true },
   { symbol: 'XRPUSDT', baseAsset: 'XRP', quoteAsset: 'USDT', marketType: 'crypto', exchange: 'Binance', label: 'XRP/USDT', provider: 'binance', category: 'Major', isActive: true },
   { symbol: 'BNBUSDT', baseAsset: 'BNB', quoteAsset: 'USDT', marketType: 'crypto', exchange: 'Binance', label: 'BNB/USDT', provider: 'binance', category: 'Major', isActive: true },
@@ -113,4 +113,3 @@ export function getMarketsGrouped(): Record<MarketType, Market[]> {
     stock: getMarketsByType('stock'),
   };
 }
-

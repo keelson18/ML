@@ -27,7 +27,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .from('profiles')
         .select('*')
         .eq('id', userId)
-        .single();
+        .maybeSingle();
       if (data) {
         setProfile({
           id: data.id,
@@ -43,14 +43,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      const sess = data.session;
-      setSession(sess);
-      if (sess?.user) {
-        fetchProfile(sess.user.id);
+    let disposed = false;
+    const timeout = setTimeout(() => {
+      if (!disposed) {
+        setSession(null);
+        setProfile(null);
+        setLoading(false);
       }
-      setLoading(false);
-    });
+    }, 10000);
+
+    supabase.auth.getSession()
+      .then(({ data }) => {
+        if (disposed) return;
+        const sess = data.session;
+        setSession(sess);
+        if (sess?.user) {
+          fetchProfile(sess.user.id);
+        }
+      })
+      .catch(() => {
+        if (disposed) return;
+        setSession(null);
+        setProfile(null);
+      })
+      .finally(() => {
+        clearTimeout(timeout);
+        if (!disposed) setLoading(false);
+      });
     // onAuthStateChange: wrap async work to avoid deadlock (per Supabase guidance).
     const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => {
       (async () => {
@@ -62,7 +81,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       })();
     });
-    return () => sub.subscription.unsubscribe();
+    return () => {
+      disposed = true;
+      clearTimeout(timeout);
+      sub.subscription.unsubscribe();
+    };
   }, []);
 
   const signUp = async (

@@ -1,6 +1,7 @@
 import type { Candle, Timeframe } from '../types';
 import { TIMEFRAME_MAP } from './types';
 import type { DataProvider } from './types';
+import { fetchWithTimeout } from './request';
 
 const REST = 'https://api.binance.com';
 const WS = 'wss://stream.binance.com:9443/ws';
@@ -15,7 +16,7 @@ export const binanceProvider: DataProvider = {
   async fetchKlines(symbol: string, timeframe: Timeframe, limit = 1000): Promise<Candle[]> {
     const tf = TIMEFRAME_MAP.binance[timeframe] ?? timeframe;
     const url = `${REST}/api/v3/klines?symbol=${symbol}&interval=${tf}&limit=${limit}`;
-    const res = await fetch(url);
+    const res = await fetchWithTimeout(url);
     if (!res.ok) throw new Error(`Binance klines ${res.status}`);
     const raw = (await res.json()) as unknown[][];
     return raw.map((k) => ({
@@ -94,4 +95,3 @@ export const binanceProvider: DataProvider = {
     };
   },
 };
-
