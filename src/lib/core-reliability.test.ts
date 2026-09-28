@@ -4,6 +4,8 @@ import { runBacktest } from './backtest/engine';
 import { getStrategyAvailability, STRATEGY_REGISTRY } from './strategies/index';
 import { pathForSidebarTab, sidebarTabFromPath } from './routes';
 import type { Candle } from './types';
+import { fetchWithTimeout } from './providers/request';
+import { vi } from 'vitest';
 
 function candles(count: number): Candle[] {
   return Array.from({ length: count }, (_, index) => {
@@ -40,5 +42,28 @@ describe('core reliability contracts', () => {
     expect(result.trades.length).toBeGreaterThan(0);
     expect(result.equity[result.equity.length - 1]).toBeGreaterThan(1000);
     expect(result.metrics.totalReturn).toBeGreaterThan(0);
+    expect(result.trades.every((trade, index) => index === 0 || trade.entryTime > result.trades[index - 1].exitTime)).toBe(true);
+  });
+
+  it('aborts slow requests with an explicit timeout reason', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_, reject) => {
+      const signal = init?.signal as AbortSignal;
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+    })));
+
+    try {
+      const request = fetchWithTimeout('/request');
+      const assertion = expect(request).rejects.toHaveProperty('name', 'TimeoutError');
+      await vi.advanceTimersByTimeAsync(30_000);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('rejects invalid backtest capital', () => {
+    expect(() => runBacktest(candles(80), () => [], 0)).toThrow('Initial capital and holding period must be positive values.');
   });
 });

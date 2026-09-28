@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity, Sun, Moon, LogOut, Wifi, WifiOff, TrendingUp, TrendingDown,
-  Menu,
+  Menu, X,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -44,6 +44,7 @@ export default function Dashboard() {
   const [symbol, setSymbol] = useState<string>('BTCUSDT');
   const [timeframe, setTimeframe] = useState<Timeframe>('1h');
   const [candles, setCandles] = useState<Candle[]>([]);
+  const [decisionCandles, setDecisionCandles] = useState<Candle[]>([]);
   const [serverDecision, setServerDecision] = useState<BackendDecision | null>(null);
   const [loading, setLoading] = useState(true);
   const [dataError, setDataError] = useState<string | null>(null);
@@ -52,7 +53,7 @@ export default function Dashboard() {
   const [livePrice, setLivePrice] = useState<number | null>(null);
   const [ml, setMl] = useState<MLPrediction | null>(null);
   const [mlLoading, setMlLoading] = useState(false);
-  const [mlStatus, setMlStatus] = useState<'idle' | 'loading' | 'ready' | 'unavailable'>('idle');
+  const [mlStatus, setMlStatus] = useState<'idle' | 'loading' | 'ready' | 'cached' | 'unavailable'>('idle');
   const candlesRef = useRef<Candle[]>([]);
 
   const isAdmin = profile?.role === 'admin';
@@ -86,7 +87,9 @@ export default function Dashboard() {
   useEffect(() => {
     let disposed = false;
     setLoading(true);
+    candlesRef.current = [];
     setCandles([]);
+    setDecisionCandles([]);
     setLivePrice(null);
     setDataError(null);
     setWsStatus('connecting');
@@ -97,11 +100,14 @@ export default function Dashboard() {
       try {
         const data = await dataProvider.fetchKlines(symbol, timeframe, 1000);
         if (disposed) return;
-        setCandles(data);
-        setLivePrice(data.length ? data[data.length - 1].close : null);
+        const merged = [...new Map([...data, ...candlesRef.current].map((candle) => [candle.time, candle])).values()].sort((a, b) => a.time - b.time);
+        candlesRef.current = merged;
+        setCandles(merged);
+        setDecisionCandles(merged.slice(0, -1));
+        setLivePrice(merged.length ? merged[merged.length - 1].close : null);
       } catch (error) {
         if (!disposed) {
-          setCandles([]);
+          if (!candlesRef.current.length) setCandles([]);
           setDataError(error instanceof Error ? error.message : 'Market data could not be loaded.');
         }
       } finally {
@@ -109,18 +115,15 @@ export default function Dashboard() {
       }
     })();
 
-    const unsub = dataProvider.subscribeKlines(symbol, timeframe, (candle) => {
-      setCandles((prev) => {
-        const arr = [...prev];
-        const last = arr[arr.length - 1];
-        if (last && last.time === candle.time) {
-          arr[arr.length - 1] = candle;
-        } else if (!last || candle.time > last.time) {
-          arr.push(candle);
-          if (arr.length > 1500) arr.shift();
-        }
-        return arr;
-      });
+    const unsub = dataProvider.subscribeKlines(symbol, timeframe, (candle, closed) => {
+      const arr = [...candlesRef.current];
+      const last = arr[arr.length - 1];
+      if (last && last.time === candle.time) arr[arr.length - 1] = candle;
+      else if (!last || candle.time > last.time) arr.push(candle);
+      if (arr.length > 1500) arr.shift();
+      candlesRef.current = arr;
+      setCandles(arr);
+      if (closed) setDecisionCandles(arr);
       setLivePrice(candle.close);
     }, (status) => setWsStatus(status));
 
@@ -130,12 +133,12 @@ export default function Dashboard() {
   useEffect(() => {
     let cancelled = false;
     setServerDecision(null);
-    if (candles.length < 60) return () => { cancelled = true; };
-    requestBackendDecision(symbol, timeframe, candles)
+    if (decisionCandles.length < 60) return () => { cancelled = true; };
+    requestBackendDecision(symbol, timeframe, decisionCandles)
       .then((decision) => { if (!cancelled) setServerDecision(decision); })
       .catch(() => { if (!cancelled) setServerDecision(null); });
     return () => { cancelled = true; };
-  }, [candles, symbol, timeframe]);
+  }, [decisionCandles, symbol, timeframe]);
 
   // Fetch cached ML prediction instantly
   useEffect(() => {
@@ -144,7 +147,7 @@ export default function Dashboard() {
       const cached = await fetchCachedMLPrediction(symbol, timeframe);
       if (!cancelled && cached) {
         setMl(cached);
-        setMlStatus('ready');
+        setMlStatus('cached');
       }
       if (candles.length >= 60) {
         if (!cancelled) setMlStatus('loading');
@@ -153,8 +156,8 @@ export default function Dashboard() {
           if (fresh) {
             setMl(fresh);
             setMlStatus('ready');
-          } else if (!cached) {
-            setMlStatus('unavailable');
+          } else {
+            setMlStatus(cached ? 'cached' : 'unavailable');
           }
         }
       }
@@ -169,7 +172,7 @@ export default function Dashboard() {
       setMl(pred);
       setMlStatus('ready');
     } else {
-      setMlStatus('unavailable');
+      setMlStatus(ml ? 'cached' : 'unavailable');
     }
     setMlLoading(false);
   };
@@ -248,8 +251,8 @@ export default function Dashboard() {
     if (sidebarTab === 'strategies') return <StrategyLab signals={signals} candles={candles} timeframe={timeframe} />;
     if (sidebarTab === 'portfolio') return <PortfolioPage />;
     if (sidebarTab === 'backtesting') return <BacktestingCenter candles={candles} timeframe={timeframe} symbol={symbol} theme={theme} />;
-    if (sidebarTab === 'watchlists') return <WatchlistsPage />;
-    if (sidebarTab === 'alerts') return <AlertsPage />;
+    if (sidebarTab === 'watchlists') return <WatchlistsPage key={user?.id ?? 'local'} userId={user?.id} />;
+    if (sidebarTab === 'alerts') return <AlertsPage key={user?.id ?? 'local'} userId={user?.id} />;
     if (sidebarTab === 'news') return <NewsPage />;
     if (sidebarTab === 'risk') return <RiskManagement />;
     if (sidebarTab === 'ai-learning') return <AILearning />;
@@ -258,7 +261,7 @@ export default function Dashboard() {
       return (
         <div className="p-4 lg:p-6">
           <div className="flex flex-wrap items-center gap-3 mb-4">
-            <select value={symbol} onChange={(e) => setSymbol(e.target.value)}
+            <select aria-label="Trading terminal symbol" value={symbol} onChange={(e) => setSymbol(e.target.value)}
               className="px-3.5 py-2 rounded-lg bg-surface border border-border text-text focus:outline-none focus:border-primary/40 text-sm font-medium">
               {availableMarkets.map((p) => <option key={p.symbol} value={p.symbol}>{p.label}</option>)}
             </select>
@@ -275,60 +278,70 @@ export default function Dashboard() {
     }
 
     return (
-      <div className="px-4 lg:px-6 py-4 lg:py-5">
-        <div className="flex flex-wrap items-center gap-3 mb-5">
-          <select
-            value={marketType}
-            onChange={(e) => {
-              const newType = e.target.value as MarketType;
-              setMarketType(newType);
-              const markets = getMarketsByType(newType);
-              if (markets.length > 0 && !markets.find((m) => m.symbol === symbol)) {
-                setSymbol(markets[0].symbol);
-              }
-            }}
-            className="px-3.5 py-2 rounded-lg bg-surface border border-border text-text focus:outline-none focus:border-primary/40 text-sm font-medium"
-          >
-            {MARKET_TYPES.map((mt) => (
-              <option key={mt.value} value={mt.value}>{mt.icon} {mt.label}</option>
-            ))}
-          </select>
+      <div className="dashboard-page px-4 lg:px-6 py-4 lg:py-5">
+        <div className="dashboard-heading">
+          <div className="dashboard-title">
+            <span className="dashboard-eyebrow"><Activity className="w-3.5 h-3.5" /> Market overview</span>
+            <h1>Dashboard</h1>
+            <p>Real-time market context, autonomous decisions, and signal confidence.</p>
+          </div>
+          <div className="dashboard-market-price">
+            <span className="dashboard-price-label">{symbol} <span>·</span> {timeframe}</span>
+            <strong>{livePrice != null ? `$${livePrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : '--'}</strong>
+            <div className="dashboard-price-change">
+              {priceChange !== null && <span className={priceChange >= 0 ? 'is-positive' : 'is-negative'}>
+                {priceChange >= 0 ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
+                {Math.abs(priceChange).toFixed(2)}%
+              </span>}
+              <small>24-bar change</small>
+            </div>
+          </div>
+        </div>
 
-          <select
-            value={symbol}
-            onChange={(e) => setSymbol(e.target.value)}
-            className="px-3.5 py-2 rounded-lg bg-surface border border-border text-text focus:outline-none focus:border-primary/40 text-sm font-medium"
-          >
-            {availableMarkets.length > 0
-              ? availableMarkets.map((p) => <option key={p.symbol} value={p.symbol}>{p.label}</option>)
-              : TRACKED_PAIRS.map((p) => <option key={p.symbol} value={p.symbol}>{p.label}</option>)}
-          </select>
+        <div className="dashboard-controls">
+          <div className="dashboard-market-filters">
+            <select
+              aria-label="Market type"
+              value={marketType}
+              onChange={(e) => {
+                const newType = e.target.value as MarketType;
+                setMarketType(newType);
+                const markets = getMarketsByType(newType);
+                if (markets.length > 0 && !markets.find((m) => m.symbol === symbol)) {
+                  setSymbol(markets[0].symbol);
+                }
+              }}
+              className="dashboard-select"
+            >
+              {MARKET_TYPES.map((mt) => (
+                <option key={mt.value} value={mt.value}>{mt.icon} {mt.label}</option>
+              ))}
+            </select>
 
-          <div className="flex gap-0.5 p-1 rounded-lg bg-surface border border-border">
+            <select
+              aria-label="Market symbol"
+              value={symbol}
+              onChange={(e) => setSymbol(e.target.value)}
+              className="dashboard-select"
+            >
+              {availableMarkets.length > 0
+                ? availableMarkets.map((p) => <option key={p.symbol} value={p.symbol}>{p.label}</option>)
+                : TRACKED_PAIRS.map((p) => <option key={p.symbol} value={p.symbol}>{p.label}</option>)}
+            </select>
+          </div>
+
+          <div className="dashboard-timeframes" aria-label="Chart timeframe">
             {TIMEFRAMES.map((tf) => (
               <button
                 key={tf.value}
                 onClick={() => setTimeframe(tf.value)}
-                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${timeframe === tf.value ? 'bg-primary text-white' : 'text-muted hover:text-text'}`}
+                aria-pressed={timeframe === tf.value}
+                className={timeframe === tf.value ? 'is-active' : ''}
               >
                 {tf.label}
               </button>
             ))}
           </div>
-
-          {livePrice != null && (
-            <div className="flex items-center gap-2.5 ml-auto">
-              <span className="text-xl font-semibold tabular-nums text-text">
-                ${livePrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-              </span>
-              {priceChange !== null && (
-                <span className={`text-sm flex items-center gap-1 font-medium ${priceChange >= 0 ? 'text-success' : 'text-danger'}`}>
-                  {priceChange >= 0 ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
-                  {Math.abs(priceChange).toFixed(2)}%
-                </span>
-              )}
-            </div>
-          )}
         </div>
 
         {dataError && (
@@ -348,23 +361,28 @@ export default function Dashboard() {
         activeTab={sidebarTab}
         onTabChange={navigateToTab}
         isAdmin={isAdmin}
-        collapsed={sidebarCollapsed}
+        collapsed={sidebarCollapsed && !mobileSidebarOpen}
         mobileOpen={mobileSidebarOpen}
         onToggle={() => {
-          if (window.matchMedia('(max-width: 700px)').matches) setMobileSidebarOpen((open) => !open);
+          if (window.matchMedia('(max-width: 1024px)').matches) setMobileSidebarOpen((open) => !open);
           else setSidebarCollapsed((collapsed) => !collapsed);
         }}
       />
+      {mobileSidebarOpen && <button className="sidebar-backdrop" type="button" aria-label="Close navigation" onClick={() => setMobileSidebarOpen(false)} />}
 
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
         <header className="h-14 border-b border-border bg-surface/80 backdrop-blur-md flex items-center justify-between px-4 lg:px-6 shrink-0">
           <div className="flex items-center gap-3">
             <button
+              type="button"
               onClick={() => setMobileSidebarOpen((open) => !open)}
-              className="p-1.5 rounded-lg hover:bg-surface transition-colors text-muted hover:text-text lg:hidden"
+              className="dashboard-mobile-menu p-1.5 rounded-lg hover:bg-surface transition-colors text-muted hover:text-text"
+              aria-label={mobileSidebarOpen ? 'Close navigation' : 'Open navigation'}
+              aria-expanded={mobileSidebarOpen}
+              aria-controls="app-navigation"
             >
-              <Menu className="w-4 h-4" />
+              {mobileSidebarOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
             </button>
             <div className="flex items-center gap-2.5">
               <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center">
@@ -375,11 +393,11 @@ export default function Dashboard() {
           </div>
           <div className="flex items-center gap-2.5">
             <WsIndicator status={wsStatus} />
-            <button onClick={toggle} className="p-2 rounded-lg hover:bg-bg transition-colors text-muted hover:text-text" title="Toggle theme">
+            <button onClick={toggle} aria-label="Toggle theme" className="p-2 rounded-lg hover:bg-bg transition-colors text-muted hover:text-text" title="Toggle theme">
               {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
             <div className="hidden sm:block text-xs text-muted font-medium">{user?.email}</div>
-            <button onClick={signOut} className="p-2 rounded-lg hover:bg-bg transition-colors text-muted hover:text-text" title="Sign out">
+            <button onClick={signOut} aria-label="Sign out" className="p-2 rounded-lg hover:bg-bg transition-colors text-muted hover:text-text" title="Sign out">
               <LogOut className="w-4 h-4" />
             </button>
           </div>
@@ -404,7 +422,7 @@ function WsIndicator({ status }: { status: WsStatus }) {
   };
   const { color, dot, icon: Icon, label } = map[status];
   return (
-    <div className={`flex items-center gap-1.5 text-xs font-medium ${color}`} title={label}>
+    <div className={`flex items-center gap-1.5 text-xs font-medium ${color}`} title={label} role="status" aria-label={`Market data ${label.toLowerCase()}`}>
       <span className={`w-1.5 h-1.5 rounded-full ${dot} ${status === 'open' ? 'pulse-dot' : ''}`} />
       <Icon className="w-3.5 h-3.5 hidden sm:block" />
       <span className="hidden md:inline">{label}</span>

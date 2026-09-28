@@ -6,7 +6,7 @@ export interface CoachMessage { role: 'user' | 'assistant'; content: string }
 export const mlApi = {
   getCachedPrediction: (symbol: string, timeframe: Timeframe) =>
     api.get<{ prediction: MLPrediction | null }>(
-      `/ml/prediction?symbol=${symbol}&timeframe=${timeframe}`,
+      `/ml/prediction?${new URLSearchParams({ symbol, timeframe })}`,
     ),
 
   predict: (symbol: string, timeframe: Timeframe) =>

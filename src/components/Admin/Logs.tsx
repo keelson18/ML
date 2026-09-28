@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { RefreshCw, AlertTriangle, Info, XCircle } from 'lucide-react';
+import { AlertTriangle, Info, XCircle } from 'lucide-react';
 
 interface LogEntry {
   id: string;
@@ -38,9 +38,10 @@ export default function Logs() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold">System Logs</h3>
+        <div><h3 className="text-sm font-semibold">Sample System Logs</h3><p className="text-[10px] text-muted mt-1">Example entries only; live log collection is not connected.</p></div>
         <div className="flex items-center gap-2">
           <select
+            aria-label="Filter logs by level"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             className="px-2 py-1 rounded text-xs bg-surface border border-border text-text focus:outline-none focus:border-primary"
@@ -50,9 +51,7 @@ export default function Logs() {
             <option value="warn">Warning</option>
             <option value="error">Error</option>
           </select>
-          <button className="p-1.5 rounded hover:bg-bg transition-colors">
-            <RefreshCw className="w-3.5 h-3.5 text-muted" />
-          </button>
+
         </div>
       </div>
       <div className="space-y-1 max-h-[400px] overflow-y-auto">
@@ -77,4 +76,3 @@ export default function Logs() {
     </div>
   );
 }
-

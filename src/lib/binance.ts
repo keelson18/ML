@@ -1,5 +1,6 @@
 import type { Candle, Timeframe } from './types';
 import { TIMEFRAMES } from './types';
+import { fetchWithTimeout } from './providers/request';
 
 const REST = 'https://api.binance.com';
 const WS = 'wss://stream.binance.com:9443/ws';
@@ -13,23 +14,17 @@ export async function fetchKlines(
 ): Promise<Candle[]> {
   const tf = TIMEFRAMES.find((t) => t.value === timeframe)?.binance ?? timeframe;
   const url = `${REST}/api/v3/klines?symbol=${symbol}&interval=${tf}&limit=${limit}`;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
-  try {
-    const res = await fetch(url, { signal: controller.signal });
-    if (!res.ok) throw new Error(`Binance klines ${res.status}`);
-    const raw = (await res.json()) as unknown[][];
-    return raw.map((k) => ({
-      time: Math.floor((k[0] as number) / 1000),
-      open: parseFloat(k[1] as string),
-      high: parseFloat(k[2] as string),
-      low: parseFloat(k[3] as string),
-      close: parseFloat(k[4] as string),
-      volume: parseFloat(k[5] as string),
-    }));
-  } finally {
-    clearTimeout(timeout);
-  }
+  const res = await fetchWithTimeout(url);
+  if (!res.ok) throw new Error(`Binance klines ${res.status}`);
+  const raw = (await res.json()) as unknown[][];
+  return raw.map((k) => ({
+    time: Math.floor((k[0] as number) / 1000),
+    open: parseFloat(k[1] as string),
+    high: parseFloat(k[2] as string),
+    low: parseFloat(k[3] as string),
+    close: parseFloat(k[4] as string),
+    volume: parseFloat(k[5] as string),
+  }));
 }
 
 // Live price ticker via combined WebSocket stream.

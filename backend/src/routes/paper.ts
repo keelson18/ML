@@ -1,11 +1,13 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import { executeDecision } from '../services/paperTradingService';
 import type { TradeDecision } from '../engines/decision-engine';
 
 export async function paperRoutes(app: FastifyInstance) {
-  app.post('/api/v1/paper/execute', async (request: FastifyRequest<{ Body: { accountId?: string; symbol: string; decision: TradeDecision; quantity?: number } }>, reply: FastifyReply) => {
+  app.post<{ Body: { accountId?: string; symbol: string; decision: TradeDecision; quantity?: number } }>('/api/v1/paper/execute', { preHandler: app.requireAdmin }, async (request, reply: FastifyReply) => {
     try {
-      return await executeDecision(request.body);
+      const accountId = request.authenticatedUserId;
+      if (!accountId) return reply.code(401).send({ error: 'Authentication required' });
+      return await executeDecision({ ...request.body, accountId });
     } catch (error) {
       return reply.code(400).send({ error: error instanceof Error ? error.message : 'Paper execution failed.' });
     }

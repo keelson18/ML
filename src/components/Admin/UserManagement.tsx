@@ -6,14 +6,17 @@ import type { UserProfile } from '../../lib/types';
 export default function UserManagement() {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   const fetchUsers = async () => {
     setLoading(true);
     try {
       const { profiles } = await authApi.getAllProfiles();
       setUsers(profiles);
+      setLoadError(false);
     } catch {
       setUsers([]);
+      setLoadError(true);
     }
     setLoading(false);
   };
@@ -33,15 +36,16 @@ export default function UserManagement() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold">User Management ({users.length})</h3>
+        <h3 className="text-sm font-semibold">User Management{!loadError && ` (${users.length})`}</h3>
         <button
           onClick={fetchUsers}
+          aria-label="Refresh users"
           className="p-1.5 rounded hover:bg-bg transition-colors"
         >
           <RefreshCw className="w-3.5 h-3.5 text-muted" />
         </button>
       </div>
-      <div className="space-y-1.5">
+      {loadError ? <div role="alert" className="text-sm text-warning text-center py-8">Could not load users. Retry to check the directory again.</div> : users.length === 0 ? <div className="text-sm text-muted text-center py-8">No users found.</div> : <div className="space-y-1.5">
         {users.map((u) => (
           <div key={u.id} className="flex items-center justify-between py-2 px-3 rounded-lg bg-bg/50 border border-border/50">
             <div className="min-w-0">
@@ -66,7 +70,7 @@ export default function UserManagement() {
             </button>
           </div>
         ))}
-      </div>
+      </div>}
     </div>
   );
 }

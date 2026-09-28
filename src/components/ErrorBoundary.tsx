@@ -23,7 +23,9 @@ export default class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('[ErrorBoundary]', error, errorInfo.componentStack);
+    const safeMessage = String(error.message).replace(/[\r\n]/g, ' ');
+    const safeStack = String(errorInfo.componentStack ?? '').replace(/[\r\n]/g, ' ');
+    console.error('[ErrorBoundary]', safeMessage, safeStack);
   }
 
   handleRetry = () => {

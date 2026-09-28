@@ -1,17 +1,15 @@
+import { supabase } from '../lib/supabase';
+
 const BASE_URL = '/api';
 
+// Keep token in-memory only — avoids XSS exposure via localStorage.
 let authToken: string | null = null;
 
 export function setAuthToken(token: string | null) {
   authToken = token;
-  if (token) localStorage.setItem('auth_token', token);
-  else localStorage.removeItem('auth_token');
 }
 
 export function getAuthToken(): string | null {
-  if (authToken) return authToken;
-  const stored = localStorage.getItem('auth_token');
-  if (stored) authToken = stored;
   return authToken;
 }
 
@@ -23,7 +21,8 @@ export async function apiRequest<T = unknown>(
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string>),
   };
-  const token = getAuthToken();
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token ?? getAuthToken();
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
   const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });

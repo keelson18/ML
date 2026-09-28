@@ -42,7 +42,7 @@ export default function KineticCoach() {
           <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`}>
             <div className={`max-w-[85%] px-3.5 py-2 rounded-2xl text-sm leading-relaxed ${
               m.role === 'user'
-                ? 'bg-primary text-white'
+                ? 'bg-primary text-black'
                 : 'bg-bg/60 border border-border text-text'
             }`}>
               {m.content}
@@ -60,16 +60,18 @@ export default function KineticCoach() {
       <div className="p-3 border-t border-border">
         <div className="flex gap-2">
           <input
+            aria-label="Message to Kinetic Coach"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && send()}
             placeholder="Ask about a signal, risk, or strategy…"
-            className="flex-1 px-3.5 py-2 rounded-lg bg-bg border border-border text-text placeholder:text-muted/50 focus:outline-none focus:border-primary/40 text-sm transition-colors"
+            className="flex-1 px-3.5 py-2 rounded-lg bg-bg border border-border text-text placeholder:text-muted focus:outline-none focus:border-primary/40 text-sm transition-colors"
           />
           <button
             onClick={send}
+            aria-label="Send message"
             disabled={loading || !input.trim()}
-            className="px-3 py-2 rounded-lg bg-primary text-white disabled:opacity-40 hover:opacity-90 transition-opacity"
+            className="px-3 py-2 rounded-lg bg-primary text-black disabled:opacity-40 hover:opacity-90 transition-opacity"
           >
             <Send className="w-4 h-4" />
           </button>

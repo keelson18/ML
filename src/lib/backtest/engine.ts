@@ -40,32 +40,39 @@ export function runBacktest(
   let capital = initialCapital;
   const minCandles = 60;
 
-  if (candles.length < minCandles + holdBars) {
+  if (!Number.isFinite(initialCapital) || initialCapital <= 0 || !Number.isInteger(holdBars) || holdBars < 1) {
+    throw new Error('Initial capital and holding period must be positive values.');
+  }
+  if (candles.length < minCandles + holdBars + 2) {
     return { trades, equity, metrics: { totalReturn: 0, maxDrawdown: 0, sharpe: 0, winRate: 0, totalTrades: 0 } };
   }
 
-  for (let i = minCandles; i < candles.length - holdBars; i++) {
+  for (let i = minCandles; i < candles.length - holdBars - 1; i++) {
     const slice = candles.slice(0, i + 1);
     const signals = signalFn(slice);
     const activeSignal = signals.find((s) => s.side !== 'neutral');
 
     if (!activeSignal) continue;
 
-    const entry = candles[i].close;
-    const exit = candles[i + holdBars].close;
+    const entryCandle = candles[i + 1];
+    const exitCandle = candles[i + holdBars + 1];
+    const entry = entryCandle.open;
+    const exit = exitCandle.close;
+    if (!Number.isFinite(entry) || !Number.isFinite(exit) || entry <= 0 || exit <= 0) continue;
 
     const side = activeSignal.side;
     const pnlPct = side === 'buy' ? (exit - entry) / entry : (entry - exit) / entry;
-    const pnl = capital * pnlPct;
+    const size = capital / entry;
+    const pnl = size * (side === 'buy' ? exit - entry : entry - exit);
 
     const tradeSide = side === 'neutral' ? 'buy' : side as 'buy' | 'sell';
     trades.push({
-      entryTime: candles[i].time,
-      exitTime: candles[i + holdBars].time,
+      entryTime: entryCandle.time,
+      exitTime: exitCandle.time,
       entryPrice: entry,
       exitPrice: exit,
       side: tradeSide,
-      size: capital / entry,
+      size,
       pnl,
       pnlPct,
       strategy: activeSignal.strategy,
@@ -77,21 +84,19 @@ export function runBacktest(
     // Update equity
     capital += pnl;
     equity.push(capital);
-
+    i += holdBars;
   }
 
   // Calculate metrics
   const wins = trades.filter((t) => t.pnl > 0);
   const winRate = trades.length > 0 ? wins.length / trades.length : 0;
   const totalReturn = (capital - initialCapital) / initialCapital;
-  const maxDrawdown = equity.reduce(
-    (max, val, idx) => {
-      const pk = Math.max(...equity.slice(0, idx + 1));
-      const dd = (pk - val) / pk;
-      return Math.max(max, dd);
-    },
-    0,
-  );
+  let peak = initialCapital;
+  let maxDrawdown = 0;
+  for (const value of equity) {
+    peak = Math.max(peak, value);
+    maxDrawdown = Math.max(maxDrawdown, (peak - value) / peak);
+  }
 
   // Sharpe (simplified)
   const returns = trades.map((t) => t.pnlPct);

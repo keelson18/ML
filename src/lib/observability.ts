@@ -39,7 +39,7 @@ export function createLogEvent(
 }
 
 export function writeLog(logEvent: LogEvent): void {
-  const serialized = JSON.stringify(logEvent);
+  const serialized = JSON.stringify(logEvent).replace(/[\r\n]/g, ' ');
   if (logEvent.level === 'error') console.error(serialized);
   else if (logEvent.level === 'warn') console.warn(serialized);
   else console.info(serialized);

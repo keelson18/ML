@@ -64,6 +64,7 @@ export default function CMSManager() {
         <div className="flex items-center gap-2">
           <button
             onClick={load}
+            aria-label="Refresh content"
             className="p-1.5 rounded hover:bg-bg transition-colors"
           >
             <RefreshCw className="w-3.5 h-3.5 text-muted" />
@@ -112,6 +113,7 @@ export default function CMSManager() {
                 onClick={() => { setSelected(c); setView('view'); }}
                 className="p-1.5 rounded hover:bg-bg transition-colors"
                 title="View"
+                aria-label={`View ${c.title}`}
               >
                 <Eye className="w-3 h-3 text-muted" />
               </button>
@@ -119,6 +121,7 @@ export default function CMSManager() {
                 onClick={() => { setSelected(c); setView('edit'); }}
                 className="p-1.5 rounded hover:bg-bg transition-colors"
                 title="Edit"
+                aria-label={`Edit ${c.title}`}
               >
                 <Edit2 className="w-3 h-3 text-muted" />
               </button>
@@ -126,6 +129,7 @@ export default function CMSManager() {
                 onClick={() => handleToggle(c.id, c.published)}
                 className="p-1.5 rounded hover:bg-bg transition-colors"
                 title={c.published ? 'Unpublish' : 'Publish'}
+                aria-label={`${c.published ? 'Unpublish' : 'Publish'} ${c.title}`}
               >
                 {c.published ? <EyeOff className="w-3 h-3 text-warning" /> : <Eye className="w-3 h-3 text-success" />}
               </button>
@@ -133,6 +137,7 @@ export default function CMSManager() {
                 onClick={() => handleDelete(c.id)}
                 className="p-1.5 rounded hover:bg-bg transition-colors"
                 title="Delete"
+                aria-label={`Delete ${c.title}`}
               >
                 <Trash2 className="w-3 h-3 text-danger" />
               </button>

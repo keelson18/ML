@@ -25,8 +25,8 @@ router.delete('/cms/:id', authMiddleware, adminMiddleware, cmsController.remove)
 router.put('/cms/:id/publish', authMiddleware, adminMiddleware, cmsController.togglePublish);
 
 // ML
-router.get('/ml/prediction', mlController.getCachedPrediction);
-router.post('/ml/predict', mlController.predict);
+router.get('/ml/prediction', authMiddleware, mlController.getCachedPrediction);
+router.post('/ml/predict', authMiddleware, mlController.predict);
 router.get('/ml/versions', authMiddleware, adminMiddleware, mlController.getModelVersions);
 
 // Trading

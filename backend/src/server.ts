@@ -6,15 +6,17 @@ import { decisionRoutes } from './routes/decisions';
 import { marketRoutes } from './routes/market';
 import { paperRoutes } from './routes/paper';
 import { positionRoutes } from './routes/positions';
+import { registerAuthGuards } from './middleware/fastify-auth';
 
 export function buildServer() {
   const app = Fastify({ logger: true });
+  registerAuthGuards(app);
   const pipeline = new AutonomousPipeline({ enableExecution: process.env.AUTONOMOUS_TRADING !== 'false' });
   void app.register(cors, { origin: true });
   void app.register(decisionRoutes, pipeline);
   void app.register(marketRoutes);
   void app.register(paperRoutes);
-  void app.register(positionRoutes, pipeline);
+  void app.register(positionRoutes);
   app.get('/health', async () => ({ status: 'ok', service: 'quantum-api', autonomy: pipeline.getSnapshot() }));
   return { app, pipeline };
 }
@@ -22,7 +24,7 @@ export function buildServer() {
 export async function startServer() {
   const { app, pipeline } = buildServer();
   const scheduler = new AutonomousScheduler(pipeline, ['BTCUSDT', 'ETHUSDT'], '15m');
-  const port = Number(process.env.PORT ?? 8787);
+  const port = Number(process.env.AUTONOMY_PORT ?? process.env.PORT ?? 8787);
   try {
     await app.listen({ port, host: '0.0.0.0' });
   } catch (error) {

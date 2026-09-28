@@ -72,7 +72,7 @@ export default function BacktestingCenter({ candles, timeframe, symbol, theme }:
     { label: 'Win Rate', value: `${(result.metrics.winRate * 100).toFixed(1)}%`, color: 'text-success' },
     { label: 'Net Profit', value: `${result.metrics.totalReturn >= 0 ? '+' : ''}$${(lastRun.capital * result.metrics.totalReturn).toFixed(2)}`, color: result.metrics.totalReturn >= 0 ? 'text-success' : 'text-danger' },
     { label: 'Max Drawdown', value: `${(result.metrics.maxDrawdown * 100).toFixed(1)}%`, color: 'text-danger' },
-    { label: 'Sharpe', value: result.metrics.sharpe.toFixed(2), color: 'text-primary' },
+    { label: 'Sharpe', value: result.metrics.totalTrades >= 2 ? result.metrics.sharpe.toFixed(2) : '--', color: result.metrics.totalTrades >= 2 ? 'text-primary' : 'text-muted' },
     { label: 'Total Trades', value: String(result.metrics.totalTrades), color: 'text-text' },
     { label: 'Timeframe', value: timeframe, color: 'text-primary' },
   ] : [
@@ -95,20 +95,20 @@ export default function BacktestingCenter({ candles, timeframe, symbol, theme }:
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-        <Field label="Strategy">
-          <select value={selectedStrategy} onChange={(event) => { setSelectedStrategy(event.target.value); setResult(null); setRunError(null); }} className="control-input">
+        <Field id="backtest-strategy" label="Strategy">
+          <select id="backtest-strategy" value={selectedStrategy} onChange={(event) => { setSelectedStrategy(event.target.value); setResult(null); setRunError(null); }} className="control-input">
             {STRATEGY_REGISTRY.map((strategy) => <option key={strategy.id} value={strategy.id}>{strategy.name}</option>)}
           </select>
         </Field>
         <Field label="Asset"><div className="control-readonly">{symbol}</div></Field>
-        <Field label="Date Range">
-          <select value={range} onChange={(event) => setRange(event.target.value === 'all' ? 'all' : Number(event.target.value) as 100 | 500)} className="control-input">
+        <Field id="backtest-range" label="Date Range">
+          <select id="backtest-range" value={range} onChange={(event) => setRange(event.target.value === 'all' ? 'all' : Number(event.target.value) as 100 | 500)} className="control-input">
             <option value={100}>Last 100 candles</option>
             <option value={500}>Last 500 candles</option>
             <option value="all">All available data ({candles.length})</option>
           </select>
         </Field>
-        <Field label="Initial Capital"><input type="number" min="1" step="100" value={capitalInput} onChange={(event) => { setCapitalInput(event.target.value); setRunError(null); }} className="control-input" /></Field>
+        <Field id="backtest-capital" label="Initial Capital"><input id="backtest-capital" type="number" min="1" step="100" value={capitalInput} onChange={(event) => { setCapitalInput(event.target.value); setRunError(null); }} className="control-input" /></Field>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
@@ -132,8 +132,8 @@ export default function BacktestingCenter({ candles, timeframe, symbol, theme }:
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <div className="bg-surface border border-border rounded-xl p-4"><label className="block text-xs text-muted mb-1.5">{label}</label>{children}</div>;
+function Field({ id, label, children }: { id?: string; label: string; children: React.ReactNode }) {
+  return <div className="bg-surface border border-border rounded-xl p-4">{id ? <label htmlFor={id} className="block text-xs text-muted mb-1.5">{label}</label> : <div className="block text-xs text-muted mb-1.5">{label}</div>}{children}</div>;
 }
 
 function formatTime(time: number): string {

@@ -38,8 +38,9 @@ export async function getAllProfiles(req: AuthenticatedRequest, res: Response, n
 
 export async function updateProfileRole(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { userId, role } = req.body as { userId: string; role: string };
+    const { userId, role } = req.body as { userId?: string; role?: string };
     if (!req.accessToken) { res.status(401).json({ error: 'Unauthorized' }); return; }
+    if (!userId || (role !== 'user' && role !== 'admin')) { res.status(400).json({ error: 'A valid user ID and role are required.' }); return; }
     await authService.updateProfileRole(req.accessToken, userId, role);
     res.json({ success: true });
   } catch (e) { next(e); }

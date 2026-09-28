@@ -37,11 +37,11 @@ const NAV_GROUPS = [
 
 export default function Sidebar({ activeTab, onTabChange, isAdmin, collapsed, mobileOpen = false, onToggle }: Props) {
   return (
-    <aside className={`app-sidebar ${collapsed ? 'is-collapsed' : ''} ${mobileOpen ? 'is-mobile-open' : ''}`}>
+    <aside id="app-navigation" className={`app-sidebar ${collapsed ? 'is-collapsed' : ''} ${mobileOpen ? 'is-mobile-open' : ''}`}>
       <div className="sidebar-brand">
         {!collapsed && <div className="flex items-center gap-2 min-w-0"><div className="sidebar-mark"><Activity className="w-3.5 h-3.5 text-primary" /></div><span className="sidebar-wordmark">Quantum <small>INTELLIGENCE</small></span></div>}
         {collapsed && <div className="w-full flex justify-center"><div className="sidebar-mark"><Activity className="w-3.5 h-3.5 text-primary" /></div></div>}
-        {onToggle && <button onClick={onToggle} className="sidebar-toggle" title={mobileOpen ? 'Close navigation' : collapsed ? 'Expand navigation' : 'Collapse navigation'}>{mobileOpen ? <X className="w-4 h-4" /> : collapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}</button>}
+        {onToggle && <button onClick={onToggle} className="sidebar-toggle" aria-label={mobileOpen ? 'Close navigation' : collapsed ? 'Expand navigation' : 'Collapse navigation'} title={mobileOpen ? 'Close navigation' : collapsed ? 'Expand navigation' : 'Collapse navigation'}>{mobileOpen ? <X className="w-4 h-4" /> : collapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}</button>}
       </div>
 
       <nav className="sidebar-nav" aria-label="Main navigation">

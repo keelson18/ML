@@ -80,12 +80,12 @@ export default function RiskManagement() {
           <h3 className="text-xs font-medium text-muted mb-3">Position Sizing Calculator</h3>
           <div className="space-y-3">
             <div>
-              <label className="block text-[10px] text-muted mb-1">Account Balance</label>
-              <input type="number" value={balance} onChange={(event) => setBalance(Number(event.target.value))} className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-text text-xs focus:outline-none focus:border-primary" />
+              <label htmlFor="risk-balance" className="block text-[10px] text-muted mb-1">Account Balance</label>
+              <input id="risk-balance" type="number" value={balance} onChange={(event) => setBalance(Number(event.target.value))} className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-text text-xs focus:outline-none focus:border-primary" />
             </div>
             <div>
-              <label className="block text-[10px] text-muted mb-1">Risk %</label>
-              <input type="number" min="0" max="2" step="0.1" value={riskPercent} onChange={(event) => setRiskPercent(Number(event.target.value))} className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-text text-xs focus:outline-none focus:border-primary" />
+              <label htmlFor="risk-percent" className="block text-[10px] text-muted mb-1">Risk %</label>
+              <input id="risk-percent" type="number" min="0" max="2" step="0.1" value={riskPercent} onChange={(event) => setRiskPercent(Number(event.target.value))} className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-text text-xs focus:outline-none focus:border-primary" />
             </div>
             <div className="grid grid-cols-2 gap-2"><label className="text-[10px] text-muted">Entry<input type="number" value={entry} onChange={(event) => setEntry(Number(event.target.value))} className="mt-1 w-full px-2 py-1.5 rounded bg-bg border border-border text-text text-xs" /></label><label className="text-[10px] text-muted">Stop<input type="number" value={stop} onChange={(event) => setStop(Number(event.target.value))} className="mt-1 w-full px-2 py-1.5 rounded bg-bg border border-border text-text text-xs" /></label></div>
             <div className="grid grid-cols-2 gap-2 pt-2 border-t border-border/50"><div><div className="text-[10px] text-muted">Risk amount</div><div className="text-sm font-semibold text-warning">${riskAmount.toFixed(2)}</div></div><div><div className="text-[10px] text-muted">Position size</div><div className="text-sm font-semibold text-primary">{positionSize.toFixed(4)}</div></div></div>{safeEntry === safeStop && safeEntry > 0 && <div className="text-xs text-warning">Entry and stop must be different to calculate position size.</div>}

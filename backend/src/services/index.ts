@@ -62,16 +62,38 @@ export const cmsService = {
 };
 
 export const mlService = {
-  async fetchCachedPrediction(symbol: string, timeframe: string): Promise<MLPrediction | null> {
-    return mlRepository.fetchCachedPrediction(symbol, timeframe);
+  async fetchCachedPrediction(symbol: string, timeframe: string, accessToken?: string): Promise<MLPrediction | null> {
+    return mlRepository.fetchCachedPrediction(symbol, timeframe, accessToken);
   },
 
   async fetchModelVersions(accessToken: string) {
     return mlRepository.fetchModelVersions(accessToken);
   },
 
-  async predict(symbol: string, timeframe: string): Promise<MLPrediction | null> {
-    return mlRepository.fetchCachedPrediction(symbol, timeframe);
+  async predict(symbol: string, timeframe: string, accessToken: string): Promise<MLPrediction> {
+    if (!config.supabaseUrl || !config.supabaseAnonKey) {
+      throw new Error('Supabase URL and anon key are required for ML predictions.');
+    }
+    const baseUrl = config.supabaseUrl.replace(/\/+$/, '');
+    const response = await fetch(`${baseUrl}/functions/v1/ml-predict/predict`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: config.supabaseAnonKey,
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ pair: symbol, timeframe }),
+    });
+    const payload = await response.json() as MLPrediction | { error?: string };
+    if (!response.ok) {
+      const error = new Error('error' in payload && payload.error ? payload.error : `ML prediction failed (${response.status}).`);
+      Object.assign(error, { status: response.status });
+      throw error;
+    }
+    if (!('pair' in payload) || !payload.pair || !payload.timeframe || !payload.prediction) {
+      throw new Error('ML prediction service returned an invalid response.');
+    }
+    return payload;
   },
 };
 

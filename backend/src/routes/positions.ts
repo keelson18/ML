@@ -1,6 +1,10 @@
 import type { FastifyInstance } from 'fastify';
-import { AutonomousPipeline } from '../autonomy/pipeline';
+import { getAccount } from '../services/paperTradingService';
 
-export async function positionRoutes(app: FastifyInstance, pipeline: AutonomousPipeline) {
-  app.get('/api/v1/paper/positions', async () => pipeline.getAccount());
+export async function positionRoutes(app: FastifyInstance) {
+  app.get('/api/v1/paper/positions', { preHandler: app.requireAuth }, async (request, reply) => {
+    const accountId = request.authenticatedUserId;
+    if (!accountId) return reply.code(401).send({ error: 'Authentication required' });
+    return getAccount(accountId);
+  });
 }

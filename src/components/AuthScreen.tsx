@@ -17,11 +17,13 @@ export default function AuthScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setNotice(null);
 
     if (mode === 'signup') {
       // Validate fields
@@ -61,7 +63,7 @@ export default function AuthScreen() {
       if (error) {
         setError(error);
       } else {
-        setError('Account created successfully. You can now sign in.');
+        setNotice('Account created successfully. You can now sign in.');
       }
     }
     setLoading(false);
@@ -70,9 +72,10 @@ export default function AuthScreen() {
   const toggleMode = () => {
     setMode(mode === 'signin' ? 'signup' : 'signin');
     setError(null);
+    setNotice(null);
   };
 
-  const inputClass = "w-full px-3 py-2.5 rounded-lg bg-surface border border-border text-text placeholder:text-muted/60 focus:outline-none focus:border-primary transition-colors pr-10";
+  const inputClass = "w-full px-3 py-2.5 rounded-lg bg-surface border border-border text-text placeholder:text-muted focus:outline-none focus:border-primary transition-colors pr-10";
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4 bg-bg text-text">
@@ -93,24 +96,26 @@ export default function AuthScreen() {
               {/* First name + Last name row */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs text-muted mb-1.5">First Name</label>
+                  <label htmlFor="signup-first-name" className="block text-xs text-muted mb-1.5">First Name</label>
                   <input
+                    id="signup-first-name"
                     type="text"
                     required
                     value={firstName}
                     onChange={(e) => setFirstName(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-lg bg-surface border border-border text-text placeholder:text-muted/60 focus:outline-none focus:border-primary transition-colors"
+                    className="w-full px-3 py-2.5 rounded-lg bg-surface border border-border text-text placeholder:text-muted focus:outline-none focus:border-primary transition-colors"
                     placeholder="John"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-muted mb-1.5">Last Name</label>
+                  <label htmlFor="signup-last-name" className="block text-xs text-muted mb-1.5">Last Name</label>
                   <input
+                    id="signup-last-name"
                     type="text"
                     required
                     value={lastName}
                     onChange={(e) => setLastName(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-lg bg-surface border border-border text-text placeholder:text-muted/60 focus:outline-none focus:border-primary transition-colors"
+                    className="w-full px-3 py-2.5 rounded-lg bg-surface border border-border text-text placeholder:text-muted focus:outline-none focus:border-primary transition-colors"
                     placeholder="Doe"
                   />
                 </div>
@@ -118,35 +123,38 @@ export default function AuthScreen() {
 
               {/* Email */}
               <div>
-                <label className="block text-xs text-muted mb-1.5">Email</label>
+                <label htmlFor="email" className="block text-xs text-muted mb-1.5">Email</label>
                 <input
+                  id="email"
                   type="email"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-lg bg-surface border border-border text-text placeholder:text-muted/60 focus:outline-none focus:border-primary transition-colors"
+                  className="w-full px-3 py-2.5 rounded-lg bg-surface border border-border text-text placeholder:text-muted focus:outline-none focus:border-primary transition-colors"
                   placeholder="you@example.com"
                 />
               </div>
 
               {/* Phone */}
               <div>
-                <label className="block text-xs text-muted mb-1.5">Phone</label>
+                <label htmlFor="signup-phone" className="block text-xs text-muted mb-1.5">Phone</label>
                 <input
+                  id="signup-phone"
                   type="tel"
                   required
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-lg bg-surface border border-border text-text placeholder:text-muted/60 focus:outline-none focus:border-primary transition-colors"
+                  className="w-full px-3 py-2.5 rounded-lg bg-surface border border-border text-text placeholder:text-muted focus:outline-none focus:border-primary transition-colors"
                   placeholder="+1 (555) 123-4567"
                 />
               </div>
 
               {/* Password with eye toggle */}
               <div>
-                <label className="block text-xs text-muted mb-1.5">Password</label>
+                <label htmlFor="password" className="block text-xs text-muted mb-1.5">Password</label>
                 <div className="relative">
                   <input
+                    id="password"
                     type={showPassword ? 'text' : 'password'}
                     required
                     minLength={8}
@@ -158,8 +166,8 @@ export default function AuthScreen() {
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-text transition-colors"
-                    tabIndex={-1}
                   >
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
@@ -168,9 +176,10 @@ export default function AuthScreen() {
 
               {/* Confirm Password with eye toggle */}
               <div>
-                <label className="block text-xs text-muted mb-1.5">Confirm Password</label>
+                <label htmlFor="confirm-password" className="block text-xs text-muted mb-1.5">Confirm Password</label>
                 <div className="relative">
                   <input
+                    id="confirm-password"
                     type={showConfirmPassword ? 'text' : 'password'}
                     required
                     minLength={8}
@@ -182,8 +191,8 @@ export default function AuthScreen() {
                   <button
                     type="button"
                     onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-text transition-colors"
-                    tabIndex={-1}
                   >
                     {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
@@ -196,22 +205,24 @@ export default function AuthScreen() {
             <>
               {/* Email */}
               <div>
-                <label className="block text-xs text-muted mb-1.5">Email</label>
+                <label htmlFor="email" className="block text-xs text-muted mb-1.5">Email</label>
                 <input
+                  id="email"
                   type="email"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-lg bg-surface border border-border text-text placeholder:text-muted/60 focus:outline-none focus:border-primary transition-colors"
+                  className="w-full px-3 py-2.5 rounded-lg bg-surface border border-border text-text placeholder:text-muted focus:outline-none focus:border-primary transition-colors"
                   placeholder="you@example.com"
                 />
               </div>
 
               {/* Password with eye toggle */}
               <div>
-                <label className="block text-xs text-muted mb-1.5">Password</label>
+                <label htmlFor="password" className="block text-xs text-muted mb-1.5">Password</label>
                 <div className="relative">
                   <input
+                    id="password"
                     type={showPassword ? 'text' : 'password'}
                     required
                     value={password}
@@ -222,8 +233,8 @@ export default function AuthScreen() {
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-text transition-colors"
-                    tabIndex={-1}
                   >
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
@@ -233,15 +244,16 @@ export default function AuthScreen() {
           )}
 
           {error && (
-            <div className="text-sm text-danger bg-danger/10 border border-danger/20 rounded-lg px-3 py-2">
+            <div role="alert" className="text-sm text-danger bg-danger/10 border border-danger/20 rounded-lg px-3 py-2">
               {error}
             </div>
           )}
+          {notice && <div role="status" className="text-sm text-success bg-success/10 border border-success/20 rounded-lg px-3 py-2">{notice}</div>}
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 rounded-lg bg-primary text-white font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
+            className="w-full py-2.5 rounded-lg bg-primary text-black font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
           >
             {loading ? 'Please wait…' : mode === 'signin' ? 'Sign in' : 'Create account'}
           </button>
@@ -257,4 +269,3 @@ export default function AuthScreen() {
     </div>
   );
 }
-

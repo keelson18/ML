@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Brain, RefreshCw, Play, StopCircle } from 'lucide-react';
+import { Brain, RefreshCw } from 'lucide-react';
 import { mlApi } from '../../api';
 
 interface ModelRecord {
@@ -14,6 +14,7 @@ interface ModelRecord {
 export default function ModelManagement() {
   const [models, setModels] = useState<ModelRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   const fetchModels = async () => {
     setLoading(true);
@@ -26,15 +27,17 @@ export default function ModelManagement() {
             id: m.model_version,
             model_name: 'ML Predictor',
             model_version: m.model_version,
-            status: 'active',
+            status: 'registered',
             accuracy: null,
             last_trained: m.created_at,
           });
         }
       }
       setModels(Array.from(uniqueVersions.values()));
+      setLoadError(false);
     } catch {
       setModels([]);
+      setLoadError(true);
     }
     setLoading(false);
   };
@@ -49,11 +52,12 @@ export default function ModelManagement() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold">ML Model Registry</h3>
-        <button onClick={fetchModels} className="p-1.5 rounded hover:bg-bg transition-colors">
+        <button onClick={fetchModels} aria-label="Refresh models" className="p-1.5 rounded hover:bg-bg transition-colors">
           <RefreshCw className="w-3.5 h-3.5 text-muted" />
         </button>
       </div>
-      {models.length === 0 && (
+      {loadError && <div role="alert" className="text-sm text-warning text-center py-8">Could not load models. Retry to check the registry again.</div>}
+      {!loadError && models.length === 0 && (
         <div className="text-sm text-muted text-center py-8">No models registered yet.</div>
       )}
       <div className="space-y-1.5">
@@ -67,9 +71,7 @@ export default function ModelManagement() {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <span className={`text-xs px-2 py-0.5 rounded-full ${
-                m.status === 'active' ? 'bg-success/15 text-success' : 'bg-muted/15 text-muted'
-              }`}>
+              <span className="text-xs px-2 py-0.5 rounded-full bg-muted/15 text-muted">
                 {m.status}
               </span>
               {m.last_trained && (
@@ -77,14 +79,7 @@ export default function ModelManagement() {
                   {new Date(m.last_trained).toLocaleDateString()}
                 </span>
               )}
-              <div className="flex gap-1">
-                <button className="p-1.5 rounded hover:bg-bg transition-colors text-success" title="Start training">
-                  <Play className="w-3 h-3" />
-                </button>
-                <button className="p-1.5 rounded hover:bg-bg transition-colors text-danger" title="Stop">
-                  <StopCircle className="w-3 h-3" />
-                </button>
-              </div>
+
             </div>
           </div>
         ))}

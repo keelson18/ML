@@ -10,13 +10,22 @@ const Ctx = createContext<ThemeCtx>({ theme: 'dark', toggle: () => {} });
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() => {
-    const saved = localStorage.getItem('qi-theme') as Theme | null;
-    return saved ?? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    try {
+      const saved = localStorage.getItem('qi-theme');
+      if (saved === 'dark' || saved === 'light') return saved;
+    } catch {
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   });
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
-    localStorage.setItem('qi-theme', theme);
+    try {
+      localStorage.setItem('qi-theme', theme);
+    } catch {
+      return;
+    }
   }, [theme]);
 
   return (

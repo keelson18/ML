@@ -202,9 +202,9 @@ async function authenticatedUser(req: Request): Promise<boolean> {
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL') ?? '',
     Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-    { global: { headers: { Authorization: authorization } } },
   );
-  const { data: { user }, error } = await supabase.auth.getUser();
+  const accessToken = authorization.slice('Bearer '.length);
+  const { data: { user }, error } = await supabase.auth.getUser(accessToken);
   return !error && user !== null;
 }
 

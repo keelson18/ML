@@ -49,6 +49,7 @@ export async function adminMiddleware(req: AuthenticatedRequest, res: Response, 
 }
 
 export function errorHandler(err: Error, _req: Request, res: Response, _next: NextFunction): void {
+  const status = 'status' in err && typeof err.status === 'number' ? err.status : 500;
   console.error('[error]', err.message);
-  res.status(500).json({ error: 'Internal server error' });
+  res.status(status).json({ error: status < 500 ? err.message : 'Internal server error' });
 }

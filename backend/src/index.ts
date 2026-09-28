@@ -13,6 +13,7 @@ app.use(cors({ origin: config.corsOrigin }));
 app.use(express.json({ limit: '2mb' }));
 app.use(morgan('dev'));
 
+app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'http-api' }));
 app.use('/api', routes);
 
 app.use((_req, res) => {
@@ -22,5 +23,5 @@ app.use((_req, res) => {
 app.use(errorHandler);
 
 app.listen(config.port, () => {
-  console.log(`[backend] API server running on http://localhost:${config.port}`);
+  console.log(`Backend server running on http://localhost:${config.port}`);
 });

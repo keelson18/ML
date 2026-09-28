@@ -7,8 +7,8 @@ describe('observability', () => {
     const correlationId = createCorrelationId();
     const event = createLogEvent('info', 'test.event', correlationId, {
       userId: 'user-1',
-      apiKey: 'do-not-log',
-      nested: { authorization: 'Bearer secret' },
+      apiKey: 'test-api-key-placeholder',
+      nested: { authorization: 'Bearer test-token' },
     });
 
     expect(correlationId).toMatch(/^corr-/);

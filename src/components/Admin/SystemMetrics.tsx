@@ -44,7 +44,7 @@ export default function SystemMetrics() {
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         {METRIC_CARDS.map((card) => {
           const metric = metrics[card.name];
-          const value = metric?.metric_value ?? 0;
+          const value = metric?.metric_value;
           const Icon = card.icon;
           return (
             <div key={card.name} className="bg-bg/50 border border-border/50 rounded-lg p-3">
@@ -53,7 +53,7 @@ export default function SystemMetrics() {
                 <span className="text-xs text-muted">{card.label}</span>
               </div>
               <div className="text-lg font-semibold tabular-nums">
-                {value.toLocaleString(undefined, { maximumFractionDigits: 2 })}{card.unit}
+                {value === undefined ? 'Unavailable' : `${card.unit === '$' ? card.unit : ''}${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}${card.unit === '%' ? card.unit : ''}`}
               </div>
               {metric && (
                 <div className="text-[10px] text-muted mt-1">

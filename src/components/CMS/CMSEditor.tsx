@@ -58,15 +58,16 @@ export default function CMSEditor({ content, onSaved, onCancel }: Props) {
         <h3 className="text-sm font-semibold">
           {content ? 'Edit Content' : 'New Content'}
         </h3>
-        <button onClick={onCancel} className="p-1.5 rounded hover:bg-bg transition-colors">
+        <button onClick={onCancel} aria-label="Close editor" className="p-1.5 rounded hover:bg-bg transition-colors">
           <X className="w-4 h-4" />
         </button>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label className="block text-xs text-muted mb-1">Title</label>
+          <label htmlFor="cms-title" className="block text-xs text-muted mb-1">Title</label>
           <input
+            id="cms-title"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-text text-sm focus:outline-none focus:border-primary"
@@ -74,8 +75,9 @@ export default function CMSEditor({ content, onSaved, onCancel }: Props) {
           />
         </div>
         <div>
-          <label className="block text-xs text-muted mb-1">Slug</label>
+          <label htmlFor="cms-slug" className="block text-xs text-muted mb-1">Slug</label>
           <input
+            id="cms-slug"
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
             className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-text text-sm focus:outline-none focus:border-primary"
@@ -85,8 +87,9 @@ export default function CMSEditor({ content, onSaved, onCancel }: Props) {
       </div>
 
       <div>
-        <label className="block text-xs text-muted mb-1">Excerpt</label>
+        <label htmlFor="cms-excerpt" className="block text-xs text-muted mb-1">Excerpt</label>
         <input
+          id="cms-excerpt"
           value={excerpt}
           onChange={(e) => setExcerpt(e.target.value)}
           className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-text text-sm focus:outline-none focus:border-primary"
@@ -96,8 +99,9 @@ export default function CMSEditor({ content, onSaved, onCancel }: Props) {
 
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label className="block text-xs text-muted mb-1">Type</label>
+          <label htmlFor="cms-type" className="block text-xs text-muted mb-1">Type</label>
           <select
+            id="cms-type"
             value={contentType}
             onChange={(e) => setContentType(e.target.value as CMSContentType)}
             className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-text text-sm focus:outline-none focus:border-primary"
@@ -108,8 +112,9 @@ export default function CMSEditor({ content, onSaved, onCancel }: Props) {
           </select>
         </div>
         <div>
-          <label className="block text-xs text-muted mb-1">Tags (comma-separated)</label>
+          <label htmlFor="cms-tags" className="block text-xs text-muted mb-1">Tags (comma-separated)</label>
           <input
+            id="cms-tags"
             value={tags}
             onChange={(e) => setTags(e.target.value)}
             className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-text text-sm focus:outline-none focus:border-primary"
@@ -119,8 +124,9 @@ export default function CMSEditor({ content, onSaved, onCancel }: Props) {
       </div>
 
       <div>
-        <label className="block text-xs text-muted mb-1">Body</label>
+        <label htmlFor="cms-body" className="block text-xs text-muted mb-1">Body</label>
         <textarea
+          id="cms-body"
           value={body}
           onChange={(e) => setBody(e.target.value)}
           rows={10}
@@ -164,4 +170,3 @@ export default function CMSEditor({ content, onSaved, onCancel }: Props) {
     </div>
   );
 }
-

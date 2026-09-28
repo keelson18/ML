@@ -1,17 +1,16 @@
-const API_BASE = (import.meta.env.VITE_BACKEND_URL as string | undefined)?.replace(/\/+$/, '');
-const API_TIMEOUT_MS = 10000;
-export const backendConfigured = Boolean(API_BASE);
+const API_BASE = import.meta.env.DEV ? '' : (import.meta.env.VITE_BACKEND_URL as string | undefined)?.replace(/\/+$/, '') ?? '';
+import type { Candle, Timeframe } from './types';
+import { fetchWithTimeout } from './providers/request';
+import { supabase } from './supabase';
+
+const API_TIMEOUT_MS = 10_000;
 
 async function request(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
-  try {
-    return await fetch(input, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timeout);
-  }
+  const { data: { session } } = await supabase.auth.getSession();
+  const headers = new Headers(init?.headers);
+  if (session?.access_token) headers.set('Authorization', `Bearer ${session.access_token}`);
+  return fetchWithTimeout(input, { ...init, headers }, API_TIMEOUT_MS);
 }
-import type { Candle, Timeframe } from './types';
 
 export interface BackendDecision {
   decision: 'BUY' | 'SELL' | 'HOLD' | 'WATCH' | 'NO_TRADE';
@@ -34,30 +33,19 @@ export interface AutonomyStatus {
   lastError?: string;
 }
 
-const OFFLINE_STATUS: AutonomyStatus = {
-  state: 'OFFLINE',
-  processedDecisions: 0,
-  executedOrders: 0,
-  skippedRuns: 0,
-  consecutiveFailures: 0,
-};
-
 export async function fetchAutonomyStatus(): Promise<AutonomyStatus> {
-  if (!API_BASE) return OFFLINE_STATUS;
   const response = await request(`${API_BASE}/api/v1/autonomy/status`);
   if (!response.ok) throw new Error(`Autonomy status ${response.status}`);
   return response.json() as Promise<AutonomyStatus>;
 }
 
 export async function setAutonomyState(action: 'start' | 'pause') {
-  if (!API_BASE) throw new Error('Backend URL is not configured.');
   const response = await request(`${API_BASE}/api/v1/autonomy/${action}`, { method: 'POST' });
   if (!response.ok) throw new Error(`Autonomy ${action} ${response.status}`);
   return response.json() as Promise<AutonomyStatus>;
 }
 
 export async function requestBackendDecision(symbol: string, timeframe: Timeframe, candles: Candle[]): Promise<BackendDecision | null> {
-  if (!API_BASE) return null;
   const response = await request(`${API_BASE}/api/v1/analyze`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -101,9 +89,8 @@ export interface PaperAccount {
   trades: PaperTrade[];
 }
 
-export async function fetchPaperAccount(accountId = 'default'): Promise<PaperAccount> {
-  if (!API_BASE) throw new Error('Backend URL is not configured.');
-  const response = await request(`${API_BASE}/api/v1/paper/positions?accountId=${encodeURIComponent(accountId)}`);
+export async function fetchPaperAccount(): Promise<PaperAccount> {
+  const response = await request(`${API_BASE}/api/v1/paper/positions`);
   if (!response.ok) throw new Error(`Paper account ${response.status}`);
   return response.json() as Promise<PaperAccount>;
 }

@@ -21,9 +21,9 @@ function isAlertRule(value: unknown): value is AlertRule {
 }
 
 function loadAlerts(storageKey: string): AlertRule[] {
-  const stored = localStorage.getItem(storageKey);
-  if (!stored) return [];
   try {
+    const stored = localStorage.getItem(storageKey);
+    if (!stored) return [];
     const parsed: unknown = JSON.parse(stored);
     return Array.isArray(parsed) ? parsed.filter(isAlertRule) : [];
   } catch {
@@ -41,7 +41,7 @@ export default function AlertsPage({ userId }: Props) {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    localStorage.setItem(storageKey, JSON.stringify(alerts));
+    try { localStorage.setItem(storageKey, JSON.stringify(alerts)); } catch { return; }
   }, [alerts, storageKey]);
 
   const createAlert = (event: FormEvent<HTMLFormElement>) => {

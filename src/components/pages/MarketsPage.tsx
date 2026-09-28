@@ -48,7 +48,7 @@ export default function MarketsPage() {
 
   return (
     <div className="page-frame space-y-6">
-      <div className="page-heading"><div className="page-heading-copy"><div className="page-eyebrow"><BarChart3 className="w-3.5 h-3.5" /> Market overview</div><h1>Markets</h1><p>Browse supported instruments and the latest provider-backed daily quote where a data source is configured.</p></div><button onClick={loadQuotes} className="p-2 rounded-lg hover:bg-surface text-muted" title="Refresh quotes"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /></button></div>
+      <div className="page-heading"><div className="page-heading-copy"><div className="page-eyebrow"><BarChart3 className="w-3.5 h-3.5" /> Market overview</div><h1>Markets</h1><p>Browse supported instruments and the latest provider-backed daily quote where a data source is configured.</p></div><button onClick={loadQuotes} className="p-2 rounded-lg hover:bg-surface text-muted" title="Refresh quotes" aria-label="Refresh market quotes"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /></button></div>
       <div className="flex gap-1 p-1 rounded-lg bg-surface border border-border w-fit max-w-full overflow-x-auto">{MARKET_TYPES.map((marketType) => <button key={marketType.value} onClick={() => setSelectedType(marketType.value)} className={`whitespace-nowrap px-3 py-1.5 rounded text-xs font-medium transition-colors ${selectedType === marketType.value ? 'bg-primary text-black' : 'text-muted hover:text-text'}`}>{marketType.icon} {marketType.label}</button>)}</div>
       {error && <div role="alert" className="text-xs text-warning bg-warning/10 border border-warning/20 rounded-lg p-3">{error}</div>}
 

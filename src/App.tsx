@@ -14,18 +14,16 @@ function Gate() {
       </div>
     );
   }
-  return session ? (
-    <ErrorBoundary>
-      <Dashboard />
-    </ErrorBoundary>
-  ) : <AuthScreen />;
+  return session ? <Dashboard /> : <AuthScreen />;
 }
 
 export default function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <Gate />
+        <ErrorBoundary>
+          <Gate />
+        </ErrorBoundary>
       </AuthProvider>
     </ThemeProvider>
   );

@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { api } from './client';
 import type { Session } from '../lib/supabase';
 import type { UserProfile, UserRole } from '../lib/types';
 
@@ -73,6 +74,6 @@ export const authApi = {
   },
 
   async updateProfileRole(userId: string, role: string): Promise<void> {
-    await supabase.from('profiles').update({ role }).eq('id', userId);
+    await api.put<{ success: boolean }>('/auth/profiles/role', { userId, role });
   },
 };

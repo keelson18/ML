@@ -37,7 +37,8 @@ export const authRepository = {
 
   async updateProfileRole(accessToken: string, userId: string, role: string): Promise<void> {
     const supabase = getSupabaseClientWithToken(accessToken);
-    await supabase.from('profiles').update({ role }).eq('id', userId);
+    const { error } = await supabase.from('profiles').update({ role }).eq('id', userId);
+    if (error) throw new Error(error.message);
   },
 };
 
@@ -85,8 +86,8 @@ export const cmsRepository = {
 };
 
 export const mlRepository = {
-  async fetchCachedPrediction(symbol: string, timeframe: string): Promise<MLPrediction | null> {
-    const supabase = getSupabaseAnonClient();
+  async fetchCachedPrediction(symbol: string, timeframe: string, accessToken?: string): Promise<MLPrediction | null> {
+    const supabase = accessToken ? getSupabaseClientWithToken(accessToken) : getSupabaseAnonClient();
     const { data } = await supabase.from('ml_predictions').select('*').eq('symbol', symbol).eq('timeframe', timeframe).maybeSingle();
     if (!data) return null;
     return {

@@ -147,5 +147,20 @@ export default function PriceChart({ candles, overlays, theme }: Props) {
     };
   }, [overlays, candles, theme]);
 
-  return <div ref={containerRef} className="w-full h-full" />;
+  const recentCandles = candles.slice(-10);
+  const latestClose = recentCandles[recentCandles.length - 1]?.close;
+  const chartDescription = latestClose === undefined
+    ? 'Price chart with no data available.'
+    : `Price chart with ${candles.length} bars. Latest close: ${latestClose}.`;
+
+  return (
+    <div className="relative w-full h-full">
+      <div ref={containerRef} role="img" aria-label={chartDescription} className="w-full h-full" />
+      <table className="sr-only">
+        <caption>Latest chart values</caption>
+        <thead><tr><th scope="col">Time</th><th scope="col">Open</th><th scope="col">High</th><th scope="col">Low</th><th scope="col">Close</th></tr></thead>
+        <tbody>{recentCandles.map((candle) => <tr key={candle.time}><th scope="row">{new Date(candle.time * 1000).toLocaleString()}</th><td>{candle.open}</td><td>{candle.high}</td><td>{candle.low}</td><td>{candle.close}</td></tr>)}</tbody>
+      </table>
+    </div>
+  );
 }
