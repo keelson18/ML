@@ -42,6 +42,6 @@ router.get('/metrics', authMiddleware, adminMiddleware, tradingController.getMet
 router.get('/markets/klines', marketController.getKlines);
 
 // Coach
-router.post('/coach/ask', coachController.ask);
+router.post('/coach/ask', authMiddleware, coachController.ask);
 
 export default router;

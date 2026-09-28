@@ -30,6 +30,6 @@ describe('backend paper position lifecycle', () => {
 
     expect(trades).toHaveLength(1);
     expect(trades[0].realizedPnl).toBeLessThan(0);
-    expect(getAccount(accountId).positions[0].status).toBe('closed');
+    expect((await getAccount(accountId)).positions[0].status).toBe('closed');
   });
 });

@@ -1,23 +1,45 @@
 import { closePaperPosition, simulatePaperOrder, type PaperAccountState, type PaperOrderRequest, type PaperTrade } from '../engines/paper-execution';
 import type { Candle } from '../../../src/lib/types';
 import type { TradeDecision } from '../engines/decision-engine';
+import { getSupabaseClient } from '../db';
 
-const accounts = new Map<string, PaperAccountState>();
-
-function getOrCreateAccount(accountId: string): PaperAccountState {
-  const existing = accounts.get(accountId);
-  if (existing) return existing;
+async function getOrCreateAccount(accountId: string): Promise<PaperAccountState> {
+  if (!accountId) throw new Error('An account ID is required.');
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from('paper_sim_accounts')
+    .select('state')
+    .eq('account_id', accountId)
+    .maybeSingle();
+  if (error) throw new Error(`Could not load paper account: ${error.message}`);
+  if (data?.state) {
+    return data.state as PaperAccountState;
+  }
   const account = { accountId, cash: 100_000, positions: [], trades: [] };
-  accounts.set(accountId, account);
+  const { error: insertError } = await supabase.from('paper_sim_accounts').insert({ account_id: accountId, state: account });
+  if (insertError && insertError.code !== '23505') throw new Error(`Could not create paper account: ${insertError.message}`);
+  if (insertError?.code === '23505') {
+    const { data: raced, error: reloadError } = await supabase.from('paper_sim_accounts').select('state').eq('account_id', accountId).single();
+    if (reloadError || !raced?.state) throw new Error(`Could not reload paper account: ${reloadError?.message ?? 'account missing'}`);
+    const restored = raced.state as PaperAccountState;
+    return restored;
+  }
   return account;
 }
 
-export function getAccount(accountId = 'default') {
+export function getAccount(accountId = 'autonomy:default') {
   return getOrCreateAccount(accountId);
 }
 
+async function saveAccount(account: PaperAccountState): Promise<void> {
+  const { error } = await getSupabaseClient()
+    .from('paper_sim_accounts')
+    .upsert({ account_id: account.accountId, state: account }, { onConflict: 'account_id' });
+  if (error) throw new Error(`Could not save paper account: ${error.message}`);
+}
+
 export async function manageOpenPositions(accountId: string, symbol: string, candle: Candle): Promise<PaperTrade[]> {
-  let account = getOrCreateAccount(accountId);
+  let account = await getOrCreateAccount(accountId);
   const openPositions = account.positions.filter((position) => position.status === 'open' && position.symbol === symbol);
   const closedTrades: PaperTrade[] = [];
 
@@ -38,7 +60,7 @@ export async function manageOpenPositions(accountId: string, symbol: string, can
     }
   }
 
-  accounts.set(accountId, account);
+  await saveAccount(account);
   return closedTrades;
 }
 
@@ -48,9 +70,33 @@ export async function executeDecision(input: {
   decision: TradeDecision;
   quantity?: number;
 }) {
-  const accountId = input.accountId ?? 'default';
+  const accountId = input.accountId ?? 'autonomy:default';
+  const account = await getOrCreateAccount(accountId);
   const decision = input.decision;
   const requestedPrice = decision.entry ?? 0;
+  const currentExposure = account.positions
+    .filter((position) => position.status === 'open')
+    .reduce((sum, position) => sum + position.quantity * position.entryPrice, 0);
+  const equity = Math.max(0, account.cash + currentExposure);
+  const quantity = input.quantity ?? (requestedPrice > 0 ? equity * 0.05 / requestedPrice : 0);
+  const stop = decision.invalidation;
+  const target = decision.targets?.[0]?.price;
+  const riskDistance = stop === undefined ? 0 : Math.abs(requestedPrice - stop);
+  const rewardDistance = target === undefined ? 0 : Math.abs(target - requestedPrice);
+  const directionValid = decision.decision === 'BUY'
+    ? stop !== undefined && target !== undefined && stop < requestedPrice && target > requestedPrice
+    : decision.decision === 'SELL'
+      ? stop !== undefined && target !== undefined && stop > requestedPrice && target < requestedPrice
+      : false;
+  const riskApproved = (decision.decision === 'BUY' || decision.decision === 'SELL')
+    && requestedPrice > 0
+    && stop !== undefined && stop > 0
+    && target !== undefined && target > 0
+    && directionValid && riskDistance > 0 && rewardDistance / riskDistance >= 1.5
+    && quantity > 0
+    && account.cash >= requestedPrice * quantity
+    && equity > 0
+    && (currentExposure + requestedPrice * quantity) / equity <= 0.5;
   const request: PaperOrderRequest = {
     orderId: `paper-${Date.now()}`,
     positionId: `position-${Date.now()}`,
@@ -58,9 +104,9 @@ export async function executeDecision(input: {
     assetId: input.symbol,
     symbol: input.symbol,
     decision,
-    riskApproved: decision.decision === 'BUY' || decision.decision === 'SELL',
-    portfolioApproved: decision.decision === 'BUY' || decision.decision === 'SELL',
-    quantity: input.quantity ?? 1,
+    riskApproved,
+    portfolioApproved: riskApproved,
+    quantity,
     requestedPrice,
     feeRate: 0.001,
     slippageRate: 0.0005,
@@ -68,7 +114,7 @@ export async function executeDecision(input: {
     takeProfit: decision.targets?.[0]?.price,
     executionVersion: 'paper-simulator-1.0.0',
   };
-  const result = simulatePaperOrder(getOrCreateAccount(accountId), request);
-  accounts.set(accountId, result.account);
+  const result = simulatePaperOrder(account, request);
+  await saveAccount(result.account);
   return result;
 }

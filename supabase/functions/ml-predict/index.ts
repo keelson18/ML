@@ -30,7 +30,7 @@ const TRAIN_FRACTION = 0.7; // chronological split, no shuffling
 
 // In-memory model state. NOTE: edge functions may reset between requests, so this is
 // best-effort. For durable state we persist to the `ml_predictions` table on each retrain.
-let modelState: {
+interface ModelState {
   weights: number[];
   bias: number;
   metrics: { accuracy: number; f1: number; samples: number };
@@ -39,7 +39,31 @@ let modelState: {
   version: string;
   mean: number[];
   std: number[];
-} | null = null;
+  pair: string;
+  timeframe: string;
+}
+const modelStates = new Map<string, ModelState>();
+const trainingFlights = new Map<string, Promise<{ ok: boolean; metrics: ModelMetrics; version: string }>>();
+const modelKey = (pair: string, timeframe: string) => `${pair}:${timeframe}`;
+
+async function ensureModel(supabase: SupabaseClient, pair: string, timeframe: string): Promise<ModelState> {
+  const key = modelKey(pair, timeframe);
+  const existing = modelStates.get(key);
+  if (existing) return existing;
+  let flight = trainingFlights.get(key);
+  if (!flight) {
+    flight = retrainInternal(supabase, pair, timeframe);
+    trainingFlights.set(key, flight);
+  }
+  try {
+    await flight;
+  } finally {
+    if (trainingFlights.get(key) === flight) trainingFlights.delete(key);
+  }
+  const trained = modelStates.get(key);
+  if (!trained) throw new Error('Model training did not produce a model.');
+  return trained;
+}
 
 // ---- Feature engineering ----
 // Computes the same feature set as the Python spec: multi-window returns, RSI, MACD,
@@ -218,12 +242,20 @@ Deno.serve(async (req: Request) => {
 
     // /model/status is public (metadata only); /predict and /retrain require the API key.
     if (path === 'model-status' || path === 'status') {
+      const pair = url.searchParams.get('pair');
+      const timeframe = url.searchParams.get('timeframe');
+      const modelState = pair && timeframe
+        ? modelStates.get(modelKey(pair, timeframe))
+        : Array.from(modelStates.values()).at(-1);
       return jsonResponse({
-        trained: modelState !== null,
+        trained: Boolean(modelState),
         version: modelState?.version ?? 'untrained',
         trainedAt: modelState?.trainedAt ?? null,
         metrics: modelState?.metrics ?? null,
         dataRange: modelState?.dataRange ?? null,
+        pair: modelState?.pair ?? null,
+        timeframe: modelState?.timeframe ?? null,
+        availableModels: [...modelStates.values()].map(({ pair: modelPair, timeframe: modelTimeframe, version }) => ({ pair: modelPair, timeframe: modelTimeframe, version })),
         horizon: PRED_HORIZON,
       });
     }
@@ -239,16 +271,15 @@ Deno.serve(async (req: Request) => {
         return jsonResponse({ error: 'Authentication required' }, 401);
       }
       const { pair, timeframe } = await req.json();
-      if (!pair || !timeframe) return jsonResponse({ error: 'pair and timeframe required' }, 400);
+      if (typeof pair !== 'string' || !/^[A-Z0-9]{2,20}$/.test(pair)
+        || typeof timeframe !== 'string' || !['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d', '1w', '1M'].includes(timeframe)) {
+        return jsonResponse({ error: 'A valid pair and timeframe are required' }, 400);
+      }
       // Rate limit: 30 predicts/min.
       if (!(await checkRate(supabase, `predict-${pair}-${timeframe}`, 30))) {
         return jsonResponse({ error: 'Rate limit exceeded' }, 429);
       }
-      // Lazily train on first predict if no model yet.
-      if (!modelState) {
-        await retrainInternal(supabase, pair, timeframe);
-      }
-      if (!modelState) return jsonResponse({ error: 'Model not available' }, 503);
+      const modelState = await ensureModel(supabase, pair, timeframe);
 
       const candles = await fetchCandles(pair, timeframe, 1000);
       const { features, valid } = computeFeatures(candles);
@@ -283,6 +314,10 @@ Deno.serve(async (req: Request) => {
       }
       if (!(await checkRate(supabase, 'retrain', 2))) return jsonResponse({ error: 'Rate limit exceeded' }, 429);
       const { pair = 'BTCUSDT', timeframe = '1h' } = await req.json().catch(() => ({}));
+      if (typeof pair !== 'string' || !/^[A-Z0-9]{2,20}$/.test(pair)
+        || typeof timeframe !== 'string' || !['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d', '1w', '1M'].includes(timeframe)) {
+        return jsonResponse({ error: 'A valid pair and timeframe are required' }, 400);
+      }
       const result = await retrainInternal(supabase, pair, timeframe);
       return jsonResponse(result);
     }
@@ -334,7 +369,7 @@ async function retrainInternal(supabase: SupabaseClient, symbol: string, timefra
   const f1 = 2 * (precision * recall) / (precision + recall || 1);
   const version = new Date().toISOString().slice(0, 10);
 
-  modelState = {
+  const modelState: ModelState = {
     weights: model.weights,
     bias: model.bias,
     metrics: { accuracy: Number(accuracy.toFixed(3)), f1: Number(f1.toFixed(3)), samples: n },
@@ -343,7 +378,10 @@ async function retrainInternal(supabase: SupabaseClient, symbol: string, timefra
     version,
     mean: model.mean,
     std: model.std,
+    pair: symbol,
+    timeframe,
   };
+  modelStates.set(modelKey(symbol, timeframe), modelState);
   console.log(`[ml] retrained on ${symbol} ${timeframe}: acc=${accuracy.toFixed(3)} f1=${f1.toFixed(3)} samples=${n}`);
   return { ok: true, metrics: modelState.metrics, version };
 }

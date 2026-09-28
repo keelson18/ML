@@ -7,7 +7,7 @@ import type { AutonomousConfig, AutonomousState, PipelineResult, PipelineSnapsho
 const DEFAULT_CONFIG: AutonomousConfig = {
   symbols: ['BTCUSDT', 'ETHUSDT'],
   timeframe: '15m',
-  accountId: 'default',
+  accountId: 'autonomy:default',
   enableExecution: true,
   killZonesUtc: [{ startHour: 8, endHour: 10 }, { startHour: 14, endHour: 17 }],
   maxConsecutiveFailures: 3,
@@ -56,7 +56,7 @@ export class AutonomousPipeline {
 
     this.transition('DECIDING');
     try {
-      const result = await analyze({ symbol, timeframe, candles: series.slice(0, -1) });
+      const result = await analyze({ symbol, timeframe, candles: series.slice(0, -1) }, this.config.accountId);
       const decision = result.decision.result;
       this.processedCandles.set(symbol, closedCandle.time);
       this.snapshot = { ...this.snapshot, state: 'MONITORING', lastRunAt: new Date().toISOString(), lastClosedCandle: { symbol, time: closedCandle.time }, processedDecisions: this.snapshot.processedDecisions + 1, consecutiveFailures: 0 };
