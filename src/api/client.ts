@@ -1,18 +1,5 @@
 import { supabase } from '../lib/supabase';
 
-const BASE_URL = '/api';
-
-// Keep token in-memory only — avoids XSS exposure via localStorage.
-let authToken: string | null = null;
-
-export function setAuthToken(token: string | null) {
-  authToken = token;
-}
-
-export function getAuthToken(): string | null {
-  return authToken;
-}
-
 export async function apiRequest<T = unknown>(
   path: string,
   options: RequestInit = {},
@@ -22,10 +9,9 @@ export async function apiRequest<T = unknown>(
     ...(options.headers as Record<string, string>),
   };
   const { data: { session } } = await supabase.auth.getSession();
-  const token = session?.access_token ?? getAuthToken();
-  if (token) headers['Authorization'] = `Bearer ${token}`;
+  if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
 
-  const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
+  const res = await fetch(path, { ...options, headers });
 
   if (!res.ok) {
     let message = `Request failed (${res.status})`;

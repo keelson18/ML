@@ -1,4 +1,4 @@
-export { api, setAuthToken, getAuthToken } from './client';
+export { api } from './client';
 export { authApi, type AuthSession } from './auth';
 export { cmsApi } from './cms';
 export { mlApi, coachApi, type CoachMessage } from './ml';
