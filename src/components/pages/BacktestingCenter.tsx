@@ -3,7 +3,7 @@ import { History, Play, RefreshCw } from 'lucide-react';
 import type { Candle, Timeframe } from '../../lib/types';
 import PriceChart from '../PriceChart';
 import { runBacktest, type BacktestResult } from '../../lib/backtest/engine';
-import { getStrategy, getStrategyAvailability, STRATEGY_REGISTRY, runStrategy } from '../../lib/strategies/index';
+import { getStrategy, getStrategyAvailability, STRATEGY_CATEGORIES, STRATEGY_REGISTRY, runStrategy } from '../../lib/strategies/index';
 
 interface Props {
   candles: Candle[];
@@ -24,10 +24,11 @@ export default function BacktestingCenter({ candles, timeframe, symbol, theme }:
   const [lastRun, setLastRun] = useState<{ strategyId: string; capital: number; candleCount: number } | null>(null);
 
   const selectedDefinition = getStrategy(selectedStrategy);
-  const availability = useMemo(() => getStrategyAvailability(candles, timeframe), [candles, timeframe]);
+  const testCandles = useMemo(() => range === 'all' ? candles : candles.slice(-range), [candles, range]);
+  const availability = useMemo(() => getStrategyAvailability(testCandles, timeframe), [testCandles, timeframe]);
   const selectedAvailability = availability.find(({ strategy }) => strategy.id === selectedStrategy);
-  const testCandles = range === 'all' ? candles : candles.slice(-range);
-  const canRun = Boolean(selectedDefinition && selectedAvailability?.eligible && testCandles.length >= 65 && Number(capitalInput) > 0);
+  const minimumTestCandles = Math.max(67, (selectedDefinition?.minCandles ?? 0) + 7);
+  const canRun = Boolean(selectedDefinition && selectedAvailability?.eligible && testCandles.length >= minimumTestCandles && Number(capitalInput) > 0);
 
   const runSelectedBacktest = () => {
     const capital = Number(capitalInput);
@@ -39,8 +40,8 @@ export default function BacktestingCenter({ candles, timeframe, symbol, theme }:
       setRunError(selectedAvailability?.reason ?? 'Select an eligible strategy.');
       return;
     }
-    if (testCandles.length < 65) {
-      setRunError('At least 65 candles are required for the default warmup and holding period.');
+    if (testCandles.length < minimumTestCandles) {
+      setRunError(`At least ${minimumTestCandles} candles are required for this strategy and the holding period.`);
       return;
     }
 
@@ -90,19 +91,22 @@ export default function BacktestingCenter({ candles, timeframe, symbol, theme }:
         <div className="page-heading-copy">
           <div className="page-eyebrow"><History className="w-3.5 h-3.5" /> Research workspace</div>
           <h1>Backtesting Center</h1>
-          <p>Run a portfolio-aware simulation against {symbol} using the same versioned strategy definitions as the live analysis desk.</p>
+          <p>Backtest one versioned strategy against the selected historical {symbol} candles using next-bar entries and a fixed holding period.</p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
         <Field id="backtest-strategy" label="Strategy">
           <select id="backtest-strategy" value={selectedStrategy} onChange={(event) => { setSelectedStrategy(event.target.value); setResult(null); setRunError(null); }} className="control-input">
-            {STRATEGY_REGISTRY.map((strategy) => <option key={strategy.id} value={strategy.id}>{strategy.name}</option>)}
+            {STRATEGY_CATEGORIES.map((category) => {
+              const strategies = STRATEGY_REGISTRY.filter((strategy) => strategy.category === category);
+              return strategies.length ? <optgroup key={category} label={category}>{strategies.map((strategy) => <option key={strategy.id} value={strategy.id}>{strategy.name}</option>)}</optgroup> : null;
+            })}
           </select>
         </Field>
         <Field label="Asset"><div className="control-readonly">{symbol}</div></Field>
         <Field id="backtest-range" label="Date Range">
-          <select id="backtest-range" value={range} onChange={(event) => setRange(event.target.value === 'all' ? 'all' : Number(event.target.value) as 100 | 500)} className="control-input">
+          <select id="backtest-range" value={range} onChange={(event) => { setRange(event.target.value === 'all' ? 'all' : Number(event.target.value) as 100 | 500); setResult(null); setRunError(null); }} className="control-input">
             <option value={100}>Last 100 candles</option>
             <option value={500}>Last 500 candles</option>
             <option value="all">All available data ({candles.length})</option>
@@ -112,7 +116,7 @@ export default function BacktestingCenter({ candles, timeframe, symbol, theme }:
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
-        <button onClick={runSelectedBacktest} disabled={running || !canRun} className="px-4 py-2 rounded-lg bg-primary text-black text-xs font-semibold disabled:opacity-50 flex items-center gap-2"><Play className="w-3.5 h-3.5" />{running ? 'Running...' : canRun ? 'Run backtest' : selectedAvailability?.reason ?? 'Need more candles'}</button>
+        <button onClick={runSelectedBacktest} disabled={running || !canRun} className="px-4 py-2 rounded-lg bg-primary text-black text-xs font-semibold disabled:opacity-50 flex items-center gap-2"><Play className="w-3.5 h-3.5" />{running ? 'Running...' : canRun ? 'Run backtest' : selectedAvailability?.reason ?? `Need ${minimumTestCandles} candles`}</button>
         <span className="text-xs text-muted">Warmup: 60 bars · Holding period: 5 bars · No fees or slippage modeled</span>
       </div>
       {runError && <div role="alert" className="text-xs text-danger bg-danger/10 border border-danger/20 rounded-lg p-3">{runError}</div>}

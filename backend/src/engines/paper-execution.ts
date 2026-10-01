@@ -39,6 +39,7 @@ export interface PaperAccountState {
   cash: number;
   positions: PaperPosition[];
   trades: PaperTrade[];
+  processedCandles?: Record<string, number>;
 }
 
 export interface PaperOrderRequest {

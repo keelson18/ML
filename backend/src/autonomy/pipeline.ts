@@ -1,7 +1,7 @@
 import { fetchKlines } from '../../../src/lib/binance';
 import type { Candle, Timeframe } from '../../../src/lib/types';
 import { analyze } from '../services/decisionService';
-import { executeDecision, getAccount, manageOpenPositions } from '../services/paperTradingService';
+import { executeDecision, getAccount, manageOpenPositions, markCandleProcessed, wasCandleProcessed } from '../services/paperTradingService';
 import type { AutonomousConfig, AutonomousState, PipelineResult, PipelineSnapshot } from './types';
 
 const DEFAULT_CONFIG: AutonomousConfig = {
@@ -51,22 +51,29 @@ export class AutonomousPipeline {
     if (!closedCandle) throw new Error(`No closed candle available for ${symbol}.`);
     if (this.state === 'PAUSED' || this.state === 'OFFLINE') return { symbol, timeframe, candle: closedCandle, skipped: `Pipeline is ${this.state}.`, state: this.state };
     const closedTrades = await manageOpenPositions(this.config.accountId, symbol, closedCandle);
-    if (this.processedCandles.get(symbol) === closedCandle.time) return { symbol, timeframe, candle: closedCandle, skipped: 'Closed candle already processed.', closedTrades, state: this.state };
+    const candleKey = `${symbol}:${timeframe}`;
+    if (this.processedCandles.get(candleKey) === closedCandle.time) return { symbol, timeframe, candle: closedCandle, skipped: 'Closed candle already processed.', closedTrades, state: this.state };
+    if (await wasCandleProcessed(this.config.accountId, symbol, timeframe, closedCandle.time)) {
+      this.processedCandles.set(candleKey, closedCandle.time);
+      return { symbol, timeframe, candle: closedCandle, skipped: 'Closed candle already processed.', closedTrades, state: this.state };
+    }
     if (!this.inKillZone()) return { ...this.skip(symbol, timeframe, closedCandle, 'Outside configured kill zone.'), closedTrades };
 
     this.transition('DECIDING');
     try {
       const result = await analyze({ symbol, timeframe, candles: series.slice(0, -1) }, this.config.accountId);
       const decision = result.decision.result;
-      this.processedCandles.set(symbol, closedCandle.time);
       this.snapshot = { ...this.snapshot, state: 'MONITORING', lastRunAt: new Date().toISOString(), lastClosedCandle: { symbol, time: closedCandle.time }, processedDecisions: this.snapshot.processedDecisions + 1, consecutiveFailures: 0 };
       this.failures = 0;
 
       if (this.config.enableExecution && (decision.decision === 'BUY' || decision.decision === 'SELL')) {
-        const order = await executeDecision({ accountId: this.config.accountId, symbol, decision });
+        const order = await executeDecision({ accountId: this.config.accountId, symbol, decision, processedCandle: { timeframe, time: closedCandle.time } });
+        this.processedCandles.set(candleKey, closedCandle.time);
         this.snapshot = { ...this.snapshot, executedOrders: this.snapshot.executedOrders + (order.accepted ? 1 : 0) };
         return { symbol, timeframe, candle: closedCandle, decision, order, closedTrades, state: this.state };
       }
+      await markCandleProcessed(this.config.accountId, symbol, timeframe, closedCandle.time);
+      this.processedCandles.set(candleKey, closedCandle.time);
       return { symbol, timeframe, candle: closedCandle, decision, closedTrades, state: this.state };
     } catch (error) {
       this.failures += 1;

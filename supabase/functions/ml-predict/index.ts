@@ -206,10 +206,12 @@ async function fetchCandles(symbol: string, timeframe: string, limit = 1000): Pr
 
 // ---- Rate limiting (durable via Supabase table) ----
 async function checkRate(supabase: SupabaseClient, key: string, maxPerMin: number): Promise<boolean> {
-  const now = Date.now();
-  const windowStart = new Date(now - 60000).toISOString();
-  const { data } = await supabase.from('ml_predictions').select('created_at').eq('symbol', `__rl__${key}`).gte('created_at', windowStart);
-  return (data?.length ?? 0) < maxPerMin;
+  const { data, error } = await supabase.rpc('consume_ml_rate_limit', {
+    p_key: key,
+    p_max_requests: maxPerMin,
+  });
+  if (error) throw new Error(`ML rate-limit check failed: ${error.message}`);
+  return data === true;
 }
 
 // ---- Auth ----
@@ -219,9 +221,9 @@ function authorized(req: Request): boolean {
   return configuredKey !== null && key === configuredKey;
 }
 
-async function authenticatedUser(req: Request): Promise<boolean> {
+async function authenticatedUser(req: Request): Promise<string | null> {
   const authorization = req.headers.get('Authorization');
-  if (!authorization?.startsWith('Bearer ')) return false;
+  if (!authorization?.startsWith('Bearer ')) return null;
 
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL') ?? '',
@@ -229,7 +231,7 @@ async function authenticatedUser(req: Request): Promise<boolean> {
   );
   const accessToken = authorization.slice('Bearer '.length);
   const { data: { user }, error } = await supabase.auth.getUser(accessToken);
-  return !error && user !== null;
+  return !error && user ? user.id : null;
 }
 
 // ---- Main handler ----
@@ -266,7 +268,8 @@ Deno.serve(async (req: Request) => {
     );
 
     if (path === 'predict' && req.method === 'POST') {
-      if (!(await authenticatedUser(req))) {
+      const userId = await authenticatedUser(req);
+      if (!userId) {
         console.warn(`[ml] unauthenticated prediction attempt from ${req.headers.get('x-forwarded-for') ?? 'unknown'}`);
         return jsonResponse({ error: 'Authentication required' }, 401);
       }
@@ -276,7 +279,7 @@ Deno.serve(async (req: Request) => {
         return jsonResponse({ error: 'A valid pair and timeframe are required' }, 400);
       }
       // Rate limit: 30 predicts/min.
-      if (!(await checkRate(supabase, `predict-${pair}-${timeframe}`, 30))) {
+      if (!(await checkRate(supabase, `predict-${userId}`, 30))) {
         return jsonResponse({ error: 'Rate limit exceeded' }, 429);
       }
       const modelState = await ensureModel(supabase, pair, timeframe);
