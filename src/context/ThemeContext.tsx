@@ -36,8 +36,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     workspaceApi.getPreferences().then((preferences) => {
       if (!cancelled && preferences) setTheme(preferences.theme);
-    }).catch(() => {
-      if (!cancelled) setSyncError('Theme could not be loaded from your account.');
+    }).catch((error) => {
+      if (!cancelled) setSyncError(error instanceof Error ? error.message : 'Theme could not be loaded from your account.');
     }).finally(() => {
       if (!cancelled) loadedUserId.current = userId;
     });
@@ -58,7 +58,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     setTheme(next);
     setSyncError(null);
     if (userId && loadedUserId.current === userId) {
-      workspaceApi.savePreferences({ theme: next }).catch(() => setSyncError('Theme could not be saved to your account.'));
+      workspaceApi.savePreferences({ theme: next }).catch((error) => setSyncError(error instanceof Error ? error.message : 'Theme could not be saved to your account.'));
     }
   };
 

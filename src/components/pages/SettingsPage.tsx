@@ -21,12 +21,13 @@ export default function SettingsPage() {
       .then((preferences) => {
         if (!cancelled && preferences) setNotifications(preferences.notifications);
       })
-      .catch(() => { if (!cancelled) setError('Could not load your preferences.'); })
+      .catch((loadError) => { if (!cancelled) setError(loadError instanceof Error ? loadError.message : 'Could not load your preferences.'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [user?.id]);
 
   const updateNotifications = async (next: UserPreferences['notifications']) => {
+    const previous = notifications;
     setNotifications(next);
     setSaving(true);
     setSaved(false);
@@ -34,8 +35,9 @@ export default function SettingsPage() {
     try {
       await workspaceApi.savePreferences({ notifications: next });
       setSaved(true);
-    } catch {
-      setError('Could not save notification preferences. Please try again.');
+    } catch (saveError) {
+      setNotifications(previous);
+      setError(saveError instanceof Error ? saveError.message : 'Could not save notification preferences.');
     } finally {
       setSaving(false);
     }
