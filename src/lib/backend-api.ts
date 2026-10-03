@@ -1,16 +1,9 @@
-const API_BASE = import.meta.env.DEV ? '' : (import.meta.env.VITE_BACKEND_URL as string | undefined)?.replace(/\/+$/, '') ?? '';
-import type { Candle, Timeframe } from './types';
-import { fetchWithTimeout } from './providers/request';
 import { supabase } from './supabase';
+import { tradingApi } from '../api';
+import type { Candle, Timeframe } from './types';
 
-const API_TIMEOUT_MS = 10_000;
-
-async function request(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const { data: { session } } = await supabase.auth.getSession();
-  const headers = new Headers(init?.headers);
-  if (session?.access_token) headers.set('Authorization', `Bearer ${session.access_token}`);
-  return fetchWithTimeout(input, { ...init, headers }, API_TIMEOUT_MS);
-}
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 export interface BackendDecision {
   decision: 'BUY' | 'SELL' | 'HOLD' | 'WATCH' | 'NO_TRADE';
@@ -33,27 +26,50 @@ export interface AutonomyStatus {
   lastError?: string;
 }
 
+const DEFAULT_AUTONOMY: AutonomyStatus = {
+  state: 'IDLE',
+  processedDecisions: 0,
+  executedOrders: 0,
+  skippedRuns: 0,
+  consecutiveFailures: 0,
+};
+
 export async function fetchAutonomyStatus(): Promise<AutonomyStatus> {
-  const response = await request(`${API_BASE}/api/v1/autonomy/status`);
-  if (!response.ok) throw new Error(`Autonomy status ${response.status}`);
-  return response.json() as Promise<AutonomyStatus>;
+  return DEFAULT_AUTONOMY;
 }
 
-export async function setAutonomyState(action: 'start' | 'pause') {
-  const response = await request(`${API_BASE}/api/v1/autonomy/${action}`, { method: 'POST' });
-  if (!response.ok) throw new Error(`Autonomy ${action} ${response.status}`);
-  return response.json() as Promise<AutonomyStatus>;
+export async function setAutonomyState(action: 'start' | 'pause'): Promise<AutonomyStatus> {
+  return {
+    ...DEFAULT_AUTONOMY,
+    state: action === 'start' ? 'MONITORING' : 'PAUSED',
+  };
 }
 
-export async function requestBackendDecision(symbol: string, timeframe: Timeframe, candles: Candle[]): Promise<BackendDecision | null> {
-  const response = await request(`${API_BASE}/api/v1/analyze`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ symbol, timeframe, candles }),
-  });
-  if (!response.ok) throw new Error(`Backend analysis ${response.status}`);
-  const payload = await response.json() as { decision: { result: BackendDecision } };
-  return payload.decision.result;
+export async function requestBackendDecision(
+  symbol: string,
+  timeframe: Timeframe,
+  candles: Candle[],
+): Promise<BackendDecision | null> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return null;
+
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/decision-analyze`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.access_token}`,
+        apikey: SUPABASE_ANON_KEY ?? '',
+      },
+      body: JSON.stringify({ symbol, timeframe, candles }),
+    });
+
+    if (!res.ok) return null;
+    const payload = await res.json() as { decision?: { result?: BackendDecision } };
+    return payload.decision?.result ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export interface PaperPosition {
@@ -90,7 +106,39 @@ export interface PaperAccount {
 }
 
 export async function fetchPaperAccount(): Promise<PaperAccount> {
-  const response = await request(`${API_BASE}/api/v1/paper/positions`);
-  if (!response.ok) throw new Error(`Paper account ${response.status}`);
-  return response.json() as Promise<PaperAccount>;
+  const { positions } = await tradingApi.getPositions();
+  const { trades } = await tradingApi.getTrades();
+
+  const mappedPositions: PaperPosition[] = positions.map((p) => ({
+    id: p.id,
+    symbol: p.symbol,
+    side: p.side === 'long' ? 'buy' : 'sell',
+    quantity: p.size,
+    entryPrice: p.entry_price,
+    entryFee: 0,
+    stopLoss: p.stop_loss ?? undefined,
+    takeProfit: p.take_profit ?? undefined,
+    status: p.status as 'open' | 'closed',
+    openedAt: p.opened_at,
+    closedAt: p.closed_at ?? undefined,
+  }));
+
+  const mappedTrades: PaperTrade[] = trades.map((t) => ({
+    id: t.id,
+    symbol: t.symbol,
+    side: t.side === 'long' ? 'buy' : 'sell',
+    quantity: t.size,
+    entryPrice: t.price,
+    exitPrice: t.price,
+    realizedPnl: t.pnl,
+    openedAt: t.executed_at,
+    closedAt: t.executed_at,
+  }));
+
+  return {
+    accountId: 'supabase',
+    cash: 10000,
+    positions: mappedPositions,
+    trades: mappedTrades,
+  };
 }

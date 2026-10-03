@@ -29,7 +29,7 @@ export default function PortfolioPage() {
         <h2 className="text-sm font-semibold flex items-center gap-2"><Briefcase className="w-4 h-4 text-primary" /> Portfolio</h2>
         <button onClick={refresh} className="p-2 rounded-lg hover:bg-surface text-muted" title="Refresh paper account" aria-label="Refresh paper account"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /></button>
       </div>
-      {error && <div className="text-xs text-warning bg-warning/10 border border-warning/20 rounded-lg p-3">Backend account unavailable. Start the backend to view live paper positions.</div>}
+      {error && <div className="text-xs text-warning bg-warning/10 border border-warning/20 rounded-lg p-3">Unable to load portfolio data. Please try refreshing.</div>}
       {account && <div className="text-xs text-muted">Open positions are valued at entry price because no quote service is connected to the paper account endpoint.</div>}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">

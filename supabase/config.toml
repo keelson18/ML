@@ -1,0 +1,8 @@
+[functions.kinetic-coach]
+verify_jwt = true
+
+[functions.ml-predict]
+verify_jwt = true
+
+[functions.decision-analyze]
+verify_jwt = true
