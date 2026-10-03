@@ -28,6 +28,7 @@ import AlertsPage from './pages/AlertsPage';
 import NewsPage from './pages/NewsPage';
 import RiskManagement from './pages/RiskManagement';
 import AILearning from './pages/AILearning';
+import SettingsPage from './pages/SettingsPage';
 import MultiTimeframeTerminal from './MultiTimeframeTerminal';
 import AutonomousCommandCenter from './AutonomousCommandCenter';
 import { requestBackendDecision, type BackendDecision } from '../lib/backend-api';
@@ -46,6 +47,7 @@ export default function Dashboard() {
   const [candles, setCandles] = useState<Candle[]>([]);
   const [decisionCandles, setDecisionCandles] = useState<Candle[]>([]);
   const [serverDecision, setServerDecision] = useState<BackendDecision | null>(null);
+  const [serverDecisionError, setServerDecisionError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [dataError, setDataError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -133,10 +135,11 @@ export default function Dashboard() {
   useEffect(() => {
     let cancelled = false;
     setServerDecision(null);
+    setServerDecisionError(null);
     if (decisionCandles.length < 60) return () => { cancelled = true; };
     requestBackendDecision(symbol, timeframe, decisionCandles)
-      .then((decision) => { if (!cancelled) setServerDecision(decision); })
-      .catch(() => { if (!cancelled) setServerDecision(null); });
+      .then((decision) => { if (!cancelled) { setServerDecision(decision); setServerDecisionError(decision ? null : 'Decision service returned no result.'); } })
+      .catch((error) => { if (!cancelled) { setServerDecision(null); setServerDecisionError(error instanceof Error ? error.message : 'Decision analysis failed.'); } });
     return () => { cancelled = true; };
   }, [decisionCandles, symbol, timeframe]);
 
@@ -215,44 +218,15 @@ export default function Dashboard() {
       );
     }
 
-    if (sidebarTab === 'settings') {
-      return (
-        <div className="p-4 lg:p-6 max-w-2xl">
-          <h2 className="text-base font-semibold mb-4 text-text">Settings</h2>
-          <div className="bg-surface border border-border rounded-xl p-5 space-y-5 shadow-card">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-sm font-medium text-text">Theme</div>
-                <div className="text-xs text-muted mt-0.5">Toggle between light and dark mode</div>
-              </div>
-              <button
-                onClick={toggle}
-                className="px-3.5 py-1.5 rounded-lg bg-bg border border-border text-xs font-medium hover:bg-surface hover:border-primary/30 transition-colors"
-              >
-                {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
-              </button>
-            </div>
-            <div className="border-t border-border/60 pt-4">
-              <div className="text-sm font-medium mb-1 text-text">Account</div>
-              <div className="text-xs text-muted">{user?.email}</div>
-              <div className="text-xs text-muted mt-1">Role: {profile?.role ?? 'user'}</div>
-            </div>
-            <div className="border-t border-border/60 pt-4">
-              <div className="text-sm font-medium mb-1 text-text">Notifications</div>
-              <div className="text-xs text-muted">Notification preferences coming soon.</div>
-            </div>
-          </div>
-        </div>
-      );
-    }
+    if (sidebarTab === 'settings') return <SettingsPage />;
 
     if (sidebarTab === 'markets') return <MarketsPage />;
-    if (sidebarTab === 'ai-analysis') return <AIAnalysis signals={signals} ml={ml} mlStatus={mlStatus} recommendation={recommendation} onRefreshML={refreshML} mlLoading={mlLoading} />;
+    if (sidebarTab === 'ai-analysis') return <AIAnalysis signals={signals} ml={ml} mlStatus={mlStatus} recommendation={recommendation} onRefreshML={refreshML} mlLoading={mlLoading} candleCount={candles.length} marketLoading={loading} marketError={dataError} />;
     if (sidebarTab === 'strategies') return <StrategyLab signals={signals} candles={candles} timeframe={timeframe} />;
     if (sidebarTab === 'portfolio') return <PortfolioPage />;
-    if (sidebarTab === 'backtesting') return <BacktestingCenter candles={candles} timeframe={timeframe} symbol={symbol} theme={theme} />;
+    if (sidebarTab === 'backtesting') return <BacktestingCenter candles={candles} timeframe={timeframe} symbol={symbol} theme={theme} marketLoading={loading} marketError={dataError} onRetryMarketData={() => setReloadKey((key) => key + 1)} />;
     if (sidebarTab === 'watchlists') return <WatchlistsPage key={user?.id ?? 'local'} userId={user?.id} />;
-    if (sidebarTab === 'alerts') return <AlertsPage key={user?.id ?? 'local'} userId={user?.id} />;
+    if (sidebarTab === 'alerts') return <AlertsPage key={user?.id ?? 'local'} />;
     if (sidebarTab === 'news') return <NewsPage />;
     if (sidebarTab === 'risk') return <RiskManagement />;
     if (sidebarTab === 'ai-learning') return <AILearning />;
@@ -350,7 +324,7 @@ export default function Dashboard() {
             <button type="button" onClick={() => setReloadKey((key) => key + 1)} className="rounded border border-warning/40 px-2 py-1 font-medium hover:bg-warning/10">Retry</button>
           </div>
         )}
-        <AutonomousCommandCenter symbol={symbol} timeframe={timeframe} marketType={marketType} wsStatus={wsStatus} candles={candles} overlays={overlays} recommendation={recommendation} serverDecision={serverDecision} signals={signals} markets={availableMarkets} onSymbolChange={setSymbol} theme={theme} risk={risk} livePrice={livePrice} loading={loading} />
+        <AutonomousCommandCenter symbol={symbol} timeframe={timeframe} marketType={marketType} wsStatus={wsStatus} candles={candles} overlays={overlays} recommendation={recommendation} serverDecision={serverDecision} serverDecisionError={serverDecisionError} signals={signals} markets={availableMarkets} onSymbolChange={setSymbol} theme={theme} risk={risk} livePrice={livePrice} loading={loading} />
       </div>
     );
   };
@@ -436,18 +410,26 @@ function PublishedArticles() {
   const [articles, setArticles] = useState<CMSContent[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const data = await fetchPublishedContent();
-      if (!cancelled) { setArticles(data); setLoading(false); }
+      try {
+        const data = await fetchPublishedContent();
+        if (!cancelled) setArticles(data);
+      } catch {
+        if (!cancelled) setLoadError(true);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     })();
     return () => { cancelled = true; };
   }, []);
 
   if (loading) return <div className="text-sm text-muted text-center py-12">Loading articles…</div>;
   if (selectedSlug) return <CMSViewer slug={selectedSlug} onBack={() => setSelectedSlug(null)} />;
+  if (loadError) return <div role="alert" className="text-sm text-danger text-center py-12">Could not load the knowledge base. Please try again.</div>;
   if (articles.length === 0) return <div className="text-sm text-muted text-center py-12">No published articles yet.</div>;
 
   return (

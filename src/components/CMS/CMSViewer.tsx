@@ -12,6 +12,7 @@ interface Props {
 export default function CMSViewer({ slug, onBack, allowUnpublished }: Props) {
   const [content, setContent] = useState<CMSContent | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -20,10 +21,14 @@ export default function CMSViewer({ slug, onBack, allowUnpublished }: Props) {
         const { item } = await cmsApi.fetchBySlug(slug, allowUnpublished);
         if (!cancelled) {
           setContent(item);
+          setLoadError(false);
           setLoading(false);
         }
       } catch {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoadError(true);
+          setLoading(false);
+        }
       }
     })();
     return () => { cancelled = true; };
@@ -39,8 +44,8 @@ export default function CMSViewer({ slug, onBack, allowUnpublished }: Props) {
 
   if (!content) {
     return (
-      <div className="text-sm text-muted text-center py-12">
-        Content not found.
+      <div role={loadError ? 'alert' : undefined} className="text-sm text-muted text-center py-12">
+        {loadError ? 'Could not load content. Please try again.' : 'Content not found.'}
       </div>
     );
   }
@@ -72,11 +77,7 @@ export default function CMSViewer({ slug, onBack, allowUnpublished }: Props) {
       {content.excerpt && (
         <p className="text-sm text-muted italic">{content.excerpt}</p>
       )}
-      <div className="prose prose-sm max-w-none text-text">
-        {content.body.split('\n').map((line, i) => (
-          <p key={i}>{line}</p>
-        ))}
-      </div>
+      <div className="prose prose-sm max-w-none text-text whitespace-pre-wrap">{content.body}</div>
       {content.publishedAt && (
         <div className="text-xs text-muted">
           Published: {new Date(content.publishedAt).toLocaleDateString()}

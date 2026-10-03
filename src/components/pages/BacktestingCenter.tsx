@@ -10,11 +10,14 @@ interface Props {
   timeframe: Timeframe;
   symbol: string;
   theme: 'light' | 'dark';
+  marketLoading: boolean;
+  marketError: string | null;
+  onRetryMarketData: () => void;
 }
 
 type Range = 100 | 500 | 'all';
 
-export default function BacktestingCenter({ candles, timeframe, symbol, theme }: Props) {
+export default function BacktestingCenter({ candles, timeframe, symbol, theme, marketLoading, marketError, onRetryMarketData }: Props) {
   const [capitalInput, setCapitalInput] = useState('10000');
   const [range, setRange] = useState<Range>(100);
   const [selectedStrategy, setSelectedStrategy] = useState(STRATEGY_REGISTRY[0].id);
@@ -28,7 +31,7 @@ export default function BacktestingCenter({ candles, timeframe, symbol, theme }:
   const availability = useMemo(() => getStrategyAvailability(testCandles, timeframe), [testCandles, timeframe]);
   const selectedAvailability = availability.find(({ strategy }) => strategy.id === selectedStrategy);
   const minimumTestCandles = Math.max(67, (selectedDefinition?.minCandles ?? 0) + 7);
-  const canRun = Boolean(selectedDefinition && selectedAvailability?.eligible && testCandles.length >= minimumTestCandles && Number(capitalInput) > 0);
+  const canRun = Boolean(!marketLoading && !marketError && selectedDefinition && selectedAvailability?.eligible && testCandles.length >= minimumTestCandles && Number(capitalInput) > 0);
 
   const runSelectedBacktest = () => {
     const capital = Number(capitalInput);
@@ -115,8 +118,11 @@ export default function BacktestingCenter({ candles, timeframe, symbol, theme }:
         <Field id="backtest-capital" label="Initial Capital"><input id="backtest-capital" type="number" min="1" step="100" value={capitalInput} onChange={(event) => { setCapitalInput(event.target.value); setRunError(null); }} className="control-input" /></Field>
       </div>
 
+      {marketError && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning"><span>Market data unavailable: {marketError}</span><button type="button" onClick={onRetryMarketData} className="rounded border border-warning/40 px-2 py-1 font-medium hover:bg-warning/10">Retry feed</button></div>}
+      {marketLoading && <div role="status" className="text-xs text-muted">Loading historical candles for {symbol}…</div>}
+
       <div className="flex flex-wrap items-center gap-3">
-        <button onClick={runSelectedBacktest} disabled={running || !canRun} className="px-4 py-2 rounded-lg bg-primary text-black text-xs font-semibold disabled:opacity-50 flex items-center gap-2"><Play className="w-3.5 h-3.5" />{running ? 'Running...' : canRun ? 'Run backtest' : selectedAvailability?.reason ?? `Need ${minimumTestCandles} candles`}</button>
+        <button onClick={runSelectedBacktest} disabled={running || !canRun} className="px-4 py-2 rounded-lg bg-primary text-black text-xs font-semibold disabled:opacity-50 flex items-center gap-2"><Play className="w-3.5 h-3.5" />{running ? 'Running...' : marketLoading ? 'Loading market data…' : marketError ? 'Market data unavailable' : canRun ? 'Run backtest' : selectedAvailability?.reason ?? `Need ${minimumTestCandles} candles`}</button>
         <span className="text-xs text-muted">Warmup: 60 bars · Holding period: 5 bars · No fees or slippage modeled</span>
       </div>
       {runError && <div role="alert" className="text-xs text-danger bg-danger/10 border border-danger/20 rounded-lg p-3">{runError}</div>}

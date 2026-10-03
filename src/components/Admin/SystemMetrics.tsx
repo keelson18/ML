@@ -14,6 +14,7 @@ const METRIC_CARDS = [
 export default function SystemMetrics() {
   const [metrics, setMetrics] = useState<Record<string, SystemMetric>>({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -27,7 +28,7 @@ export default function SystemMetrics() {
         }
         setMetrics(map);
       } catch {
-        // graceful empty state
+        if (!cancelled) setLoadError(true);
       }
       if (!cancelled) setLoading(false);
     })();
@@ -41,6 +42,7 @@ export default function SystemMetrics() {
   return (
     <div className="space-y-4">
       <h3 className="text-sm font-semibold">System Metrics Overview</h3>
+      {loadError && <div role="alert" className="text-xs text-danger bg-danger/10 border border-danger/20 rounded-lg p-3">Could not load system metrics. Verify the database permissions and try again.</div>}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         {METRIC_CARDS.map((card) => {
           const metric = metrics[card.name];

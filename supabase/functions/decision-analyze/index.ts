@@ -120,7 +120,7 @@ Deno.serve(async (req: Request) => {
 
     const decision = analyzeDecision(reqData);
     return response({ decision });
-  } catch (error) {
+  } catch {
     return response({ error: "Analysis failed" }, 500);
   }
 });

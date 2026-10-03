@@ -25,22 +25,22 @@ export const cmsApi = {
     let query = supabase.from('cms_content').select('*').eq('published', true).order('published_at', { ascending: false });
     if (type) query = query.eq('content_type', type);
     const { data, error } = await query;
-    if (error || !data) return { items: [] };
-    return { items: data.map(mapRow) };
+    if (error) throw error;
+    return { items: (data ?? []).map(mapRow) };
   },
 
   async fetchBySlug(slug: string, allowUnpublished = false): Promise<{ item: CMSContent | null }> {
     let query = supabase.from('cms_content').select('*').eq('slug', slug);
     if (!allowUnpublished) query = query.eq('published', true);
     const { data, error } = await query.maybeSingle();
-    if (error || !data) return { item: null };
-    return { item: mapRow(data) };
+    if (error) throw error;
+    return { item: data ? mapRow(data) : null };
   },
 
   async fetchAll(): Promise<{ items: CMSContent[] }> {
     const { data, error } = await supabase.from('cms_content').select('*').order('created_at', { ascending: false });
-    if (error || !data) return { items: [] };
-    return { items: data.map(mapRow) };
+    if (error) throw error;
+    return { items: (data ?? []).map(mapRow) };
   },
 
   async upsert(payload: Record<string, unknown>): Promise<{ item: CMSContent | null }> {
@@ -55,13 +55,14 @@ export const cmsApi = {
       featured_image: payload.featuredImage ?? payload.featured_image,
       metadata: payload.metadata ?? {},
     }).select('*').maybeSingle();
-    if (error) return { item: null };
+    if (error) throw error;
     return { item: data ? mapRow(data) : null };
   },
 
   async delete(id: string): Promise<{ success: boolean }> {
     const { error } = await supabase.from('cms_content').delete().eq('id', id);
-    return { success: !error };
+    if (error) throw error;
+    return { success: true };
   },
 
   async togglePublish(id: string, published: boolean): Promise<{ success: boolean }> {
@@ -69,6 +70,7 @@ export const cmsApi = {
       published,
       published_at: published ? new Date().toISOString() : null,
     }).eq('id', id);
-    return { success: !error };
+    if (error) throw error;
+    return { success: true };
   },
 };

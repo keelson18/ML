@@ -60,7 +60,7 @@ export const authApi = {
       .from('profiles')
       .select('id, role, display_name, avatar_url, created_at')
       .order('created_at', { ascending: false });
-    if (error || !data) return { profiles: [] };
+    if (error) throw error;
     return {
       profiles: data.map((p) => ({
         id: p.id,
@@ -73,6 +73,7 @@ export const authApi = {
   },
 
   async updateProfileRole(userId: string, role: string): Promise<void> {
-    await supabase.from('profiles').update({ role }).eq('id', userId);
+    const { error } = await supabase.from('profiles').update({ role }).eq('id', userId);
+    if (error) throw error;
   },
 };

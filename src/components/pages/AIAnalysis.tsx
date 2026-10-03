@@ -8,11 +8,15 @@ interface Props {
   recommendation: Recommendation | null;
   onRefreshML: () => void;
   mlLoading: boolean;
+  candleCount: number;
+  marketLoading: boolean;
+  marketError: string | null;
 }
 
-export default function AIAnalysis({ signals, ml, mlStatus, recommendation, onRefreshML, mlLoading }: Props) {
+export default function AIAnalysis({ signals, ml, mlStatus, recommendation, onRefreshML, mlLoading, candleCount, marketLoading, marketError }: Props) {
   return (
     <div className="page-frame space-y-6">
+      {marketError && <div role="alert" className="text-xs text-warning bg-warning/10 border border-warning/20 rounded-lg p-3">Market data unavailable: {marketError}. Pattern analysis may be stale.</div>}
       <h2 className="text-sm font-semibold flex items-center gap-2">
         <Brain className="w-4 h-4 text-primary" /> AI Analysis Panel
       </h2>
@@ -72,7 +76,7 @@ export default function AIAnalysis({ signals, ml, mlStatus, recommendation, onRe
             <Zap className="w-3 h-3" /> Active Patterns
           </h3>
           <div className="space-y-2">
-            {signals.length === 0 && <div className="text-xs text-muted">No patterns detected</div>}
+            {signals.length === 0 && <div className="text-xs text-muted">{marketLoading ? 'Loading market data…' : marketError ? 'Patterns cannot be evaluated until the market feed recovers.' : candleCount < 60 ? 'Waiting for enough candles to evaluate patterns.' : 'No patterns detected on the latest candle.'}</div>}
             {signals.slice(0, 5).map((s, i) => (
               <div key={i} className="flex items-center gap-2 text-xs">
                 <span className={`w-1.5 h-1.5 rounded-full ${s.side === 'buy' ? 'bg-success' : s.side === 'sell' ? 'bg-danger' : 'bg-muted'}`} />

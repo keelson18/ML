@@ -7,7 +7,8 @@ export async function decisionRoutes(app: FastifyInstance, pipeline: AutonomousP
   const handler = async (request: FastifyRequest<{ Body: AnalyzeInput }>, reply: FastifyReply) => {
     try {
       if (!request.authenticatedUserId) return reply.code(401).send({ error: 'Authentication required' });
-      return await analyze(request.body, request.authenticatedUserId);
+      if (!request.accessToken) return reply.code(401).send({ error: 'Authentication required' });
+      return await analyze(request.body, request.authenticatedUserId, request.accessToken);
     } catch (error) {
       return reply.code(400).send({ error: error instanceof Error ? error.message : 'Analysis failed.' });
     }

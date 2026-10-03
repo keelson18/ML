@@ -2,30 +2,18 @@ import { cmsApi } from '../api';
 import type { CMSContent, CMSContentType } from './types';
 
 export async function fetchPublishedContent(type?: CMSContentType): Promise<CMSContent[]> {
-  try {
-    const { items } = await cmsApi.fetchPublished(type);
-    return items;
-  } catch {
-    return [];
-  }
+  const { items } = await cmsApi.fetchPublished(type);
+  return items;
 }
 
 export async function fetchContentBySlug(slug: string, allowUnpublished?: boolean): Promise<CMSContent | null> {
-  try {
-    const { item } = await cmsApi.fetchBySlug(slug, allowUnpublished);
-    return item;
-  } catch {
-    return null;
-  }
+  const { item } = await cmsApi.fetchBySlug(slug, allowUnpublished);
+  return item;
 }
 
 export async function fetchAllContent(): Promise<CMSContent[]> {
-  try {
-    const { items } = await cmsApi.fetchAll();
-    return items;
-  } catch {
-    return [];
-  }
+  const { items } = await cmsApi.fetchAll();
+  return items;
 }
 
 export async function upsertContent(content: Partial<CMSContent> & { slug: string; title: string; body: string }): Promise<CMSContent | null> {

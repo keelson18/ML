@@ -3,7 +3,7 @@ import { Activity, AlertTriangle, ShieldCheck, Target, TrendingDown, TrendingUp 
 import PriceChart from './PriceChart';
 import TradingTerminal from './TradingTerminal';
 import type { AutonomyStatus, BackendDecision } from '../lib/backend-api';
-import { fetchAutonomyStatus } from '../lib/backend-api';
+import { executePaperDecision, fetchAutonomyStatus } from '../lib/backend-api';
 import type { Candle, Recommendation, Signal, Timeframe } from '../lib/types';
 
 interface Props {
@@ -15,6 +15,7 @@ interface Props {
   overlays: Parameters<typeof PriceChart>[0]['overlays'];
   recommendation: Recommendation | null;
   serverDecision: BackendDecision | null;
+  serverDecisionError: string | null;
   signals: Signal[];
   markets: { symbol: string; label: string }[];
   onSymbolChange: (symbol: string) => void;
@@ -26,9 +27,11 @@ interface Props {
 
 const initialStatus: AutonomyStatus = { state: 'OFFLINE', processedDecisions: 0, executedOrders: 0, skippedRuns: 0, consecutiveFailures: 0 };
 
-export default function AutonomousCommandCenter({ symbol, timeframe, marketType, wsStatus, candles, overlays, recommendation, serverDecision, signals, markets, onSymbolChange, theme, risk, livePrice, loading }: Props) {
+export default function AutonomousCommandCenter({ symbol, timeframe, marketType, wsStatus, candles, overlays, recommendation, serverDecision, serverDecisionError, signals, markets, onSymbolChange, theme, risk, livePrice, loading }: Props) {
   const [status, setStatus] = useState<AutonomyStatus>(initialStatus);
   const [statusError, setStatusError] = useState(false);
+  const [executing, setExecuting] = useState(false);
+  const [executionMessage, setExecutionMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -43,6 +46,21 @@ export default function AutonomousCommandCenter({ symbol, timeframe, marketType,
   const confidence = serverDecision ? Math.round(serverDecision.confidence * 100) : recommendation ? Math.round(Math.abs(recommendation.score) * 100) : 0;
   const evidence = useMemo(() => signals.slice(0, 6), [signals]);
   const automatic = status.state === 'MONITORING' || status.state === 'DECIDING';
+  const canExecute = Boolean(serverDecision && (serverDecision.decision === 'BUY' || serverDecision.decision === 'SELL'));
+
+  const execute = async () => {
+    if (!serverDecision || !canExecute) return;
+    setExecuting(true);
+    setExecutionMessage(null);
+    try {
+      const result = await executePaperDecision(symbol, serverDecision);
+      setExecutionMessage(result.accepted ? `Paper order filled at $${result.fillPrice?.toLocaleString(undefined, { maximumFractionDigits: 4 })}.` : result.reason ?? 'Paper order was rejected by risk checks.');
+    } catch {
+      setExecutionMessage('Paper order could not be submitted. Please try again.');
+    } finally {
+      setExecuting(false);
+    }
+  };
 
   return (
     <section className="command-center" aria-label="Autonomous trading command center">
@@ -78,11 +96,13 @@ export default function AutonomousCommandCenter({ symbol, timeframe, marketType,
 
       <div className="command-decision-bar">
         <div className={`command-decision decision-${direction}`}><span>DECISION</span><strong>{direction === 'neutral' ? 'NO_TRADE' : direction.toUpperCase()}</strong></div>
-        <div className="decision-explanation">{serverDecision?.explanation ?? (recommendation ? `${recommendation.contributors.length} local engines contributing while the server decision loads.` : 'No executable setup. Capital remains protected while the system waits.')}</div>
+        <div className="decision-explanation">{serverDecision?.explanation ?? (serverDecisionError ? `Server decision analysis is unavailable: ${serverDecisionError}. Local evidence is shown where possible.` : recommendation ? `${recommendation.contributors.length} local engines contributing while the server decision loads.` : 'No executable setup. Capital remains protected while the system waits.')}</div>
         <div className="decision-risk"><span><ShieldCheck className="w-3.5 h-3.5" /> Risk gate</span><strong>{risk ? 'READY' : 'WAITING'}</strong></div>
         <div className="decision-risk"><span>Orders</span><strong>{status.executedOrders}</strong></div>
+        {canExecute && <button type="button" onClick={() => void execute()} disabled={executing} className="px-3 py-2 rounded-lg bg-primary text-black text-xs font-semibold disabled:opacity-50">{executing ? 'Checking risk…' : 'Execute paper trade'}</button>}
         {status.state === 'PAUSED' && <span title="Automatic engine paused after a safety event"><AlertTriangle className="w-4 h-4 text-warning" /></span>}
       </div>
+      {executionMessage && <div role="status" className="text-xs text-muted px-3 py-2 border-t border-border/50">{executionMessage}</div>}
     </section>
   );
 }

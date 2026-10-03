@@ -1,7 +1,8 @@
 import { closePaperPosition, simulatePaperOrder, type PaperAccountState, type PaperOrderRequest, type PaperTrade } from '../engines/paper-execution';
 import type { Candle } from '../../../src/lib/types';
 import type { TradeDecision } from '../engines/decision-engine';
-import { getSupabaseClient } from '../db';
+import { getSupabaseClient, getSupabaseClientWithToken } from '../db';
+import { fetchKlines } from '../../../src/lib/binance';
 
 const testAccounts = new Map<string, PaperAccountState>();
 
@@ -10,7 +11,7 @@ interface LoadedAccount {
   version: number;
 }
 
-async function loadAccount(accountId: string): Promise<LoadedAccount> {
+async function loadAccount(accountId: string, accessToken?: string): Promise<LoadedAccount> {
   if (!accountId) throw new Error('An account ID is required.');
   if (process.env.NODE_ENV === 'test') {
     const account = testAccounts.get(accountId);
@@ -19,7 +20,7 @@ async function loadAccount(accountId: string): Promise<LoadedAccount> {
     testAccounts.set(accountId, created);
     return { account: created, version: 0 };
   }
-  const supabase = getSupabaseClient();
+  const supabase = accessToken ? getSupabaseClientWithToken(accessToken) : getSupabaseClient();
   for (let attempt = 0; attempt < 3; attempt++) {
     const { data, error } = await supabase
       .from('paper_sim_accounts')
@@ -37,22 +38,24 @@ async function loadAccount(accountId: string): Promise<LoadedAccount> {
   throw new Error('Could not initialize paper account after concurrent creation.');
 }
 
-export function getAccount(accountId = 'autonomy:default') {
-  return loadAccount(accountId).then(({ account }) => account);
+export function getAccount(accountId = 'autonomy:default', accessToken?: string) {
+  return loadAccount(accountId, accessToken).then(({ account }) => account);
 }
 
 async function updateAccount<T>(
   accountId: string,
   update: (account: PaperAccountState) => { account: PaperAccountState; result: T },
+  accessToken?: string,
 ): Promise<T> {
   for (let attempt = 0; attempt < 5; attempt++) {
-    const loaded = await loadAccount(accountId);
+    const loaded = await loadAccount(accountId, accessToken);
     const changed = update(loaded.account);
     if (process.env.NODE_ENV === 'test') {
       testAccounts.set(accountId, changed.account);
       return changed.result;
     }
-    const { data, error } = await getSupabaseClient()
+    const supabase = accessToken ? getSupabaseClientWithToken(accessToken) : getSupabaseClient();
+    const { data, error } = await supabase
       .from('paper_sim_accounts')
       .update({ state: changed.account, version: loaded.version + 1 })
       .eq('account_id', accountId)
@@ -63,6 +66,17 @@ async function updateAccount<T>(
     if (data) return changed.result;
   }
   throw new Error('Paper account changed concurrently too many times. Please retry.');
+}
+
+export async function closeOpenPaperPosition(accountId: string, symbol: string, accessToken?: string): Promise<PaperTrade> {
+  const candles = await fetchKlines(symbol, '1m', 1);
+  const exitPrice = candles.at(-1)?.close;
+  if (!exitPrice || !Number.isFinite(exitPrice)) throw new Error('A current market price is unavailable.');
+  return updateAccount(accountId, (account) => {
+    const result = closePaperPosition(account, symbol, exitPrice, 0.001, 'paper-simulator-1.0.0', `trade-${Date.now()}`);
+    if ('error' in result) throw new Error(result.error);
+    return { account: result.account, result: result.trade };
+  }, accessToken);
 }
 
 export async function manageOpenPositions(accountId: string, symbol: string, candle: Candle): Promise<PaperTrade[]> {
@@ -115,6 +129,7 @@ export async function executeDecision(input: {
   decision: TradeDecision;
   quantity?: number;
   processedCandle?: { timeframe: string; time: number };
+  accessToken?: string;
 }) {
   const accountId = input.accountId ?? 'autonomy:default';
   const decision = input.decision;
@@ -174,5 +189,5 @@ export async function executeDecision(input: {
       ? { ...result.account, processedCandles: { ...result.account.processedCandles, [checkpoint]: input.processedCandle!.time } }
       : result.account;
     return { account: nextAccount, result: { ...result, account: nextAccount } };
-  });
+  }, input.accessToken);
 }

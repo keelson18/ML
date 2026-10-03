@@ -73,23 +73,30 @@ export function fetchMarketData(canonicalSymbol: string, timeframe: Timeframe, l
 }
 
 async function fetchMarketDataUncoalesced(canonicalSymbol: string, timeframe: Timeframe, limit: number): Promise<MarketDataSeries> {
-  const instrument = getMarket(canonicalSymbol);
-  if (!instrument) throw new Error(`Unknown canonical instrument: ${canonicalSymbol}`);
-  if (!instrument.provider || !instrument.sourceSymbol) throw new Error(`No market-data source is configured for ${canonicalSymbol}.`);
+  const configuredInstrument = getMarket(canonicalSymbol);
+  if (!configuredInstrument) throw new Error(`Unknown canonical instrument: ${canonicalSymbol}`);
+  const sourceSymbol = configuredInstrument.sourceSymbol ?? (configuredInstrument.provider === 'binance' ? configuredInstrument.symbol : undefined);
+  if (!configuredInstrument.provider || !sourceSymbol) throw new Error(`No market-data source is configured for ${canonicalSymbol}.`);
   if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw new Error('Candle limit must be an integer between 1 and 1000.');
+  const instrument: Market = {
+    ...configuredInstrument,
+    id: configuredInstrument.id ?? canonicalSymbol,
+    canonicalSymbol: configuredInstrument.canonicalSymbol ?? canonicalSymbol,
+    sourceSymbol,
+  };
 
   const candles = await fetchFromProvider(instrument, timeframe, limit);
   validateCandles(candles, canonicalSymbol);
   const provider = instrument.provider;
-  const sourceInstrument = instrument.sourceSymbol;
+  const sourceInstrument = sourceSymbol;
   const startTimestamp = candles[0]?.time ?? null;
   const endTimestamp = candles.at(-1)?.time ?? null;
   const dataVersion = `${provider}-ohlcv-v1`;
   const datasetId = [provider, sourceInstrument, instrument.quoteAsset, timeframe, startTimestamp ?? 'empty', endTimestamp ?? 'empty', dataVersion].join(':');
 
   const identity: MarketDataIdentity = {
-    instrumentId: instrument.id,
-    canonicalSymbol: instrument.canonicalSymbol,
+    instrumentId: instrument.id ?? canonicalSymbol,
+    canonicalSymbol: instrument.canonicalSymbol ?? canonicalSymbol,
     sourceSymbol: sourceInstrument,
     provider,
     baseAsset: instrument.baseAsset,

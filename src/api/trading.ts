@@ -37,7 +37,7 @@ export const tradingApi = {
       .from('positions')
       .select('*')
       .order('opened_at', { ascending: false });
-    if (error || !data) return { positions: [] };
+    if (error) throw error;
     return {
       positions: data.map((r: Record<string, unknown>) => ({
         id: r.id as string,
@@ -68,7 +68,8 @@ export const tradingApi = {
       })
       .select('*')
       .maybeSingle();
-    if (error || !data) return { position: null };
+    if (error) throw error;
+    if (!data) return { position: null };
     return {
       position: {
         id: data.id as string,
@@ -90,7 +91,8 @@ export const tradingApi = {
       .from('positions')
       .update({ status: 'closed', closed_at: new Date().toISOString() })
       .eq('id', id);
-    return { success: !error };
+    if (error) throw error;
+    return { success: true };
   },
 
   async getTrades(): Promise<{ trades: TradeRecord[] }> {
@@ -98,7 +100,7 @@ export const tradingApi = {
       .from('trades')
       .select('*')
       .order('executed_at', { ascending: false });
-    if (error || !data) return { trades: [] };
+    if (error) throw error;
     return {
       trades: data.map((r: Record<string, unknown>) => ({
         id: r.id as string,
@@ -121,7 +123,7 @@ export const metricsApi = {
       .select('*')
       .order('recorded_at', { ascending: false })
       .limit(100);
-    if (error || !data) return { metrics: [] };
+    if (error) throw error;
     return {
       metrics: data.map((r: Record<string, unknown>) => ({
         metric_name: r.metric_name as string,

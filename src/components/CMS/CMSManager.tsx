@@ -12,29 +12,40 @@ export default function CMSManager() {
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<ViewState>('list');
   const [selected, setSelected] = useState<CMSContent | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
+    setError(null);
     try {
       const { items } = await cmsApi.fetchAll();
       setContents(items);
     } catch {
-      setContents([]);
+      setError('Could not load content. Check your connection and try again.');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   useEffect(() => { load(); }, []);
 
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this content?')) return;
-    await cmsApi.delete(id);
-    await load();
+    try {
+      await cmsApi.delete(id);
+      await load();
+    } catch {
+      setError('Could not delete content. Please try again.');
+    }
   };
 
   const handleToggle = async (id: string, published: boolean) => {
-    await cmsApi.togglePublish(id, published);
-    await load();
+    try {
+      await cmsApi.togglePublish(id, !published);
+      await load();
+    } catch {
+      setError('Could not update publication status. Please try again.');
+    }
   };
 
   if (view === 'view' && selected) {
@@ -82,13 +93,15 @@ export default function CMSManager() {
         <div className="text-sm text-muted text-center py-8">Loading content…</div>
       )}
 
-      {!loading && contents.length === 0 && (
+      {error && <div role="alert" className="text-xs text-danger bg-danger/10 border border-danger/20 rounded-lg p-3">{error}</div>}
+
+      {!loading && !error && contents.length === 0 && (
         <div className="text-sm text-muted text-center py-8">
           No content yet. Create your first article or guide.
         </div>
       )}
 
-      <div className="space-y-1.5">
+      {!error && <div className="space-y-1.5">
         {contents.map((c) => (
           <div key={c.id} className="flex items-center justify-between py-2 px-3 rounded-lg bg-bg/50 border border-border/50">
             <div className="min-w-0 flex-1">
@@ -144,7 +157,7 @@ export default function CMSManager() {
             </div>
           </div>
         ))}
-      </div>
+      </div>}
     </div>
   );
 }

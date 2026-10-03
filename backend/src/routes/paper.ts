@@ -7,7 +7,8 @@ export async function paperRoutes(app: FastifyInstance) {
     try {
       const accountId = request.authenticatedUserId;
       if (!accountId) return reply.code(401).send({ error: 'Authentication required' });
-      return await executeDecision({ ...request.body, accountId });
+      if (!request.accessToken) return reply.code(401).send({ error: 'Authentication required' });
+      return await executeDecision({ ...request.body, accountId, accessToken: request.accessToken });
     } catch (error) {
       return reply.code(400).send({ error: error instanceof Error ? error.message : 'Paper execution failed.' });
     }

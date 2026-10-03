@@ -24,6 +24,8 @@ export const MARKET_UNIVERSE: Market[] = [
   { symbol: 'NEARUSDT', baseAsset: 'NEAR', quoteAsset: 'USDT', marketType: 'crypto', exchange: 'Binance', label: 'NEAR/USDT', provider: 'binance', category: 'Altcoin', isActive: true },
   { symbol: 'APTUSDT', baseAsset: 'APT', quoteAsset: 'USDT', marketType: 'crypto', exchange: 'Binance', label: 'APT/USDT', provider: 'binance', category: 'Altcoin', isActive: true },
 
+  { symbol: 'BTCUSD', canonicalSymbol: 'BTCUSD', sourceSymbol: 'X:BTCUSD', id: 'crypto-btc-usd', baseAsset: 'BTC', quoteAsset: 'USD', priceCurrency: 'USD', marketType: 'crypto', exchange: 'Massive', label: 'BTC/USD', provider: 'massive', category: 'Major', isActive: true },
+
   // ---- Forex Majors ----
   { symbol: 'EURUSD', baseAsset: 'EUR', quoteAsset: 'USD', marketType: 'forex', exchange: 'OANDA', label: 'EUR/USD', provider: 'oanda', category: 'Major', isActive: true },
   { symbol: 'GBPUSD', baseAsset: 'GBP', quoteAsset: 'USD', marketType: 'forex', exchange: 'OANDA', label: 'GBP/USD', provider: 'oanda', category: 'Major', isActive: true },

@@ -1,13 +1,24 @@
 import { supabase } from './supabase';
-import { tradingApi } from '../api';
 import type { Candle, Timeframe } from './types';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+async function authenticatedBackendRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Authentication required.');
+  const headers = new Headers(init.headers);
+  headers.set('Content-Type', 'application/json');
+  headers.set('Authorization', `Bearer ${session.access_token}`);
+  const response = await fetch(path, { ...init, headers });
+  const payload = await response.json() as T & { error?: string };
+  if (!response.ok) throw new Error(payload.error ?? `Backend request failed (${response.status}).`);
+  return payload;
+}
 
 export interface BackendDecision {
   decision: 'BUY' | 'SELL' | 'HOLD' | 'WATCH' | 'NO_TRADE';
   confidence: number;
+  entry?: number;
+  invalidation?: number;
+  targets?: { price: number }[];
   strategy: string;
   supportingEvidence: { source: string; explanation: string; score?: number }[];
   contradictions: string[];
@@ -26,23 +37,12 @@ export interface AutonomyStatus {
   lastError?: string;
 }
 
-const DEFAULT_AUTONOMY: AutonomyStatus = {
-  state: 'IDLE',
-  processedDecisions: 0,
-  executedOrders: 0,
-  skippedRuns: 0,
-  consecutiveFailures: 0,
-};
-
 export async function fetchAutonomyStatus(): Promise<AutonomyStatus> {
-  return DEFAULT_AUTONOMY;
+  return authenticatedBackendRequest<AutonomyStatus>('/api/v1/autonomy/status');
 }
 
 export async function setAutonomyState(action: 'start' | 'pause'): Promise<AutonomyStatus> {
-  return {
-    ...DEFAULT_AUTONOMY,
-    state: action === 'start' ? 'MONITORING' : 'PAUSED',
-  };
+  return authenticatedBackendRequest<AutonomyStatus>(`/api/v1/autonomy/${action}`, { method: 'POST' });
 }
 
 export async function requestBackendDecision(
@@ -50,26 +50,26 @@ export async function requestBackendDecision(
   timeframe: Timeframe,
   candles: Candle[],
 ): Promise<BackendDecision | null> {
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return null;
+  const payload = await authenticatedBackendRequest<{ decision?: { result?: BackendDecision } }>('/api/v1/decisions/analyze', {
+    method: 'POST',
+    body: JSON.stringify({ symbol, timeframe, candles }),
+  });
+  return payload.decision?.result ?? null;
+}
 
-    const res = await fetch(`${SUPABASE_URL}/functions/v1/decision-analyze`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${session.access_token}`,
-        apikey: SUPABASE_ANON_KEY ?? '',
-      },
-      body: JSON.stringify({ symbol, timeframe, candles }),
-    });
+export interface PaperOrderResult {
+  accepted: boolean;
+  status: 'filled' | 'rejected';
+  reason?: string;
+  fillPrice?: number;
+  fee?: number;
+}
 
-    if (!res.ok) return null;
-    const payload = await res.json() as { decision?: { result?: BackendDecision } };
-    return payload.decision?.result ?? null;
-  } catch {
-    return null;
-  }
+export async function executePaperDecision(symbol: string, decision: BackendDecision): Promise<PaperOrderResult> {
+  return authenticatedBackendRequest<PaperOrderResult>('/api/v1/paper/execute', {
+    method: 'POST',
+    body: JSON.stringify({ symbol, decision }),
+  });
 }
 
 export interface PaperPosition {
@@ -105,40 +105,25 @@ export interface PaperAccount {
   trades: PaperTrade[];
 }
 
+export interface MarketDataResponse {
+  symbol: string;
+  timeframe: Timeframe;
+  candles: Candle[];
+}
+
+export async function fetchCanonicalMarketData(symbol: string, timeframe: Timeframe, limit = 1000): Promise<MarketDataResponse> {
+  const query = new URLSearchParams({ timeframe, limit: String(limit) });
+  return authenticatedBackendRequest<MarketDataResponse>(`/api/v1/market/candles/${encodeURIComponent(symbol)}?${query}`);
+}
+
 export async function fetchPaperAccount(): Promise<PaperAccount> {
-  const { positions } = await tradingApi.getPositions();
-  const { trades } = await tradingApi.getTrades();
+  return authenticatedBackendRequest<PaperAccount>('/api/v1/paper/positions');
+}
 
-  const mappedPositions: PaperPosition[] = positions.map((p) => ({
-    id: p.id,
-    symbol: p.symbol,
-    side: p.side === 'long' ? 'buy' : 'sell',
-    quantity: p.size,
-    entryPrice: p.entry_price,
-    entryFee: 0,
-    stopLoss: p.stop_loss ?? undefined,
-    takeProfit: p.take_profit ?? undefined,
-    status: p.status as 'open' | 'closed',
-    openedAt: p.opened_at,
-    closedAt: p.closed_at ?? undefined,
-  }));
-
-  const mappedTrades: PaperTrade[] = trades.map((t) => ({
-    id: t.id,
-    symbol: t.symbol,
-    side: t.side === 'long' ? 'buy' : 'sell',
-    quantity: t.size,
-    entryPrice: t.price,
-    exitPrice: t.price,
-    realizedPnl: t.pnl,
-    openedAt: t.executed_at,
-    closedAt: t.executed_at,
-  }));
-
-  return {
-    accountId: 'supabase',
-    cash: 10000,
-    positions: mappedPositions,
-    trades: mappedTrades,
-  };
+export async function closePaperPosition(symbol: string): Promise<PaperTrade> {
+  const { trade } = await authenticatedBackendRequest<{ trade: PaperTrade }>('/api/v1/paper/close', {
+    method: 'POST',
+    body: JSON.stringify({ symbol }),
+  });
+  return trade;
 }

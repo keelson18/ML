@@ -7,6 +7,7 @@ export default function UserManagement() {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [actionError, setActionError] = useState(false);
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -25,8 +26,13 @@ export default function UserManagement() {
 
   const toggleRole = async (userId: string, currentRole: string) => {
     const newRole = currentRole === 'admin' ? 'user' : 'admin';
-    await authApi.updateProfileRole(userId, newRole);
-    await fetchUsers();
+    setActionError(false);
+    try {
+      await authApi.updateProfileRole(userId, newRole);
+      await fetchUsers();
+    } catch {
+      setActionError(true);
+    }
   };
 
   if (loading) {
@@ -45,6 +51,7 @@ export default function UserManagement() {
           <RefreshCw className="w-3.5 h-3.5 text-muted" />
         </button>
       </div>
+      {actionError && <div role="alert" className="text-xs text-danger bg-danger/10 border border-danger/20 rounded-lg p-3">Could not update that user's role. Check your admin permissions and try again.</div>}
       {loadError ? <div role="alert" className="text-sm text-warning text-center py-8">Could not load users. Retry to check the directory again.</div> : users.length === 0 ? <div className="text-sm text-muted text-center py-8">No users found.</div> : <div className="space-y-1.5">
         {users.map((u) => (
           <div key={u.id} className="flex items-center justify-between py-2 px-3 rounded-lg bg-bg/50 border border-border/50">

@@ -9,10 +9,10 @@ export interface AnalyzeInput {
   inputContextId?: string;
 }
 
-async function buildContext(input: AnalyzeInput, accountId: string): Promise<DecisionEngineContext> {
+async function buildContext(input: AnalyzeInput, accountId: string, accessToken?: string): Promise<DecisionEngineContext> {
   const latest = input.candles[input.candles.length - 1];
   const entry = latest?.close ?? 0;
-  const account = await getAccount(accountId);
+  const account = await getAccount(accountId, accessToken);
   const positions = account.positions.filter((position) => position.status === 'open');
   const grossExposure = positions.reduce((sum, position) => sum + position.quantity * position.entryPrice, 0);
   const portfolioValue = Math.max(0, account.cash + grossExposure);
@@ -64,11 +64,11 @@ async function buildContext(input: AnalyzeInput, accountId: string): Promise<Dec
   };
 }
 
-export async function analyze(input: AnalyzeInput, accountId = 'autonomy:default') {
+export async function analyze(input: AnalyzeInput, accountId = 'autonomy:default', accessToken?: string) {
   if (!input?.symbol || !input.timeframe || !Array.isArray(input.candles) || input.candles.length < 60) {
     throw new Error('A symbol, timeframe, and at least 60 candles are required.');
   }
-  const context = await buildContext(input, accountId);
+  const context = await buildContext(input, accountId, accessToken);
   const decision = masterDecisionEngine.analyze(context);
   return { decision };
 }

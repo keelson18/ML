@@ -6,7 +6,6 @@ import { detectExtendedChartPatterns } from '../patterns/chart-patterns';
 import { detectHeadShoulders, detectDoubleTopBottom, detectTriangleFlag } from './legacy-patterns';
 import { analyzeMarketStructure } from '../market-structure';
 import { adx } from '../indicators/adx';
-import { trendFollowingStrategy } from './trend-following';
 
 export type StrategyCategory = 'Trend' | 'Momentum' | 'Breakout' | 'Mean Reversion' | 'Market Structure' | 'Liquidity' | 'Price Action' | 'Volume' | 'Divergence' | 'Volatility' | 'Multi-factor / Confluence' | 'Additional';
 

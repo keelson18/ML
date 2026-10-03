@@ -5,6 +5,7 @@ export type Timeframe = '1m' | '3m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d' 
 export type UserRole = 'user' | 'admin';
 
 export type MarketType = 'crypto' | 'forex' | 'commodity' | 'index' | 'stock';
+export type MarketDataProvider = 'binance' | 'massive' | 'twelvedata';
 
 export interface Candle {
   time: number; // unix seconds
@@ -79,9 +80,28 @@ export interface Market {
   exchange: string;
   label: string;
   provider: string;
+  canonicalSymbol?: string;
+  sourceSymbol?: string;
+  priceCurrency?: string;
+  id?: string;
   category?: string;
   sector?: string;
   isActive: boolean;
+}
+
+export interface MarketDataIdentity {
+  instrumentId: string;
+  canonicalSymbol: string;
+  sourceSymbol: string;
+  provider: string;
+  baseAsset: string;
+  quoteAsset: string;
+  marketType: MarketType;
+  timeframe: Timeframe;
+  startTimestamp: number | null;
+  endTimestamp: number | null;
+  datasetId: string;
+  dataVersion: string;
 }
 
 // User profile with role

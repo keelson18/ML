@@ -13,4 +13,6 @@ export const config = {
   supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? '',
   geminiApiKey: process.env.GEMINI_API_KEY ?? '',
   mlServiceApiKey: process.env.ML_SERVICE_API_KEY ?? '',
+  massiveApiKey: process.env.MASSIVE_API_KEY ?? '',
+  twelveDataApiKey: process.env.TWELVEDATA_API_KEY ?? '',
 };

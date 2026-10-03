@@ -35,20 +35,25 @@ export default function CMSEditor({ content, onSaved, onCancel }: Props) {
     }
     setSaving(true);
     setError(null);
-    const result = await upsertContent({
-      slug: slug.trim(),
-      title: title.trim(),
-      body: body.trim(),
-      excerpt: excerpt.trim() || undefined,
-      contentType,
-      tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
-      published,
-    });
-    setSaving(false);
-    if (result) {
+    try {
+      const result = await upsertContent({
+        slug: slug.trim(),
+        title: title.trim(),
+        body: body.trim(),
+        excerpt: excerpt.trim() || undefined,
+        contentType,
+        tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
+        published,
+      });
+      if (!result) {
+        setError('Failed to save content.');
+        return;
+      }
       onSaved();
-    } else {
-      setError('Failed to save content.');
+    } catch {
+      setError('Failed to save content. Please try again.');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -131,7 +136,7 @@ export default function CMSEditor({ content, onSaved, onCancel }: Props) {
           onChange={(e) => setBody(e.target.value)}
           rows={10}
           className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-text text-sm font-mono focus:outline-none focus:border-primary resize-y"
-          placeholder="Content body (markdown supported)"
+          placeholder="Content body (plain text; line breaks are preserved)"
         />
       </div>
 
