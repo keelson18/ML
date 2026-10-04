@@ -8,11 +8,19 @@ import { paperRoutes } from './routes/paper';
 import { positionRoutes } from './routes/positions';
 import { registerAuthGuards } from './middleware/fastify-auth';
 
+function allowedOrigins(): string[] {
+  const configured = process.env.CORS_ORIGIN;
+  if (!configured && process.env.NODE_ENV === 'production') throw new Error('CORS_ORIGIN must be set in production.');
+  return (configured ?? 'http://localhost:5173').split(',').map((origin) => origin.trim()).filter(Boolean);
+}
+
+const autonomyEnabled = () => process.env.AUTONOMOUS_TRADING === 'true';
+
 export function buildServer() {
   const app = Fastify({ logger: true });
   registerAuthGuards(app);
-  const pipeline = new AutonomousPipeline({ enableExecution: process.env.AUTONOMOUS_TRADING !== 'false' });
-  void app.register(cors, { origin: true });
+  const pipeline = new AutonomousPipeline({ enableExecution: autonomyEnabled() });
+  void app.register(cors, { origin: allowedOrigins() });
   void app.register(decisionRoutes, pipeline);
   void app.register(marketRoutes);
   void app.register(paperRoutes);
@@ -43,7 +51,7 @@ export async function startServer() {
     }
     throw error;
   }
-  if (process.env.AUTONOMOUS_TRADING !== 'false') scheduler.start();
+  if (autonomyEnabled()) scheduler.start();
   const shutdown = async () => { scheduler.stop(); await app.close(); };
   process.once('SIGINT', shutdown);
   process.once('SIGTERM', shutdown);

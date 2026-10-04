@@ -152,7 +152,7 @@ export default function Dashboard() {
         setMl(cached);
         setMlStatus('cached');
       }
-      if (candles.length >= 60) {
+      if (decisionCandles.length >= 60) {
         if (!cancelled) setMlStatus('loading');
         const fresh = await fetchMLPrediction(symbol, timeframe);
         if (!cancelled) {
@@ -166,7 +166,7 @@ export default function Dashboard() {
       }
     })();
     return () => { cancelled = true; };
-  }, [symbol, timeframe, candles.length]);
+  }, [symbol, timeframe, decisionCandles.length]);
 
   const refreshML = async () => {
     setMlLoading(true);
@@ -181,12 +181,12 @@ export default function Dashboard() {
   };
 
   const { signals, recommendation, risk } = useMemo(() => {
-    if (candles.length < 60) return { signals: [] as Signal[], recommendation: null as Recommendation | null, risk: null };
-    const sigs = runAllStrategies(candles, timeframe);
-    const rec = combineSignals(sigs, ml, candles, symbol, timeframe);
-    const r = riskLevels(candles);
+    if (decisionCandles.length < 60) return { signals: [] as Signal[], recommendation: null as Recommendation | null, risk: null };
+    const sigs = runAllStrategies(decisionCandles, timeframe);
+    const rec = combineSignals(sigs, ml, decisionCandles, symbol, timeframe);
+    const r = riskLevels(decisionCandles);
     return { signals: sigs, recommendation: rec, risk: r };
-  }, [candles, ml, symbol, timeframe]);
+  }, [decisionCandles, ml, symbol, timeframe]);
 
   const overlays = useMemo(() => {
     const all = signals.flatMap((s) => s.overlays ?? []);

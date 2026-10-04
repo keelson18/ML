@@ -5,7 +5,7 @@ import { TIMEFRAME_MAP } from './types';
 
 const REST = 'https://api.twelvedata.com';
 const WS = 'wss://ws.twelvedata.com/v1/quotes/price';
-const API_KEY = import.meta.env.VITE_TWELVEDATA_API_KEY as string | undefined;
+const API_KEY = import.meta.env.TWELVEDATA_API_KEY as string | undefined;
 
 type TwelveDataCandle = {
   datetime: string;

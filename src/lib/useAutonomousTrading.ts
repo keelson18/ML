@@ -65,8 +65,21 @@ function createPaperAccount(): PaperAccountState {
   return { accountId: 'paper-001', cash: 10000, positions: [], trades: [] };
 }
 
+function mergeCandle(prev: Candle[], candle: Candle): Candle[] {
+  const arr = [...prev];
+  const last = arr[arr.length - 1];
+  if (last && last.time === candle.time) {
+    arr[arr.length - 1] = candle;
+  } else if (!last || candle.time > last.time) {
+    arr.push(candle);
+    if (arr.length > 1500) arr.shift();
+  }
+  return arr;
+}
+
 export function useAutonomousTrading(symbol: string, timeframe: Timeframe) {
   const [candles, setCandles] = useState<Candle[]>([]);
+  const [analysisCandles, setAnalysisCandles] = useState<Candle[]>([]);
   const [loading, setLoading] = useState(true);
   const [wsStatus, setWsStatus] = useState<'connecting' | 'open' | 'closed' | 'reconnecting'>('connecting');
   const [livePrice, setLivePrice] = useState<number | null>(null);
@@ -85,6 +98,7 @@ export function useAutonomousTrading(symbol: string, timeframe: Timeframe) {
     let disposed = false;
     setLoading(true);
     setCandles([]);
+    setAnalysisCandles([]);
     setMl(null);
     setIntelligence(null);
 
@@ -93,6 +107,7 @@ export function useAutonomousTrading(symbol: string, timeframe: Timeframe) {
         const data = await fetchKlines(symbol, timeframe, 1000);
         if (disposed) return;
         setCandles(data);
+        setAnalysisCandles(data.slice(0, -1));
         setLivePrice(data.length ? data[data.length - 1].close : null);
       } catch {
         if (!disposed) setCandles([]);
@@ -101,18 +116,9 @@ export function useAutonomousTrading(symbol: string, timeframe: Timeframe) {
       }
     })();
 
-    const unsub = subscribeKlines(symbol, timeframe, (candle) => {
-      setCandles((prev) => {
-        const arr = [...prev];
-        const last = arr[arr.length - 1];
-        if (last && last.time === candle.time) {
-          arr[arr.length - 1] = candle;
-        } else if (!last || candle.time > last.time) {
-          arr.push(candle);
-          if (arr.length > 1500) arr.shift();
-        }
-        return arr;
-      });
+    const unsub = subscribeKlines(symbol, timeframe, (candle, closed) => {
+      setCandles((prev) => mergeCandle(prev, candle));
+      if (closed) setAnalysisCandles((prev) => mergeCandle(prev, candle));
       setLivePrice(candle.close);
     }, (status) => setWsStatus(status));
 
@@ -131,11 +137,11 @@ export function useAutonomousTrading(symbol: string, timeframe: Timeframe) {
 
   // Run intelligence pipeline
   const runAnalysis = useCallback(async () => {
-    if (candles.length < 60) return;
+    if (analysisCandles.length < 60) return;
     setComputing(true);
     setError(null);
     try {
-      const entryPrice = candles[candles.length - 1].close;
+      const entryPrice = analysisCandles[analysisCandles.length - 1].close;
       const risk = {
         ...DEFAULT_RISK,
         trade: { ...DEFAULT_RISK.trade, entryPrice, portfolioValue: accountRef.current.cash },
@@ -149,7 +155,7 @@ export function useAutonomousTrading(symbol: string, timeframe: Timeframe) {
         inputContextId: `auto-${Date.now()}`,
         symbol,
         timeframe,
-        candles,
+        candles: analysisCandles,
         observedAt: Math.floor(Date.now() / 1000),
         risk,
         portfolio,
@@ -176,14 +182,13 @@ export function useAutonomousTrading(symbol: string, timeframe: Timeframe) {
     } finally {
       setComputing(false);
     }
-  }, [candles, symbol, timeframe, ml]);
+  }, [analysisCandles, symbol, timeframe, ml]);
 
-  // Auto-run analysis when candles update significantly
   useEffect(() => {
-    if (candles.length >= 60 && !loading) {
+    if (analysisCandles.length >= 60 && !loading) {
       runAnalysis();
     }
-  }, [candles.length, loading, runAnalysis]);
+  }, [analysisCandles.length, loading, runAnalysis]);
 
   const refreshML = async () => {
     setMlLoading(true);

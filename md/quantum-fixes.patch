@@ -1,0 +1,283 @@
+diff --git a/.env.example b/.env.example
+index 031ebdb..a37ad9a 100644
+--- a/.env.example
++++ b/.env.example
+@@ -12,9 +12,12 @@ VITE_BACKEND_URL=http://localhost:8787
+ # Server-only ML maintenance key (never expose with a VITE_ prefix)
+ ML_SERVICE_API_KEY=replace-with-a-random-server-secret
+ 
+-# Exact browser origin allowed by authenticated Edge Functions
++# Exact browser origin(s) allowed by the API and Edge Functions (comma-separated). Required in production.
+ CORS_ORIGIN=http://localhost:5173
+ 
++# Autonomous paper-trading scheduler. Off unless set to true.
++AUTONOMOUS_TRADING=false
++
+ # Google Gemini API Key (for Kinetic Coach)
+ GEMINI_API_KEY=your-gemini-api-key-here
+ 
+diff --git a/backend/src/routes/decisions.ts b/backend/src/routes/decisions.ts
+index 54b0473..5713402 100644
+--- a/backend/src/routes/decisions.ts
++++ b/backend/src/routes/decisions.ts
+@@ -2,14 +2,45 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+ import { analyze, type AnalyzeInput } from '../services/decisionService';
+ import { AutonomousPipeline } from '../autonomy/pipeline';
+ import { getAccount } from '../services/paperTradingService';
++import { TIMEFRAMES } from '../../../src/lib/types';
++
++const VALID_TIMEFRAMES = new Set<string>(TIMEFRAMES.map((t) => t.value));
++const SYMBOL_PATTERN = /^[A-Z0-9._-]{1,20}$/;
++const MIN_CANDLES = 60;
++const MAX_CANDLES = 2000;
++
++// Checks the request body before it reaches the engines. Returns a fixed, safe message
++// describing the first problem, or null when the input is valid.
++function validateAnalyzeInput(input: Partial<AnalyzeInput> | undefined, requireCandles: boolean): string | null {
++  if (!input || typeof input !== 'object') return 'Request body is required.';
++  if (typeof input.symbol !== 'string' || !SYMBOL_PATTERN.test(input.symbol)) return 'Invalid symbol.';
++  if (typeof input.timeframe !== 'string' || !VALID_TIMEFRAMES.has(input.timeframe)) return 'Invalid timeframe.';
++  if (input.candles === undefined && !requireCandles) return null;
++  if (!Array.isArray(input.candles) || input.candles.length < MIN_CANDLES || input.candles.length > MAX_CANDLES) {
++    return `candles must be an array of ${MIN_CANDLES} to ${MAX_CANDLES} items.`;
++  }
++  // Every candle needs finite numeric fields, otherwise indicators can silently produce NaN.
++  const valid = input.candles.every((c) => c
++    && Number.isFinite(c.time) && Number.isFinite(c.open) && Number.isFinite(c.high)
++    && Number.isFinite(c.low) && Number.isFinite(c.close) && Number.isFinite(c.volume));
++  return valid ? null : 'candles contain invalid values.';
++}
+ 
+ export async function decisionRoutes(app: FastifyInstance, pipeline: AutonomousPipeline) {
+   const handler = async (request: FastifyRequest<{ Body: AnalyzeInput }>, reply: FastifyReply) => {
++    if (!request.authenticatedUserId) return reply.code(401).send({ error: 'Authentication required' });
++    const invalid = validateAnalyzeInput(request.body, true);
++    if (invalid) {
++      // Repeated rejections from one user can indicate probing, so keep a trace.
++      request.log.warn({ userId: request.authenticatedUserId, reason: invalid }, 'rejected invalid analyze input');
++      return reply.code(400).send({ error: invalid });
++    }
+     try {
+-      if (!request.authenticatedUserId) return reply.code(401).send({ error: 'Authentication required' });
+       return await analyze(request.body, request.authenticatedUserId);
+     } catch (error) {
+-      return reply.code(400).send({ error: error instanceof Error ? error.message : 'Analysis failed.' });
++      // The real cause stays in the server log; the client only gets a generic message.
++      request.log.error({ err: error, userId: request.authenticatedUserId }, 'decision analysis failed');
++      return reply.code(500).send({ error: 'Analysis failed.' });
+     }
+   };
+   app.post<{ Body: AnalyzeInput }>('/api/v1/decisions/analyze', { preHandler: app.requireAuth }, handler);
+@@ -20,12 +51,18 @@ export async function decisionRoutes(app: FastifyInstance, pipeline: AutonomousP
+   app.post('/api/v1/autonomy/start', { preHandler: app.requireAdmin }, async () => { pipeline.start(); return pipeline.getSnapshot(); });
+   app.post('/api/v1/autonomy/pause', { preHandler: app.requireAdmin }, async () => { pipeline.pause(); return pipeline.getSnapshot(); });
+   app.post('/api/v1/autonomy/run', { preHandler: app.requireAdmin }, async (request, reply) => {
+-    const body = request.body as { symbol?: string; timeframe?: AnalyzeInput['timeframe']; candles?: AnalyzeInput['candles'] };
++    // `?? {}` stops a missing body from throwing a TypeError whose message would reach the client.
++    const body = (request.body ?? {}) as { symbol?: string; timeframe?: AnalyzeInput['timeframe']; candles?: AnalyzeInput['candles'] };
++    const symbol = body.symbol ?? 'BTCUSDT';
++    // The timeframe is optional here (the pipeline has its own default), so only check it when sent.
++    const invalid = validateAnalyzeInput({ ...body, symbol, timeframe: body.timeframe ?? '15m' }, false);
++    if (invalid) return reply.code(400).send({ error: invalid });
+     try {
+       pipeline.start();
+-      return await pipeline.runOnce(body.symbol ?? 'BTCUSDT', body.timeframe, body.candles);
++      return await pipeline.runOnce(symbol, body.timeframe, body.candles);
+     } catch (error) {
+-      return reply.code(400).send({ error: error instanceof Error ? error.message : 'Pipeline failed.' });
++      request.log.error({ err: error }, 'autonomy run failed');
++      return reply.code(500).send({ error: 'Pipeline failed.' });
+     }
+   });
+ }
+diff --git a/backend/src/server.ts b/backend/src/server.ts
+index f2d00a0..5dce71a 100644
+--- a/backend/src/server.ts
++++ b/backend/src/server.ts
+@@ -8,11 +8,22 @@ import { paperRoutes } from './routes/paper';
+ import { positionRoutes } from './routes/positions';
+ import { registerAuthGuards } from './middleware/fastify-auth';
+ 
++// Only the configured browser origin(s) may call this API; never reflect arbitrary origins.
++// CORS_ORIGIN accepts a comma-separated list and is mandatory in production.
++function allowedOrigins(): string[] {
++  const configured = process.env.CORS_ORIGIN;
++  if (!configured && process.env.NODE_ENV === 'production') throw new Error('CORS_ORIGIN must be set in production.');
++  return (configured ?? 'http://localhost:5173').split(',').map((origin) => origin.trim()).filter(Boolean);
++}
++
++// Autonomous (paper) execution is opt-in: it only runs when AUTONOMOUS_TRADING=true.
++const autonomyEnabled = () => process.env.AUTONOMOUS_TRADING === 'true';
++
+ export function buildServer() {
+   const app = Fastify({ logger: true });
+   registerAuthGuards(app);
+-  const pipeline = new AutonomousPipeline({ enableExecution: process.env.AUTONOMOUS_TRADING !== 'false' });
+-  void app.register(cors, { origin: true });
++  const pipeline = new AutonomousPipeline({ enableExecution: autonomyEnabled() });
++  void app.register(cors, { origin: allowedOrigins() });
+   void app.register(decisionRoutes, pipeline);
+   void app.register(marketRoutes);
+   void app.register(paperRoutes);
+@@ -43,7 +54,7 @@ export async function startServer() {
+     }
+     throw error;
+   }
+-  if (process.env.AUTONOMOUS_TRADING !== 'false') scheduler.start();
++  if (autonomyEnabled()) scheduler.start();
+   const shutdown = async () => { scheduler.stop(); await app.close(); };
+   process.once('SIGINT', shutdown);
+   process.once('SIGTERM', shutdown);
+diff --git a/src/components/Dashboard.tsx b/src/components/Dashboard.tsx
+index 691e96f..7bcaef4 100644
+--- a/src/components/Dashboard.tsx
++++ b/src/components/Dashboard.tsx
+@@ -149,7 +149,8 @@ export default function Dashboard() {
+         setMl(cached);
+         setMlStatus('cached');
+       }
+-      if (candles.length >= 60) {
++      // Only refresh the ML prediction once a candle has closed, not when a new one opens.
++      if (decisionCandles.length >= 60) {
+         if (!cancelled) setMlStatus('loading');
+         const fresh = await fetchMLPrediction(symbol, timeframe);
+         if (!cancelled) {
+@@ -163,7 +164,7 @@ export default function Dashboard() {
+       }
+     })();
+     return () => { cancelled = true; };
+-  }, [symbol, timeframe, candles.length]);
++  }, [symbol, timeframe, decisionCandles.length]);
+ 
+   const refreshML = async () => {
+     setMlLoading(true);
+@@ -178,12 +179,14 @@ export default function Dashboard() {
+   };
+ 
+   const { signals, recommendation, risk } = useMemo(() => {
+-    if (candles.length < 60) return { signals: [] as Signal[], recommendation: null as Recommendation | null, risk: null };
+-    const sigs = runAllStrategies(candles, timeframe);
+-    const rec = combineSignals(sigs, ml, candles, symbol, timeframe);
+-    const r = riskLevels(candles);
++    // Analyse closed candles only. The live candle is still forming (a brand-new one is just
++    // open=high=low=close), so signals computed on it flip on the first tick instead of on a real setup.
++    if (decisionCandles.length < 60) return { signals: [] as Signal[], recommendation: null as Recommendation | null, risk: null };
++    const sigs = runAllStrategies(decisionCandles, timeframe);
++    const rec = combineSignals(sigs, ml, decisionCandles, symbol, timeframe);
++    const r = riskLevels(decisionCandles);
+     return { signals: sigs, recommendation: rec, risk: r };
+-  }, [candles, ml, symbol, timeframe]);
++  }, [decisionCandles, ml, symbol, timeframe]);
+ 
+   const overlays = useMemo(() => {
+     const all = signals.flatMap((s) => s.overlays ?? []);
+diff --git a/src/lib/useAutonomousTrading.ts b/src/lib/useAutonomousTrading.ts
+index 1949f3a..3fdf34d 100644
+--- a/src/lib/useAutonomousTrading.ts
++++ b/src/lib/useAutonomousTrading.ts
+@@ -65,8 +65,23 @@ function createPaperAccount(): PaperAccountState {
+   return { accountId: 'paper-001', cash: 10000, positions: [], trades: [] };
+ }
+ 
++// Replace the candle with the same open time, or append a newer one (keeps the last 1500).
++function mergeCandle(prev: Candle[], candle: Candle): Candle[] {
++  const arr = [...prev];
++  const last = arr[arr.length - 1];
++  if (last && last.time === candle.time) {
++    arr[arr.length - 1] = candle;
++  } else if (!last || candle.time > last.time) {
++    arr.push(candle);
++    if (arr.length > 1500) arr.shift();
++  }
++  return arr;
++}
++
+ export function useAutonomousTrading(symbol: string, timeframe: Timeframe) {
+   const [candles, setCandles] = useState<Candle[]>([]);
++  // Closed candles only: analysis runs on these so signals never come from a half-formed candle.
++  const [analysisCandles, setAnalysisCandles] = useState<Candle[]>([]);
+   const [loading, setLoading] = useState(true);
+   const [wsStatus, setWsStatus] = useState<'connecting' | 'open' | 'closed' | 'reconnecting'>('connecting');
+   const [livePrice, setLivePrice] = useState<number | null>(null);
+@@ -85,6 +100,7 @@ export function useAutonomousTrading(symbol: string, timeframe: Timeframe) {
+     let disposed = false;
+     setLoading(true);
+     setCandles([]);
++    setAnalysisCandles([]);
+     setMl(null);
+     setIntelligence(null);
+ 
+@@ -93,6 +109,8 @@ export function useAutonomousTrading(symbol: string, timeframe: Timeframe) {
+         const data = await fetchKlines(symbol, timeframe, 1000);
+         if (disposed) return;
+         setCandles(data);
++        // The newest candle from the REST call is still forming, so leave it out of the analysis set.
++        setAnalysisCandles(data.slice(0, -1));
+         setLivePrice(data.length ? data[data.length - 1].close : null);
+       } catch {
+         if (!disposed) setCandles([]);
+@@ -101,18 +119,10 @@ export function useAutonomousTrading(symbol: string, timeframe: Timeframe) {
+       }
+     })();
+ 
+-    const unsub = subscribeKlines(symbol, timeframe, (candle) => {
+-      setCandles((prev) => {
+-        const arr = [...prev];
+-        const last = arr[arr.length - 1];
+-        if (last && last.time === candle.time) {
+-          arr[arr.length - 1] = candle;
+-        } else if (!last || candle.time > last.time) {
+-          arr.push(candle);
+-          if (arr.length > 1500) arr.shift();
+-        }
+-        return arr;
+-      });
++    const unsub = subscribeKlines(symbol, timeframe, (candle, closed) => {
++      setCandles((prev) => mergeCandle(prev, candle));
++      // Only a closed candle joins the analysis set (and so triggers a new analysis).
++      if (closed) setAnalysisCandles((prev) => mergeCandle(prev, candle));
+       setLivePrice(candle.close);
+     }, (status) => setWsStatus(status));
+ 
+@@ -131,11 +141,11 @@ export function useAutonomousTrading(symbol: string, timeframe: Timeframe) {
+ 
+   // Run intelligence pipeline
+   const runAnalysis = useCallback(async () => {
+-    if (candles.length < 60) return;
++    if (analysisCandles.length < 60) return;
+     setComputing(true);
+     setError(null);
+     try {
+-      const entryPrice = candles[candles.length - 1].close;
++      const entryPrice = analysisCandles[analysisCandles.length - 1].close;
+       const risk = {
+         ...DEFAULT_RISK,
+         trade: { ...DEFAULT_RISK.trade, entryPrice, portfolioValue: accountRef.current.cash },
+@@ -149,7 +159,7 @@ export function useAutonomousTrading(symbol: string, timeframe: Timeframe) {
+         inputContextId: `auto-${Date.now()}`,
+         symbol,
+         timeframe,
+-        candles,
++        candles: analysisCandles,
+         observedAt: Math.floor(Date.now() / 1000),
+         risk,
+         portfolio,
+@@ -176,14 +186,14 @@ export function useAutonomousTrading(symbol: string, timeframe: Timeframe) {
+     } finally {
+       setComputing(false);
+     }
+-  }, [candles, symbol, timeframe, ml]);
++  }, [analysisCandles, symbol, timeframe, ml]);
+ 
+-  // Auto-run analysis when candles update significantly
++  // Re-run the analysis when a candle closes (analysisCandles only changes on close or on a new load).
+   useEffect(() => {
+-    if (candles.length >= 60 && !loading) {
++    if (analysisCandles.length >= 60 && !loading) {
+       runAnalysis();
+     }
+-  }, [candles.length, loading, runAnalysis]);
++  }, [analysisCandles.length, loading, runAnalysis]);
+ 
+   const refreshML = async () => {
+     setMlLoading(true);

@@ -4,7 +4,7 @@ import { fetchWithTimeout } from './request';
 
 const REST = 'https://api.massive.com';
 
-const API_KEY = import.meta.env.VITE_MASSIVE_API_KEY as string | undefined;
+const API_KEY = import.meta.env.MASSIVE_API_KEY as string | undefined;
 
 const TIMEFRAME_MAP: Record<Timeframe, {
   multiplier: number;
