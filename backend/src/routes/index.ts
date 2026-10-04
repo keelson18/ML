@@ -4,7 +4,7 @@ import * as authController from '../controllers/authController.js';
 import * as cmsController from '../controllers/cmsController.js';
 import * as mlController from '../controllers/mlController.js';
 import * as tradingController from '../controllers/tradingController.js';
-import * as marketController from '../controllers/marketController.js';
+
 import * as coachController from '../controllers/coachController.js';
 
 const router = Router();
@@ -38,8 +38,6 @@ router.get('/trading/trades', authMiddleware, tradingController.getTrades);
 // Metrics
 router.get('/metrics', authMiddleware, adminMiddleware, tradingController.getMetrics);
 
-// Market data
-router.get('/markets/klines', marketController.getKlines);
 
 // Coach
 router.post('/coach/ask', authMiddleware, coachController.ask);

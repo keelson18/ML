@@ -20,7 +20,7 @@ const PANELS: { timeframe: Timeframe; label: string; role: string; limit: number
 export default function MultiTimeframeTerminal({ symbol, marketType, theme, wsStatus }: Props) {
   const [series, setSeries] = useState<Record<string, Candle[]>>({});
   const [loading, setLoading] = useState(true);
-  const dataProvider = useMemo(() => getDataProvider(marketType), [marketType]);
+  const dataProvider = useMemo(() => getDataProvider(symbol), [symbol]);
 
   useEffect(() => {
     let cancelled = false;

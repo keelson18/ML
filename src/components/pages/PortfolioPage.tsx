@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Briefcase, TrendingUp, DollarSign, Activity, RefreshCw, X } from 'lucide-react';
 import { closePaperPosition, fetchPaperAccount, type PaperAccount } from '../../lib/backend-api';
 import { getDataProvider } from '../../lib/providers';
@@ -9,7 +9,6 @@ export default function PortfolioPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [closingSymbol, setClosingSymbol] = useState<string | null>(null);
-  const provider = useMemo(() => getDataProvider('crypto'), []);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -42,7 +41,7 @@ export default function PortfolioPage() {
     const loadPrices = async () => {
       const entries = await Promise.all(symbols.map(async (symbol) => {
         try {
-          const candles = await provider.fetchKlines(symbol, '1m', 1);
+          const candles = await getDataProvider(symbol).fetchKlines(symbol, '1m', 1);
           const price = candles.at(-1)?.close;
           return price && Number.isFinite(price) ? [symbol, price] as const : null;
         } catch {
@@ -54,7 +53,7 @@ export default function PortfolioPage() {
     void loadPrices();
     const timer = window.setInterval(() => void loadPrices(), 15_000);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [provider, symbolKey]);
+  }, [symbolKey]);
 
   const trades = account?.trades ?? [];
   const wins = trades.filter((trade) => trade.realizedPnl > 0).length;

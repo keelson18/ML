@@ -16,7 +16,6 @@ export default function AlertsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const triggering = useRef(new Set<string>());
-  const provider = useMemo(() => getDataProvider('crypto'), []);
   const activeAlerts = useMemo(() => alerts.filter((alert) => alert.active), [alerts]);
 
   const load = useCallback(async () => {
@@ -35,7 +34,7 @@ export default function AlertsPage() {
 
   useEffect(() => {
     const symbols = [...new Set(activeAlerts.map((alert) => alert.symbol))];
-    const unsubscribe = symbols.map((trackedSymbol) => provider.subscribeKlines(trackedSymbol, '1m', (candle) => {
+    const unsubscribe = symbols.map((trackedSymbol) => getDataProvider(trackedSymbol).subscribeKlines(trackedSymbol, '1m', (candle) => {
       const crossed = activeAlerts.filter((alert) => alert.symbol === trackedSymbol
         && (alert.direction === 'above' ? candle.close >= alert.targetPrice : candle.close <= alert.targetPrice));
       for (const alert of crossed) {
@@ -50,7 +49,7 @@ export default function AlertsPage() {
       }
     }));
     return () => unsubscribe.forEach((stop) => stop());
-  }, [activeAlerts, provider]);
+  }, [activeAlerts]);
 
   const createAlert = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

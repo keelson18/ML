@@ -24,7 +24,7 @@ const MASSIVE_TIMEFRAMES: Record<Timeframe, { multiplier: number; timespan: 'min
 };
 
 export class MarketDataProviderError extends Error {
-  constructor(provider: string, readonly status: number, readonly retryAfter: string | null) {
+  constructor(readonly provider: string, readonly status: number, readonly retryAfter: string | null) {
     super(`${provider} market data failed (${status}).`);
   }
 }
@@ -75,7 +75,15 @@ export function fetchMarketData(canonicalSymbol: string, timeframe: Timeframe, l
 async function fetchMarketDataUncoalesced(canonicalSymbol: string, timeframe: Timeframe, limit: number): Promise<MarketDataSeries> {
   const configuredInstrument = getMarket(canonicalSymbol);
   if (!configuredInstrument) throw new Error(`Unknown canonical instrument: ${canonicalSymbol}`);
-  const sourceSymbol = configuredInstrument.sourceSymbol ?? (configuredInstrument.provider === 'binance' ? configuredInstrument.symbol : undefined);
+  const sourceSymbol = configuredInstrument.sourceSymbol ?? (
+    configuredInstrument.provider === 'binance'
+      ? configuredInstrument.symbol
+      : configuredInstrument.provider === 'twelvedata'
+        ? `${configuredInstrument.baseAsset}/${configuredInstrument.quoteAsset}`
+        : configuredInstrument.provider === 'massive' && configuredInstrument.marketType === 'stock'
+          ? configuredInstrument.symbol
+          : undefined
+  );
   if (!configuredInstrument.provider || !sourceSymbol) throw new Error(`No market-data source is configured for ${canonicalSymbol}.`);
   if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw new Error('Candle limit must be an integer between 1 and 1000.');
   const instrument: Market = {
@@ -164,9 +172,9 @@ async function fetchFromProvider(instrument: Market, timeframe: Timeframe, reque
     const minutes = interval.minutes * limit * 1.5;
     const from = new Date(Date.now() - minutes * 60_000).toISOString().slice(0, 10);
     const to = new Date().toISOString().slice(0, 10);
-    const query = new URLSearchParams({ adjusted: 'true', sort: 'asc', limit: String(limit), apiKey });
+    const query = new URLSearchParams({ adjusted: 'true', sort: 'asc', limit: String(limit) });
     const url = `${MASSIVE_REST}/v2/aggs/ticker/${encodeURIComponent(sourceSymbol)}/range/${interval.multiplier}/${interval.timespan}/${from}/${to}?${query}`;
-    const response = await fetchWithTimeout(url);
+    const response = await fetchWithTimeout(url, { headers: { Authorization: `Bearer ${apiKey}` } });
     if (!response.ok) throw new MarketDataProviderError('Massive', response.status, response.headers.get('retry-after'));
     const body = await response.json() as {
       status?: string;

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Star, Plus, X, RefreshCw } from 'lucide-react';
 import { TRACKED_PAIRS } from '../../lib/types';
 import { getDataProvider } from '../../lib/providers';
@@ -21,7 +21,6 @@ export default function WatchlistsPage({ userId }: Props) {
   const [saving, setSaving] = useState(false);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const provider = useMemo(() => getDataProvider('crypto'), []);
 
   const load = useCallback(async () => {
     if (!userId) {
@@ -50,7 +49,7 @@ export default function WatchlistsPage({ userId }: Props) {
     setQuoteLoading(true);
     const entries = await Promise.all(symbols.map(async (symbol) => {
       try {
-        const candles = await provider.fetchKlines(symbol, '1d', 2);
+        const candles = await getDataProvider(symbol).fetchKlines(symbol, '1d', 2);
         const latest = candles.at(-1);
         if (!latest) return null;
         const previous = candles.at(-2);
@@ -61,7 +60,7 @@ export default function WatchlistsPage({ userId }: Props) {
     }));
     setQuotes(Object.fromEntries(entries.filter((entry): entry is [string, Quote] => entry !== null)));
     setQuoteLoading(false);
-  }, [provider, symbols]);
+  }, [symbols]);
 
   useEffect(() => { void loadQuotes(); }, [loadQuotes]);
 

@@ -1,8 +1,9 @@
-import { closePaperPosition, simulatePaperOrder, type PaperAccountState, type PaperOrderRequest, type PaperTrade } from '../engines/paper-execution';
+import { closePaperPosition, simulatePaperOrder, type PaperAccountState, type PaperOrderRequest, type PaperOrderResult, type PaperTrade } from '../engines/paper-execution';
 import type { Candle } from '../../../src/lib/types';
+import { getMarket } from '../../../src/lib/markets';
 import type { TradeDecision } from '../engines/decision-engine';
 import { getSupabaseClient, getSupabaseClientWithToken } from '../db';
-import { fetchKlines } from '../../../src/lib/binance';
+import { fetchMarketData } from './marketDataService';
 
 const testAccounts = new Map<string, PaperAccountState>();
 
@@ -69,7 +70,7 @@ async function updateAccount<T>(
 }
 
 export async function closeOpenPaperPosition(accountId: string, symbol: string, accessToken?: string): Promise<PaperTrade> {
-  const candles = await fetchKlines(symbol, '1m', 1);
+  const candles = (await fetchMarketData(symbol, '1m', 1)).candles;
   const exitPrice = candles.at(-1)?.close;
   if (!exitPrice || !Number.isFinite(exitPrice)) throw new Error('A current market price is unavailable.');
   return updateAccount(accountId, (account) => {
@@ -134,9 +135,18 @@ export async function executeDecision(input: {
   const accountId = input.accountId ?? 'autonomy:default';
   const decision = input.decision;
   const requestedPrice = decision.entry ?? 0;
+  const market = getMarket(input.symbol);
+  const quoteCurrency = market?.priceCurrency ?? market?.quoteAsset;
+  const orderId = `paper-${Date.now()}`;
   const checkpoint = input.processedCandle ? candleCheckpoint(input.symbol, input.processedCandle.timeframe) : undefined;
 
-  return updateAccount(accountId, (account) => {
+  return updateAccount<PaperOrderResult>(accountId, (account) => {
+    if (quoteCurrency !== 'USD') {
+      return {
+        account,
+        result: { accepted: false, orderId, status: 'rejected', reason: 'Paper accounts support USD-quoted markets only.', account },
+      };
+    }
     if (checkpoint && account.processedCandles?.[checkpoint] === input.processedCandle?.time) {
       return { account, result: simulatePaperOrder(account, {
         orderId: 'duplicate-candle', positionId: 'duplicate-candle', decisionId: `decision-${decision.timestamp}`,
@@ -168,7 +178,7 @@ export async function executeDecision(input: {
       && equity > 0
       && (currentExposure + requestedPrice * quantity) / equity <= 0.5;
     const request: PaperOrderRequest = {
-      orderId: `paper-${Date.now()}`,
+      orderId,
       positionId: `position-${Date.now()}`,
       decisionId: `decision-${decision.timestamp}`,
       assetId: input.symbol,

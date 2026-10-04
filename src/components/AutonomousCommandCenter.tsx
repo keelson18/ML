@@ -3,8 +3,9 @@ import { Activity, AlertTriangle, ShieldCheck, Target, TrendingDown, TrendingUp 
 import PriceChart from './PriceChart';
 import TradingTerminal from './TradingTerminal';
 import type { AutonomyStatus, BackendDecision } from '../lib/backend-api';
-import { executePaperDecision, fetchAutonomyStatus } from '../lib/backend-api';
+import { executePaperTrade, fetchAutonomyStatus } from '../lib/backend-api';
 import type { Candle, Recommendation, Signal, Timeframe } from '../lib/types';
+import { formatMarketPrice } from '../lib/markets';
 
 interface Props {
   symbol: string;
@@ -53,8 +54,8 @@ export default function AutonomousCommandCenter({ symbol, timeframe, marketType,
     setExecuting(true);
     setExecutionMessage(null);
     try {
-      const result = await executePaperDecision(symbol, serverDecision);
-      setExecutionMessage(result.accepted ? `Paper order filled at $${result.fillPrice?.toLocaleString(undefined, { maximumFractionDigits: 4 })}.` : result.reason ?? 'Paper order was rejected by risk checks.');
+      const result = await executePaperTrade(symbol, timeframe);
+      setExecutionMessage(result.accepted ? `Paper order filled at ${formatMarketPrice(symbol, result.fillPrice, 4)}.` : result.reason ?? 'Paper order was rejected by risk checks.');
     } catch {
       setExecutionMessage('Paper order could not be submitted. Please try again.');
     } finally {
@@ -82,7 +83,7 @@ export default function AutonomousCommandCenter({ symbol, timeframe, marketType,
         </aside>
 
         <div className="command-chart">
-          <div className="chart-caption"><span>EXECUTION CHART</span><span>{livePrice ? `$${livePrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : '--'}</span></div>
+          <div className="chart-caption"><span>EXECUTION CHART</span><span>{formatMarketPrice(symbol, livePrice)}</span></div>
           <div className="command-chart-canvas">{candles.length > 0 ? <TradingTerminal symbol={symbol} marketType={marketType} candles={candles} overlays={overlays} timeframe={timeframe} theme={theme} wsStatus={wsStatus} /> : <div className="command-empty">{loading ? 'Loading market data' : 'No market data available'}</div>}</div>
         </div>
 

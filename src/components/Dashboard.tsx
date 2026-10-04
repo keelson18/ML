@@ -16,7 +16,7 @@ import CMSManager from './CMS/CMSManager';
 import CMSViewer from './CMS/CMSViewer';
 import Sidebar from './Sidebar';
 import { pathForSidebarTab, sidebarTabFromPath, type SidebarTab } from '../lib/routes';
-import { getMarketsByType } from '../lib/markets';
+import { formatMarketPrice, getMarketsByType } from '../lib/markets';
 import { fetchPublishedContent } from '../lib/cms';
 import MarketsPage from './pages/MarketsPage';
 import AIAnalysis from './pages/AIAnalysis';
@@ -81,7 +81,7 @@ export default function Dashboard() {
   }, [isAdmin, profile]);
 
   const availableMarkets = useMemo(() => getMarketsByType(marketType), [marketType]);
-  const dataProvider = useMemo(() => getDataProvider(marketType), [marketType]);
+  const dataProvider = useMemo(() => getDataProvider(symbol), [symbol]);
 
   useEffect(() => { candlesRef.current = candles; }, [candles]);
 
@@ -125,7 +125,12 @@ export default function Dashboard() {
       if (arr.length > 1500) arr.shift();
       candlesRef.current = arr;
       setCandles(arr);
-      if (closed) setDecisionCandles(arr);
+      if (closed) {
+        setDecisionCandles((previous) => {
+          if (previous.at(-1) && previous[previous.length - 1].time > candle.time) return previous;
+          return arr.filter((item) => item.time <= candle.time);
+        });
+      }
       setLivePrice(candle.close);
     }, (status) => setWsStatus(status));
 
@@ -242,7 +247,7 @@ export default function Dashboard() {
             <div className="flex items-center gap-1 px-3 py-2 rounded-lg bg-surface border border-border text-xs text-muted">
               <span className="text-text font-medium">1D</span><span>·</span><span>4H</span><span>·</span><span>15M</span><span>·</span><span>5M</span>
             </div>
-            <span className="text-lg font-semibold tabular-nums ml-auto text-text">${livePrice?.toLocaleString(undefined, { maximumFractionDigits: 2 }) ?? '--'}</span>
+            <span className="text-lg font-semibold tabular-nums ml-auto text-text">{formatMarketPrice(symbol, livePrice)}</span>
           </div>
           <div className="bg-surface border border-border rounded-xl overflow-hidden h-[600px] relative">
             <MultiTimeframeTerminal symbol={symbol} marketType={marketType} theme={theme} wsStatus={wsStatus} />
@@ -261,7 +266,7 @@ export default function Dashboard() {
           </div>
           <div className="dashboard-market-price">
             <span className="dashboard-price-label">{symbol} <span>·</span> {timeframe}</span>
-            <strong>{livePrice != null ? `$${livePrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : '--'}</strong>
+            <strong>{formatMarketPrice(symbol, livePrice)}</strong>
             <div className="dashboard-price-change">
               {priceChange !== null && <span className={priceChange >= 0 ? 'is-positive' : 'is-negative'}>
                 {priceChange >= 0 ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}

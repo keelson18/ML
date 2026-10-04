@@ -1,12 +1,7 @@
 import { spawn } from 'node:child_process';
 
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-const backendPort = process.env.BACKEND_PORT ?? '3001';
 const autonomyPort = process.env.AUTONOMY_PORT ?? '8787';
-const services = [
-  ['HTTP API', ['run', 'api:dev'], { BACKEND_PORT: backendPort }],
-  ['Autonomy API', ['run', 'backend:dev'], { AUTONOMY_PORT: autonomyPort }],
-];
 const children = [];
 let stopping = false;
 
@@ -51,11 +46,8 @@ async function waitUntilReady(name, url) {
 }
 
 async function start() {
-  for (const [name, args, overrides] of services) launchService(name, args, overrides);
-  await Promise.all([
-    waitUntilReady('HTTP API', `http://127.0.0.1:${backendPort}/health`),
-    waitUntilReady('Autonomy API', `http://127.0.0.1:${autonomyPort}/health`),
-  ]);
+  launchService('Autonomy API', ['run', 'backend:dev'], { AUTONOMY_PORT: autonomyPort });
+  await waitUntilReady('Autonomy API', `http://127.0.0.1:${autonomyPort}/health`);
   if (!stopping) launchService('Web', ['run', 'dev:web']);
 }
 

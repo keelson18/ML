@@ -65,10 +65,10 @@ export interface PaperOrderResult {
   fee?: number;
 }
 
-export async function executePaperDecision(symbol: string, decision: BackendDecision): Promise<PaperOrderResult> {
+export async function executePaperTrade(symbol: string, timeframe: Timeframe): Promise<PaperOrderResult> {
   return authenticatedBackendRequest<PaperOrderResult>('/api/v1/paper/execute', {
     method: 'POST',
-    body: JSON.stringify({ symbol, decision }),
+    body: JSON.stringify({ symbol, timeframe }),
   });
 }
 

@@ -1,7 +1,7 @@
-import { fetchKlines } from '../../../src/lib/binance';
 import type { Candle, Timeframe } from '../../../src/lib/types';
 import { analyze } from '../services/decisionService';
 import { executeDecision, getAccount, manageOpenPositions, markCandleProcessed, wasCandleProcessed } from '../services/paperTradingService';
+import { fetchMarketData } from '../services/marketDataService';
 import type { AutonomousConfig, AutonomousState, PipelineResult, PipelineSnapshot } from './types';
 
 const DEFAULT_CONFIG: AutonomousConfig = {
@@ -46,7 +46,7 @@ export class AutonomousPipeline {
   }
 
   async runOnce(symbol: string, timeframe: Timeframe = this.config.timeframe, candles?: Candle[]): Promise<PipelineResult> {
-    const series = candles ?? await fetchKlines(symbol, timeframe, 501);
+    const series = candles ?? (await fetchMarketData(symbol, timeframe, 501)).candles;
     const closedCandle = series[series.length - 2];
     if (!closedCandle) throw new Error(`No closed candle available for ${symbol}.`);
     if (this.state === 'PAUSED' || this.state === 'OFFLINE') return { symbol, timeframe, candle: closedCandle, skipped: `Pipeline is ${this.state}.`, state: this.state };

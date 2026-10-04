@@ -18,8 +18,6 @@ export default function MarketsPage() {
   const pageCount = Math.max(1, Math.ceil(markets.length / pageSize));
   const visibleMarkets = useMemo(() => markets.slice(page * pageSize, (page + 1) * pageSize), [markets, page]);
   const marketTypeMeta = MARKET_TYPES.find((mt) => mt.value === selectedType);
-  const provider = useMemo(() => getDataProvider(selectedType), [selectedType]);
-
   const loadQuotes = useCallback(() => {
     let cancelled = false;
     setLoading(true);
@@ -27,7 +25,7 @@ export default function MarketsPage() {
     setError(null);
     Promise.all(visibleMarkets.map(async (market) => {
       try {
-        const candles = await provider.fetchKlines(market.symbol, '1d', 2);
+        const candles = await getDataProvider(market.symbol).fetchKlines(market.symbol, '1d', 2);
         if (candles.length < 1) return { symbol: market.symbol, quote: null };
         const latest = candles[candles.length - 1];
         const previous = candles[candles.length - 2];
@@ -40,11 +38,11 @@ export default function MarketsPage() {
         const usableEntries = results.filter((result): result is typeof result & { quote: Quote } => result.quote !== null);
         setQuotes(Object.fromEntries(usableEntries.map(({ symbol, quote }) => [symbol, quote])));
         const failures = results.length - usableEntries.length;
-        if (failures) setError(`${failures} of ${results.length} displayed quotes are unavailable from ${provider.name}. Check provider access or rate limits.`);
+        if (failures) setError(`${failures} of ${results.length} displayed quotes are unavailable from their configured providers. Check provider access or rate limits.`);
       }
     }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [provider, visibleMarkets]);
+  }, [visibleMarkets]);
 
   useEffect(() => loadQuotes(), [loadQuotes]);
 

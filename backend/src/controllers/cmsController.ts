@@ -13,8 +13,7 @@ export async function fetchPublished(req: AuthenticatedRequest, res: Response, n
 export async function fetchBySlug(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
   try {
     const slug = String(req.params.slug);
-    const allowUnpublished = Boolean(req.query.draft);
-    const item = await cmsService.fetchBySlug(slug, allowUnpublished);
+    const item = await cmsService.fetchBySlug(slug, false);
     if (!item) { res.status(404).json({ error: 'Not found' }); return; }
     res.json({ item });
   } catch (e) { next(e); }
