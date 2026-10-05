@@ -39,8 +39,8 @@ export async function decisionRoutes(app: FastifyInstance, pipeline: AutonomousP
       return reply.code(500).send({ error: 'Analysis failed.' });
     }
   };
-  app.post<{ Body: AnalyzeInput }>('/api/v1/decisions/analyze', { preHandler: app.requireAuth }, handler);
-  app.post<{ Body: AnalyzeInput }>('/api/v1/analyze', { preHandler: app.requireAuth }, handler);
+  app.post<{ Body: AnalyzeInput }>('/api/v1/decisions/analyze', { preHandler: app.requireAuth, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, handler);
+  app.post<{ Body: AnalyzeInput }>('/api/v1/analyze', { preHandler: app.requireAuth, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, handler);
 
   app.get('/api/v1/autonomy/status', { preHandler: app.requireAuth }, async () => pipeline.getSnapshot());
   app.get('/api/v1/autonomy/account', { preHandler: app.requireAdmin }, async () => getAccount('autonomy:default'));
@@ -48,7 +48,7 @@ export async function decisionRoutes(app: FastifyInstance, pipeline: AutonomousP
   app.post('/api/v1/autonomy/pause', { preHandler: app.requireAdmin }, async () => { pipeline.pause(); return pipeline.getSnapshot(); });
   app.post('/api/v1/autonomy/run', { preHandler: app.requireAdmin }, async (request, reply) => {
     const body = (request.body ?? {}) as { symbol?: string; timeframe?: AnalyzeInput['timeframe']; candles?: AnalyzeInput['candles'] };
-    const symbol = body.symbol ?? 'BTCUSDT';
+    const symbol = body.symbol ?? 'BTCUSD';
     const invalid = validateAnalyzeInput({ ...body, symbol, timeframe: body.timeframe ?? '15m' }, false);
     if (invalid) return reply.code(400).send({ error: invalid });
     try {

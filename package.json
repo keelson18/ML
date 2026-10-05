@@ -18,6 +18,8 @@
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",
+    "@fastify/helmet": "^13.1.1",
+    "@fastify/rate-limit": "^11.2.0",
     "@supabase/supabase-js": "^2.57.4",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

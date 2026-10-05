@@ -1,5 +1,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import rateLimit from '@fastify/rate-limit';
+import helmet from '@fastify/helmet';
 import { AutonomousPipeline } from './autonomy/pipeline';
 import { AutonomousScheduler } from './autonomy/scheduler';
 import { decisionRoutes } from './routes/decisions';
@@ -8,6 +10,7 @@ import { paperRoutes } from './routes/paper';
 import { positionRoutes } from './routes/positions';
 import { registerAuthGuards } from './middleware/fastify-auth';
 
+// Allowed CORS origins from env, defaults to local dev
 function allowedOrigins(): string[] {
   const configured = process.env.CORS_ORIGIN;
   if (!configured && process.env.NODE_ENV === 'production') throw new Error('CORS_ORIGIN must be set in production.');
@@ -20,6 +23,24 @@ export function buildServer() {
   const app = Fastify({ logger: true });
   registerAuthGuards(app);
   const pipeline = new AutonomousPipeline({ enableExecution: autonomyEnabled() });
+
+  // Helmet: HSTS and standard security headers
+  void app.register(helmet, {
+    contentSecurityPolicy: false, // Disable CSP — Vite injects inline styles in dev
+  });
+
+  // Rate limiting: per-user, stricter on market and decision routes
+  void app.register(rateLimit, {
+    max: 100,
+    timeWindow: '1 minute',
+    keyGenerator: (req) => req.authenticatedUserId ?? req.ip,
+    addHeaders: {
+      'x-ratelimit-limit': true,
+      'x-ratelimit-remaining': true,
+      'x-ratelimit-reset': true,
+    },
+  });
+
   void app.register(cors, { origin: allowedOrigins() });
   void app.register(decisionRoutes, pipeline);
   void app.register(marketRoutes);
