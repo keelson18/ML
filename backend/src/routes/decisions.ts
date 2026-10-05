@@ -1,8 +1,9 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { analyze, type AnalyzeInput } from '../services/decisionService';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { AutonomousPipeline } from '../autonomy/pipeline';
 import { getAccount } from '../services/paperTradingService';
 import { TIMEFRAMES } from '../../../src/lib/types';
+import { config } from '../config.js';
 
 const VALID_TIMEFRAMES = new Set<string>(TIMEFRAMES.map((t) => t.value));
 const SYMBOL_PATTERN = /^[A-Z0-9._-]{1,20}$/;
@@ -39,8 +40,12 @@ export async function decisionRoutes(app: FastifyInstance, pipeline: AutonomousP
       return reply.code(500).send({ error: 'Analysis failed.' });
     }
   };
-  app.post<{ Body: AnalyzeInput }>('/api/v1/decisions/analyze', { preHandler: app.requireAuth }, handler);
-  app.post<{ Body: AnalyzeInput }>('/api/v1/analyze', { preHandler: app.requireAuth }, handler);
+  const analyzeOptions = {
+    onRequest: app.requireAuth,
+    config: { rateLimit: { max: config.analyzeRateLimitMax, timeWindow: config.rateLimitWindowMs } },
+  };
+  app.post<{ Body: AnalyzeInput }>('/api/v1/decisions/analyze', analyzeOptions, handler);
+  app.post<{ Body: AnalyzeInput }>('/api/v1/analyze', analyzeOptions, handler);
 
   app.get('/api/v1/autonomy/status', { preHandler: app.requireAuth }, async () => pipeline.getSnapshot());
   app.get('/api/v1/autonomy/account', { preHandler: app.requireAdmin }, async () => getAccount('autonomy:default'));

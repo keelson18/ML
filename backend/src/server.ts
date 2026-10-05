@@ -1,5 +1,9 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import helmet from '@fastify/helmet';
+import rateLimit from '@fastify/rate-limit';
+import { config } from './config.js';
+
 import { AutonomousPipeline } from './autonomy/pipeline';
 import { AutonomousScheduler } from './autonomy/scheduler';
 import { decisionRoutes } from './routes/decisions';
@@ -18,6 +22,20 @@ const autonomyEnabled = () => process.env.AUTONOMOUS_TRADING === 'true';
 
 export function buildServer() {
   const app = Fastify({ logger: true });
+  void app.register(helmet, {
+    hsts: process.env.NODE_ENV === 'production'
+      ? { maxAge: 31_536_000, includeSubDomains: true }
+      : false,
+  });
+  void app.register(rateLimit, {
+    global: false,
+    hook: 'preHandler',
+    max: config.marketRateLimitMax,
+    timeWindow: config.rateLimitWindowMs,
+    keyGenerator: (request) => request.authenticatedUserId ?? request.ip,
+    onExceeded: (request) => request.log.warn({ userId: request.authenticatedUserId, route: request.routeOptions.url }, 'authenticated request rate limit exceeded'),
+    errorResponseBuilder: () => ({ statusCode: 429, error: 'Too Many Requests', message: 'Too many requests. Please try again later.' }),
+  });
   registerAuthGuards(app);
   const pipeline = new AutonomousPipeline({ enableExecution: autonomyEnabled() });
   void app.register(cors, { origin: allowedOrigins() });

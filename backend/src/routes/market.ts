@@ -1,10 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { getMarket } from '../../../src/lib/markets';
+import { config } from '../config';
 import { fetchMarketData, isTimeframe, MarketDataProviderError } from '../services/marketDataService';
 
 export async function marketRoutes(app: FastifyInstance) {
   app.get<{ Params: { symbol: string }; Querystring: { timeframe?: string; limit?: string } }>('/api/v1/market/candles/:symbol', {
-    preHandler: app.requireAuth,
+    onRequest: app.requireAuth,
+    config: { rateLimit: { max: config.marketRateLimitMax, timeWindow: config.rateLimitWindowMs } },
   }, async (request, reply) => {
     const { symbol } = request.params;
     const timeframe = request.query.timeframe ?? '15m';
