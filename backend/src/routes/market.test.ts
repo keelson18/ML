@@ -56,7 +56,7 @@ describe('market candle route', () => {
     await app.close();
   });
 
-  it('falls back to synthetic data when the upstream provider fails', async () => {
+  it('returns a generic error when the upstream provider fails', async () => {
     const app = await createApp();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('upstream secret detail', { status: 503 })));
 
@@ -65,14 +65,8 @@ describe('market candle route', () => {
       headers: { authorization: 'Bearer test-token' },
     });
 
-    expect(response.statusCode).toBe(200);
-    const body = response.json();
-    expect(body.candles).toHaveLength(100);
-    expect(body.candles[0]).toHaveProperty('open');
-    expect(body.candles[0]).toHaveProperty('high');
-    expect(body.candles[0]).toHaveProperty('low');
-    expect(body.candles[0]).toHaveProperty('close');
-    expect(body.candles[0]).toHaveProperty('volume');
+    expect(response.statusCode).toBe(502);
+    expect(response.json()).toEqual({ error: 'Market data unavailable.' });
     expect(response.body).not.toContain('upstream secret detail');
     await app.close();
   });

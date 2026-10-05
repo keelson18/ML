@@ -93,15 +93,9 @@ async function fetchMarketDataUncoalesced(canonicalSymbol: string, timeframe: Ti
     sourceSymbol,
   };
 
-  let candles: Candle[];
-  let provider = instrument.provider;
-  try {
-    candles = await fetchFromProvider(instrument, timeframe, limit);
-  } catch {
-    candles = generateSyntheticCandles(instrument, timeframe, limit);
-    provider = 'synthetic' as typeof provider;
-  }
+  const candles = await fetchFromProvider(instrument, timeframe, limit);
   validateCandles(candles, canonicalSymbol);
+  const provider = instrument.provider;
   const sourceInstrument = sourceSymbol;
   const startTimestamp = candles[0]?.time ?? null;
   const endTimestamp = candles.at(-1)?.time ?? null;
@@ -250,61 +244,3 @@ function validateCandles(candles: Candle[], canonicalSymbol: string): void {
   }
 }
 
-const TIMEFRAME_SECONDS: Record<Timeframe, number> = {
-  '1m': 60, '3m': 180, '5m': 300, '15m': 900, '30m': 1800,
-  '1h': 3600, '4h': 14400, '1d': 86400, '1w': 604800, '1M': 2592000,
-};
-
-const BASE_PRICES: Record<string, number> = {
-  BTCUSDT: 65000, BTCUSD: 65000, ETHUSDT: 3200, SOLUSDT: 145, XRPUSDT: 0.52,
-  BNBUSDT: 580, ADAUSDT: 0.45, DOGEUSDT: 0.12, AVAXUSDT: 28, LINKUSDT: 14,
-  DOTUSDT: 6.5, MATICUSDT: 0.72, LTCUSDT: 72, BCHUSDT: 380, XLMUSDT: 0.11,
-  UNIUSDT: 8.5, ATOMUSDT: 7.2, ETCUSDT: 24, FILUSDT: 5.1, NEARUSDT: 5.8,
-  APTUSDT: 8.4, EURUSD: 1.085, GBPUSD: 1.27, USDJPY: 149.5, USDCHF: 0.88,
-  AUDUSD: 0.66, NZDUSD: 0.60, USDCAD: 1.36, EURGBP: 0.854, EURJPY: 162.3,
-  GBPJPY: 190.2, AUDJPY: 98.5, CHFJPY: 170.1, EURAUD: 1.644, EURCHF: 0.956,
-  GBPCHF: 1.118, AUDCAD: 0.902, NZDCAD: 0.816, CADJPY: 109.9,
-  XAUUSD: 2350, XAGUSD: 28, XPTUSD: 950, XPDUSD: 980, USOIL: 78, UKOIL: 82,
-  NATGAS: 2.2, XCUUSD: 4.3,
-  SPX500: 5200, NAS100: 18300, US30: 39000, UK100: 8200, GER40: 18500, FRA40: 8000,
-  JP225: 39000, HK50: 17000, AUS200: 7800,
-  AAPL: 225, MSFT: 420, GOOGL: 165, AMZN: 185, TSLA: 250, META: 560,
-  NVDA: 120, JPM: 215, V: 275, JNJ: 160, WMT: 75, PG: 168, MA: 460,
-  UNH: 560, HD: 380, DIS: 95, NFLX: 680, ADBE: 550, CRM: 280, INTC: 35,
-};
-
-function generateSyntheticCandles(instrument: Market, timeframe: Timeframe, limit: number): Candle[] {
-  const stepSec = TIMEFRAME_SECONDS[timeframe];
-  const now = Math.floor(Date.now() / 1000);
-  const startTime = now - stepSec * limit;
-  const basePrice = BASE_PRICES[instrument.symbol] ?? 100;
-  const seed = instrument.symbol.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-  const volatility = basePrice > 1000 ? 0.015 : basePrice > 10 ? 0.02 : 0.03;
-
-  const candles: Candle[] = [];
-  let prevClose = basePrice;
-  for (let i = 0; i < limit; i++) {
-    const time = startTime + i * stepSec;
-    const pseudoRand = Math.sin(seed * 9.7 + i * 0.35) * 0.5 + Math.sin(seed * 2.1 + i * 0.71) * 0.3 + Math.sin(seed * 5.3 + i * 1.13) * 0.2;
-    const change = pseudoRand * volatility * prevClose;
-    const open = prevClose;
-    const close = Math.max(open + change, open * 0.5);
-    const high = Math.max(open, close) + Math.abs(Math.sin(seed + i * 1.7)) * volatility * prevClose * 0.5;
-    const low = Math.min(open, close) - Math.abs(Math.cos(seed + i * 2.3)) * volatility * prevClose * 0.5;
-    const volume = Math.abs(Math.sin(seed * 3.1 + i * 0.9)) * 1000 + 100;
-    candles.push({
-      time,
-      open: round(open),
-      high: round(high),
-      low: round(low),
-      close: round(close),
-      volume: round(volume),
-    });
-    prevClose = close;
-  }
-  return candles;
-}
-
-function round(n: number): number {
-  return Math.round(n * 100) / 100;
-}
