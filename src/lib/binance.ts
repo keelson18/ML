@@ -12,7 +12,7 @@ export async function fetchKlines(
   timeframe: Timeframe,
   limit = 1000,
 ): Promise<Candle[]> {
-  const tf = TIMEFRAMES.find((t) => t.value === timeframe)?.binance ?? timeframe;
+  const tf = TIMEFRAMES.find((t) => t.value === timeframe)?.value ?? timeframe;
   const url = `${REST}/api/v3/klines?symbol=${symbol}&interval=${tf}&limit=${limit}`;
   const res = await fetchWithTimeout(url);
   if (!res.ok) throw new Error(`Binance klines ${res.status}`);
@@ -74,7 +74,7 @@ export function subscribeKlines(
   let backoff = 1000;
   let closed = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
-  const tf = TIMEFRAMES.find((t) => t.value === timeframe)?.binance ?? timeframe;
+  const tf = TIMEFRAMES.find((t) => t.value === timeframe)?.value ?? timeframe;
 
   const connect = () => {
     if (closed) return;

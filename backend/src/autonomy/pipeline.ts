@@ -5,7 +5,7 @@ import { fetchMarketData } from '../services/marketDataService';
 import type { AutonomousConfig, AutonomousState, PipelineResult, PipelineSnapshot } from './types';
 
 const DEFAULT_CONFIG: AutonomousConfig = {
-  symbols: ['BTCUSDT', 'ETHUSDT'],
+  symbols: ['BTCUSD', 'ETHUSD'],
   timeframe: '15m',
   accountId: 'autonomy:default',
   enableExecution: true,

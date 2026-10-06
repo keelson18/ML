@@ -5,7 +5,7 @@ export type Timeframe = '1m' | '3m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d' 
 export type UserRole = 'user' | 'admin';
 
 export type MarketType = 'crypto' | 'forex' | 'commodity' | 'index' | 'stock';
-export type MarketDataProvider = 'binance' | 'massive' | 'twelvedata';
+export type MarketDataProvider = 'massive' | 'twelvedata';
 
 export interface Candle {
   time: number; // unix seconds
@@ -134,26 +134,26 @@ export interface CMSContent {
 }
 
 export const TRACKED_PAIRS = [
-  { symbol: 'BTCUSDT', label: 'BTC/USDT', marketType: 'crypto' as MarketType },
-  { symbol: 'ETHUSDT', label: 'ETH/USDT', marketType: 'crypto' as MarketType },
-  { symbol: 'SOLUSDT', label: 'SOL/USDT', marketType: 'crypto' as MarketType },
-  { symbol: 'BNBUSDT', label: 'BNB/USDT', marketType: 'crypto' as MarketType },
-  { symbol: 'ADAUSDT', label: 'ADA/USDT', marketType: 'crypto' as MarketType },
-  { symbol: 'XRPUSDT', label: 'XRP/USDT', marketType: 'crypto' as MarketType },
-  { symbol: 'DOTUSDT', label: 'DOT/USDT', marketType: 'crypto' as MarketType },
+  { symbol: 'BTCUSD', label: 'BTC/USD', marketType: 'crypto' as MarketType },
+  { symbol: 'ETHUSD', label: 'ETH/USD', marketType: 'crypto' as MarketType },
+  { symbol: 'SOLUSD', label: 'SOL/USD', marketType: 'crypto' as MarketType },
+  { symbol: 'BNBUSD', label: 'BNB/USD', marketType: 'crypto' as MarketType },
+  { symbol: 'ADAUSD', label: 'ADA/USD', marketType: 'crypto' as MarketType },
+  { symbol: 'XRPUSD', label: 'XRP/USD', marketType: 'crypto' as MarketType },
+  { symbol: 'DOTUSD', label: 'DOT/USD', marketType: 'crypto' as MarketType },
 ] as const;
 
-export const TIMEFRAMES: { value: Timeframe; label: string; binance: string }[] = [
-  { value: '1m', label: '1m', binance: '1m' },
-  { value: '3m', label: '3m', binance: '3m' },
-  { value: '5m', label: '5m', binance: '5m' },
-  { value: '15m', label: '15m', binance: '15m' },
-  { value: '30m', label: '30m', binance: '30m' },
-  { value: '1h', label: '1h', binance: '1h' },
-  { value: '4h', label: '4h', binance: '4h' },
-  { value: '1d', label: '1d', binance: '1d' },
-  { value: '1w', label: '1w', binance: '1w' },
-  { value: '1M', label: '1M', binance: '1M' },
+export const TIMEFRAMES: { value: Timeframe; label: string }[] = [
+  { value: '1m', label: '1m' },
+  { value: '3m', label: '3m' },
+  { value: '5m', label: '5m' },
+  { value: '15m', label: '15m' },
+  { value: '30m', label: '30m' },
+  { value: '1h', label: '1h' },
+  { value: '4h', label: '4h' },
+  { value: '1d', label: '1d' },
+  { value: '1w', label: '1w' },
+  { value: '1M', label: '1M' },
 ];
 
 // Market categories for multi-market support

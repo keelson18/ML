@@ -24,7 +24,7 @@ const corsHeaders = {
 function maintenanceApiKey(): string | null {
   return Deno.env.get("ML_SERVICE_API_KEY") ?? null;
 }
-const BINANCE = "https://api.binance.com";
+const BACKEND_URL = Deno.env.get("BACKEND_URL") ?? "http://localhost:8787";
 const PRED_HORIZON = 5; // candles ahead to predict
 const TRAIN_FRACTION = 0.7; // chronological split, no shuffling
 
@@ -189,19 +189,14 @@ function predictProba(model: { weights: number[]; bias: number; mean: number[]; 
 }
 
 // ---- Data fetching ----
-async function fetchCandles(symbol: string, timeframe: string, limit = 1000): Promise<Candle[]> {
-  const url = `${BINANCE}/api/v3/klines?symbol=${symbol}&interval=${timeframe}&limit=${limit}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Binance ${res.status}`);
-  const raw = (await res.json()) as unknown[][];
-  return raw.map((k) => ({
-    time: Math.floor((k[0] as number) / 1000),
-    open: parseFloat(k[1] as string),
-    high: parseFloat(k[2] as string),
-    low: parseFloat(k[3] as string),
-    close: parseFloat(k[4] as string),
-    volume: parseFloat(k[5] as string),
-  }));
+// Routes through the backend market data service so ML predictions use the same
+// provider (Massive/Twelve Data) as the UI, not a separate Binance feed.
+async function fetchCandles(symbol: string, timeframe: string, limit: number, accessToken: string): Promise<{ candles: Candle[]; provider: string; quoteCurrency: string }> {
+  const url = `${BACKEND_URL}/api/v1/market/candles/${encodeURIComponent(symbol)}?timeframe=${encodeURIComponent(timeframe)}&limit=${limit}`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error(`Market data service ${res.status}`);
+  const body = await res.json() as { candles: Candle[]; dataset: { provider: string; quoteCurrency: string } };
+  return { candles: body.candles, provider: body.dataset.provider, quoteCurrency: body.dataset.quoteCurrency };
 }
 
 // ---- Rate limiting (durable via Supabase table) ----
@@ -273,7 +268,7 @@ Deno.serve(async (req: Request) => {
         console.warn(`[ml] unauthenticated prediction attempt from ${req.headers.get('x-forwarded-for') ?? 'unknown'}`);
         return jsonResponse({ error: 'Authentication required' }, 401);
       }
-      const { pair, timeframe } = await req.json();
+      const { pair, timeframe } = await req.json() as { pair?: string; timeframe?: string };
       if (typeof pair !== 'string' || !/^[A-Z0-9]{2,20}$/.test(pair)
         || typeof timeframe !== 'string' || !['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d', '1w', '1M'].includes(timeframe)) {
         return jsonResponse({ error: 'A valid pair and timeframe are required' }, 400);
@@ -284,7 +279,9 @@ Deno.serve(async (req: Request) => {
       }
       const modelState = await ensureModel(supabase, pair, timeframe);
 
-      const candles = await fetchCandles(pair, timeframe, 1000);
+      const authHeader = req.headers.get('Authorization') ?? '';
+      const token = authHeader.slice('Bearer '.length);
+      const { candles, provider, quoteCurrency } = await fetchCandles(pair, timeframe, 1000, token);
       const { features, valid } = computeFeatures(candles);
       if (!valid || features.length === 0) return jsonResponse({ error: 'Insufficient data' }, 422);
       const last = features[features.length - 1];
@@ -301,6 +298,8 @@ Deno.serve(async (req: Request) => {
         expected_move_pct: Number(expectedMovePct.toFixed(2)),
         model_version: modelState.version,
         confidence,
+        dataProvider: provider,
+        quoteCurrency,
       };
       // Cache prediction durably.
       await supabase.from('ml_predictions').upsert({
@@ -316,12 +315,14 @@ Deno.serve(async (req: Request) => {
         return jsonResponse({ error: 'Unauthorized' }, 401);
       }
       if (!(await checkRate(supabase, 'retrain', 2))) return jsonResponse({ error: 'Rate limit exceeded' }, 429);
-      const { pair = 'BTCUSDT', timeframe = '1h' } = await req.json().catch(() => ({}));
+      const { pair = 'BTCUSD', timeframe = '1h' } = await req.json().catch(() => ({}));
       if (typeof pair !== 'string' || !/^[A-Z0-9]{2,20}$/.test(pair)
         || typeof timeframe !== 'string' || !['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d', '1w', '1M'].includes(timeframe)) {
         return jsonResponse({ error: 'A valid pair and timeframe are required' }, 400);
       }
-      const result = await retrainInternal(supabase, pair, timeframe);
+      const authHeader = req.headers.get('Authorization') ?? '';
+      const token = authHeader.slice('Bearer '.length);
+      const result = await retrainInternal(supabase, pair, timeframe, token);
       return jsonResponse(result);
     }
 
@@ -341,8 +342,9 @@ function jsonResponse(body: unknown, status = 200) {
 
 interface ModelMetrics { accuracy: number; f1: number; samples: number }
 
-async function retrainInternal(supabase: SupabaseClient, symbol: string, timeframe: string): Promise<{ ok: boolean; metrics: ModelMetrics; version: string }> {
-  const candles = await fetchCandles(symbol, timeframe, 1000);
+async function retrainInternal(supabase: SupabaseClient, symbol: string, timeframe: string, accessToken?: string): Promise<{ ok: boolean; metrics: ModelMetrics; version: string }> {
+  const token = accessToken ?? Deno.env.get('SERVICE_ACCESS_TOKEN') ?? '';
+  const { candles } = await fetchCandles(symbol, timeframe, 1000, token);
   const { features, labels, valid } = computeFeatures(candles);
   if (!valid) throw new Error('Insufficient data for training');
 

@@ -9,6 +9,6 @@ const unconfiguredProvider = createDataProvider(null);
 
 export function getDataProvider(symbol: string): DataProvider {
   const provider = getMarket(symbol)?.provider;
-  if (provider !== 'binance' && provider !== 'massive' && provider !== 'twelvedata') return unconfiguredProvider;
+  if (provider !== 'massive' && provider !== 'twelvedata') return unconfiguredProvider;
   return providers[provider] ??= createDataProvider(provider);
 }

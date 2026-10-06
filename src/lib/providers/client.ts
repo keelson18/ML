@@ -4,7 +4,6 @@ import { getNewlyClosedCandles } from './polling';
 import type { DataProvider } from './types';
 
 const POLL_INTERVALS: Record<MarketDataProvider, number> = {
-  binance: 15_000,
   massive: 30_000,
   twelvedata: 30_000,
 };
