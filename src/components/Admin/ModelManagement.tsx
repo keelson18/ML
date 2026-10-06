@@ -3,12 +3,8 @@ import { Brain, RefreshCw } from 'lucide-react';
 import { mlApi } from '../../api';
 
 interface ModelRecord {
-  id: string;
-  model_name: string;
   model_version: string;
-  status: string;
-  accuracy: number | null;
-  last_trained: string | null;
+  last_seen: string;
 }
 
 export default function ModelManagement() {
@@ -24,12 +20,8 @@ export default function ModelManagement() {
       for (const m of versions) {
         if (!uniqueVersions.has(m.model_version)) {
           uniqueVersions.set(m.model_version, {
-            id: m.model_version,
-            model_name: 'ML Predictor',
             model_version: m.model_version,
-            status: 'registered',
-            accuracy: null,
-            last_trained: m.created_at,
+            last_seen: m.created_at,
           });
         }
       }
@@ -51,36 +43,23 @@ export default function ModelManagement() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold">ML Model Registry</h3>
-        <button onClick={fetchModels} aria-label="Refresh models" className="p-1.5 rounded hover:bg-bg transition-colors">
-          <RefreshCw className="w-3.5 h-3.5 text-muted" />
+        <div><h2 className="text-base font-semibold">Observed model versions</h2><p className="text-xs text-muted mt-1">Versions recorded by recent predictions; deployment status is not tracked here.</p></div>
+        <button onClick={fetchModels} disabled={loading} aria-label="Refresh model versions" className="p-2 rounded-lg border border-border hover:border-primary/40 disabled:opacity-50">
+          <RefreshCw className={`w-3.5 h-3.5 text-muted ${loading ? 'animate-spin' : ''}`} />
         </button>
       </div>
       {loadError && <div role="alert" className="text-sm text-warning text-center py-8">Could not load models. Retry to check the registry again.</div>}
       {!loadError && models.length === 0 && (
-        <div className="text-sm text-muted text-center py-8">No models registered yet.</div>
+        <div className="rounded-xl border border-dashed border-border p-8 text-center"><Brain className="w-5 h-5 text-muted mx-auto mb-2" /><p className="text-sm font-medium">No model versions observed</p><p className="text-xs text-muted mt-1">Versions will appear after prediction records are written.</p></div>
       )}
       <div className="space-y-1.5">
         {models.map((m) => (
-          <div key={m.id} className="flex items-center justify-between py-2 px-3 rounded-lg bg-bg/50 border border-border/50">
+          <div key={m.model_version} className="flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-bg/50 px-4 py-3">
             <div className="flex items-center gap-3 min-w-0">
-              <Brain className="w-4 h-4 text-primary shrink-0" />
-              <div className="min-w-0">
-                <div className="text-sm font-medium">{m.model_name}</div>
-                <div className="text-xs text-muted">v{m.model_version}</div>
-              </div>
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10"><Brain className="w-4 h-4 text-primary" /></div>
+              <div className="min-w-0"><div className="text-sm font-medium">ML prediction model</div><div className="text-xs text-muted">Version {m.model_version}</div></div>
             </div>
-            <div className="flex items-center gap-3">
-              <span className="text-xs px-2 py-0.5 rounded-full bg-muted/15 text-muted">
-                {m.status}
-              </span>
-              {m.last_trained && (
-                <span className="text-xs text-muted hidden md:inline">
-                  {new Date(m.last_trained).toLocaleDateString()}
-                </span>
-              )}
-
-            </div>
+            <span className="text-xs text-muted shrink-0">Last seen {new Date(m.last_seen).toLocaleDateString()}</span>
           </div>
         ))}
       </div>
