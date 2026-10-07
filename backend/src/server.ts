@@ -56,7 +56,7 @@ export function buildServer() {
 
 export async function startServer() {
   const { app, pipeline } = buildServer();
-  const scheduler = new AutonomousScheduler(pipeline, getDefaultSymbols(), '15m');
+  const scheduler = new AutonomousScheduler(pipeline, getDefaultSymbols());
   const port = Number(process.env.AUTONOMY_PORT ?? process.env.PORT ?? 8787);
   try {
     await app.listen({ port, host: '0.0.0.0' });

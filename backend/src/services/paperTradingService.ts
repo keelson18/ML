@@ -142,18 +142,20 @@ export async function manageOpenPositions(accountId: string, symbol: string, can
   });
 }
 
-function candleCheckpoint(symbol: string, timeframe: string): string {
-  return `${symbol}:${timeframe}`;
+function candleCheckpoint(symbol: string, timeframe: string, role = 'executor'): string {
+  return `${symbol}:${role}:${timeframe}`;
 }
 
-export async function wasCandleProcessed(accountId: string, symbol: string, timeframe: string, time: number): Promise<boolean> {
+export async function wasCandleProcessed(accountId: string, symbol: string, timeframe: string, time: number, role = 'executor'): Promise<boolean> {
   const { account } = await loadAccount(accountId);
-  return account.processedCandles?.[candleCheckpoint(symbol, timeframe)] === time;
+  const checkpoints = account.processedCandles ?? {};
+  return checkpoints[candleCheckpoint(symbol, timeframe, role)] === time
+    || role === 'executor' && checkpoints[`${symbol}:${timeframe}`] === time;
 }
 
-export async function markCandleProcessed(accountId: string, symbol: string, timeframe: string, time: number): Promise<void> {
+export async function markCandleProcessed(accountId: string, symbol: string, timeframe: string, time: number, role = 'executor'): Promise<void> {
   await updateAccount(accountId, (account) => {
-    const key = candleCheckpoint(symbol, timeframe);
+    const key = candleCheckpoint(symbol, timeframe, role);
     return {
       account: { ...account, processedCandles: { ...account.processedCandles, [key]: time } },
       result: undefined,
@@ -175,7 +177,7 @@ export async function executeDecision(input: {
   const market = getMarket(input.symbol);
   const quoteCurrency = market?.priceCurrency ?? market?.quoteAsset;
   const orderId = `paper-${Date.now()}`;
-  const checkpoint = input.processedCandle ? candleCheckpoint(input.symbol, input.processedCandle.timeframe) : undefined;
+  const checkpoint = input.processedCandle ? candleCheckpoint(input.symbol, input.processedCandle.timeframe, 'executor') : undefined;
   const accountSnapshot = await getAccount(accountId, input.accessToken);
   const markPrices: Record<string, number> = { [input.symbol]: requestedPrice };
   if (process.env.NODE_ENV !== 'test') {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { executeDecision, getAccount, manageOpenPositions } from './paperTradingService';
+import { executeDecision, getAccount, manageOpenPositions, markCandleProcessed, wasCandleProcessed } from './paperTradingService';
 import type { TradeDecision } from '../engines/decision-engine';
 
 function buyDecision(): TradeDecision {
@@ -60,5 +60,13 @@ describe('backend paper position lifecycle', () => {
     expect(result.accepted).toBe(false);
     expect(result.reason).toContain('Short paper positions are not enabled');
     expect((await getAccount(accountId)).positions).toHaveLength(0);
+  });
+
+  it('keeps planner, executor, and manager candle checkpoints independent', async () => {
+    const accountId = `roles-${Date.now()}`;
+    await markCandleProcessed(accountId, 'BTCUSD', '15m', 900, 'executor');
+    expect(await wasCandleProcessed(accountId, 'BTCUSD', '15m', 900, 'executor')).toBe(true);
+    expect(await wasCandleProcessed(accountId, 'BTCUSD', '15m', 900, 'planner')).toBe(false);
+    expect(await wasCandleProcessed(accountId, 'BTCUSD', '15m', 900, 'manager')).toBe(false);
   });
 });
