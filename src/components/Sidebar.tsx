@@ -1,4 +1,4 @@
-import { Activity, BarChart3, Shield, BookOpen, Settings, PanelLeftClose, PanelLeftOpen, TrendingUp, Brain, Zap, Briefcase, History, Star, Bell, Newspaper, AlertTriangle, X } from 'lucide-react';
+import { Activity, BarChart3, Shield, BookOpen, Settings, PanelLeftClose, PanelLeftOpen, TrendingUp, Brain, Zap, Briefcase, History, Star, Bell, Newspaper, AlertTriangle, X, ClipboardList } from 'lucide-react';
 import type { SidebarTab } from '../lib/routes';
 export type { SidebarTab } from '../lib/routes';
 
@@ -13,6 +13,7 @@ interface Props {
 
 const NAV_ITEMS: { key: SidebarTab; label: string; icon: typeof Activity; adminOnly?: boolean }[] = [
   { key: 'dashboard', label: 'Dashboard', icon: Activity },
+  { key: 'trader-desk', label: 'Trader Desk', icon: ClipboardList },
   { key: 'markets', label: 'Markets', icon: BarChart3 },
   { key: 'terminal', label: 'Trading Terminal', icon: TrendingUp },
   { key: 'ai-analysis', label: 'AI Analysis', icon: Brain },
@@ -30,7 +31,7 @@ const NAV_ITEMS: { key: SidebarTab; label: string; icon: typeof Activity; adminO
 ];
 
 const NAV_GROUPS = [
-  { label: 'Operate', keys: ['dashboard', 'markets', 'terminal', 'portfolio', 'watchlists'] as SidebarTab[] },
+  { label: 'Operate', keys: ['dashboard', 'trader-desk', 'markets', 'terminal', 'portfolio', 'watchlists'] as SidebarTab[] },
   { label: 'Research', keys: ['ai-analysis', 'strategies', 'backtesting', 'news', 'ai-learning'] as SidebarTab[] },
   { label: 'Control', keys: ['alerts', 'risk', 'admin', 'cms', 'settings'] as SidebarTab[] },
 ];

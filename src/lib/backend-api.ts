@@ -147,3 +147,38 @@ export async function closePaperPosition(symbol: string): Promise<PaperTrade> {
   });
   return trade;
 }
+
+export interface TraderPlan {
+  id: string; symbol: string; side: 'long' | 'short'; setupType: string; htfBias: string;
+  zone: { low: number; high: number }; trigger: { kind: string; level?: number };
+  invalidation: number; targets: Array<{ price: number; fractionOfPosition: number }>;
+  minRR: number; expiresAtBar: number; thesis: string; falsification: string;
+  grade: string; status: string; createdAt: string; updatedAt: string; datasetId: string;
+}
+
+export interface TraderOverview {
+  cash: number; startingEquity: number; equity: number; unrealizedPnl: number; drawdownPct: number;
+  openRiskCash: number; heatPct: number; dailyPnl: number; weeklyPnl: number;
+  dailyLossLimitPct: number; weeklyLossLimitPct: number; staleSymbols: string[];
+  positions: Array<PaperPosition & { currentPrice: number; unrealizedPnl: number; rMultiple: number }>;
+  recentTrades: PaperTrade[];
+}
+
+export async function fetchTraderPlans(): Promise<TraderPlan[]> {
+  const result = await authenticatedBackendRequest<{ plans: TraderPlan[] }>('/api/v1/trader/plans');
+  return result.plans;
+}
+
+export async function fetchTraderOverview(): Promise<TraderOverview> {
+  return authenticatedBackendRequest<TraderOverview>('/api/v1/trader/overview');
+}
+
+export async function refreshTraderPlans(): Promise<{ plans: TraderPlan[]; watchlist: Array<{ bias: string; regime: string; keyLevels: number[]; qualityScore: number; reason: string }>; count: number }> {
+  return authenticatedBackendRequest('/api/v1/trader/plans/refresh', { method: 'POST' });
+}
+
+export async function fetchTraderHistory<T>(kind: 'journal' | 'reviews' | 'events' | 'orders'): Promise<T[]> {
+  const key = { journal: 'entries', reviews: 'reviews', events: 'events', orders: 'orders' }[kind];
+  const result = await authenticatedBackendRequest<Record<string, T[]>>(`/api/v1/trader/${kind}?limit=20`);
+  return result[key] ?? [];
+}

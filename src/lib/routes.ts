@@ -1,7 +1,8 @@
-export type SidebarTab = 'dashboard' | 'markets' | 'terminal' | 'ai-analysis' | 'strategies' | 'portfolio' | 'backtesting' | 'watchlists' | 'alerts' | 'news' | 'risk' | 'ai-learning' | 'admin' | 'cms' | 'settings';
+export type SidebarTab = 'dashboard' | 'trader-desk' | 'markets' | 'terminal' | 'ai-analysis' | 'strategies' | 'portfolio' | 'backtesting' | 'watchlists' | 'alerts' | 'news' | 'risk' | 'ai-learning' | 'admin' | 'cms' | 'settings';
 
 export const SIDEBAR_PATHS: Record<SidebarTab, string> = {
   dashboard: '/',
+  'trader-desk': '/trader-desk',
   markets: '/markets',
   terminal: '/terminal',
   'ai-analysis': '/ai-analysis',

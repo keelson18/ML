@@ -29,6 +29,7 @@ import NewsPage from './pages/NewsPage';
 import RiskManagement from './pages/RiskManagement';
 import AILearning from './pages/AILearning';
 import SettingsPage from './pages/SettingsPage';
+import TraderDesk from './pages/TraderDesk';
 import MultiTimeframeTerminal from './MultiTimeframeTerminal';
 import AutonomousCommandCenter from './AutonomousCommandCenter';
 import { fetchMarketAvailability, requestBackendDecision, type BackendDecision } from '../lib/backend-api';
@@ -242,6 +243,7 @@ export default function Dashboard() {
     }
 
     if (sidebarTab === 'settings') return <SettingsPage />;
+    if (sidebarTab === 'trader-desk') return <TraderDesk />;
 
     if (sidebarTab === 'markets') return <MarketsPage />;
     if (sidebarTab === 'ai-analysis') return <AIAnalysis signals={signals} ml={ml} mlStatus={mlStatus} recommendation={recommendation} onRefreshML={refreshML} mlLoading={mlLoading} candleCount={candles.length} marketLoading={loading} marketError={dataError} />;

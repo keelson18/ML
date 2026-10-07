@@ -66,4 +66,14 @@ describe('Fastify security headers', () => {
     expect(response.json()).toEqual({ statusCode: 429, error: 'Too Many Requests', message: 'Too many requests. Please try again later.' });
     await app.close();
   });
+
+  it('requires authentication for the Trader Desk overview and plan resources', async () => {
+    process.env.NODE_ENV = 'test';
+    const { app } = buildServer();
+    const overview = await app.inject('/api/v1/trader/overview');
+    const plans = await app.inject('/api/v1/trader/plans');
+    expect(overview.statusCode).toBe(401);
+    expect(plans.statusCode).toBe(401);
+    await app.close();
+  });
 });

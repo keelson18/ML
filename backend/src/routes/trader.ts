@@ -9,6 +9,8 @@ import { fetchMarketData } from '../services/marketDataService';
 import { getMarketAvailability } from '../services/marketAvailability';
 import { traderConfig } from '../trader/config';
 import { createTradePlan, rankPlannerResults } from '../trader/planner';
+import { getAccount } from '../services/paperTradingService';
+import { markToMarket } from '../trader/risk';
 
 const listQuery = z.object({ status: z.enum(['WATCHING', 'ARMED', 'PENDING_ORDER', 'OPEN', 'MANAGING', 'CLOSED']).optional() }).strict();
 const historyQuery = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) }).strict();
@@ -22,6 +24,50 @@ function closedCandles(candles: Awaited<ReturnType<typeof fetchMarketData>>['can
 }
 
 export async function traderRoutes(app: FastifyInstance) {
+  app.get('/api/v1/trader/overview', {
+    preHandler: app.requireAuth,
+    config: { rateLimit: { max: config.marketRateLimitMax, timeWindow: config.rateLimitWindowMs } },
+  }, async (request, reply) => {
+    if (!request.accessToken || !request.authenticatedUserId) return reply.code(401).send({ error: 'Authentication required.' });
+    try {
+      const account = await getAccount(request.authenticatedUserId, request.accessToken);
+      const open = account.positions.filter((position) => position.status === 'open');
+      const prices: Record<string, number> = {};
+      const staleSymbols: string[] = [];
+      await Promise.all(open.map(async (position) => {
+        try {
+          const data = await fetchMarketData(position.symbol, '1m', 2);
+          const mark = data.candles.at(-1)?.close;
+          if (!mark || !Number.isFinite(mark) || data.stale) staleSymbols.push(position.symbol);
+          prices[position.symbol] = mark && Number.isFinite(mark) ? mark : position.entryPrice;
+        } catch {
+          staleSymbols.push(position.symbol);
+          prices[position.symbol] = position.entryPrice;
+        }
+      }));
+      const marked = markToMarket(account, prices);
+      const current = Date.now();
+      const dayStart = new Date(new Date(current).setUTCHours(0, 0, 0, 0)).getTime();
+      const weekStart = dayStart - ((new Date(dayStart).getUTCDay() + 6) % 7) * 86_400_000;
+      const dailyPnl = account.trades.filter((trade) => Date.parse(trade.closedAt) >= dayStart).reduce((sum, trade) => sum + trade.realizedPnl, 0);
+      const weeklyPnl = account.trades.filter((trade) => Date.parse(trade.closedAt) >= weekStart).reduce((sum, trade) => sum + trade.realizedPnl, 0);
+      const openRiskCash = open.reduce((sum, position) => sum + Math.max(0, (position.entryPrice - (position.stopLoss ?? position.entryPrice)) * position.quantity), 0);
+      return {
+        cash: account.cash, startingEquity: traderConfig.TRADER_STARTING_EQUITY,
+        equity: marked.equity, unrealizedPnl: marked.unrealizedPnl, drawdownPct: marked.drawdownPct,
+        openRiskCash, heatPct: marked.equity > 0 ? openRiskCash / marked.equity * 100 : 0,
+        dailyPnl, weeklyPnl, dailyLossLimitPct: traderConfig.DAILY_LOSS_STOP_PCT,
+        weeklyLossLimitPct: traderConfig.WEEKLY_LOSS_STOP_PCT, staleSymbols,
+        positions: marked.positions.map(({ position, currentPrice, pnl }) => ({ ...position, currentPrice, unrealizedPnl: pnl,
+          rMultiple: position.initialRisk && position.initialRisk > 0 ? (currentPrice - position.entryPrice) / position.initialRisk : 0 })),
+        recentTrades: [...account.trades].sort((left, right) => Date.parse(right.closedAt) - Date.parse(left.closedAt)).slice(0, 20),
+      };
+    } catch (error) {
+      request.log.error({ reason: error instanceof Error ? error.message : 'unknown' }, 'Trader overview failed');
+      return reply.code(503).send({ error: 'Trader overview is temporarily unavailable.' });
+    }
+  });
+
   app.get('/api/v1/trader/plans', {
     preHandler: app.requireAuth,
     config: { rateLimit: { max: config.marketRateLimitMax, timeWindow: config.rateLimitWindowMs } },
