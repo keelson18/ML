@@ -1,6 +1,6 @@
 import type { Candle, Timeframe } from '../../../src/lib/types';
 import { analyze } from '../services/decisionService';
-import { executeDecision, getAccount, manageOpenPositions, markCandleProcessed, wasCandleProcessed } from '../services/paperTradingService';
+import { getAccount, manageOpenPositions, markCandleProcessed, wasCandleProcessed } from '../services/paperTradingService';
 import { fetchMarketData } from '../services/marketDataService';
 import type { AutonomousConfig, AutonomousState, PipelineResult, PipelineSnapshot } from './types';
 import { getDefaultSymbols } from '../constants/markets';
@@ -71,15 +71,20 @@ export class AutonomousPipeline {
       this.snapshot = { ...this.snapshot, state: 'MONITORING', lastRunAt: new Date().toISOString(), lastClosedCandle: { symbol, time: closedCandle.time }, processedDecisions: this.snapshot.processedDecisions + 1, consecutiveFailures: 0 };
       this.failures = 0;
 
-      if (this.config.enableExecution && (decision.decision === 'BUY' || decision.decision === 'SELL')) {
-        const order = await executeDecision({ accountId: this.config.accountId, symbol, decision, processedCandle: { timeframe, time: closedCandle.time }, marketDataStale: fetchedSeries?.stale ?? false });
-        this.processedCandles.set(candleKey, closedCandle.time);
-        this.snapshot = { ...this.snapshot, executedOrders: this.snapshot.executedOrders + (order.accepted ? 1 : 0) };
-        return { symbol, timeframe, candle: closedCandle, decision, order, closedTrades, state: this.state };
-      }
+      const directionalSignal = decision.decision === 'BUY' || decision.decision === 'SELL';
       await markCandleProcessed(this.config.accountId, symbol, timeframe, closedCandle.time);
       this.processedCandles.set(candleKey, closedCandle.time);
-      return { symbol, timeframe, candle: closedCandle, decision, closedTrades, state: this.state };
+      return {
+        symbol,
+        timeframe,
+        candle: closedCandle,
+        decision,
+        skipped: directionalSignal
+          ? 'Directional analysis is not an order; no stored plan and confirmed pending-order workflow was supplied.'
+          : undefined,
+        closedTrades,
+        state: this.state,
+      };
     } catch (error) {
       this.failures += 1;
       const errorMessage = error instanceof Error ? error.message : 'Unknown pipeline failure.';
