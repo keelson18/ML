@@ -12,6 +12,7 @@ import { positionRoutes } from './routes/positions';
 import { registerAuthGuards } from './middleware/fastify-auth';
 import { getDefaultSymbols } from './constants/markets';
 import { marketAvailabilityRoutes } from './routes/market-availability';
+import { traderRoutes } from './routes/trader';
 import { probeAllMarkets } from './services/marketAvailability';
 
 // Allowed CORS origins from env, defaults to local dev
@@ -48,6 +49,7 @@ export function buildServer() {
   void app.register(paperRoutes);
   void app.register(positionRoutes);
   void app.register(marketAvailabilityRoutes);
+  void app.register(traderRoutes);
   app.get('/health', async () => ({ status: 'ok', service: 'quantum-api', autonomy: pipeline.getSnapshot() }));
   return { app, pipeline };
 }

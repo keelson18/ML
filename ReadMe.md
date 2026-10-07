@@ -99,6 +99,8 @@ For the local Supabase Edge Function runtime, set `BACKEND_URL` to a URL reachab
 
 Trader Desk paper parameters are server-side and environment-overridable through the `TRADER_*`, `RISK_*`, `MAX_*`, and related settings shown in `.env.example`. Phase 1 defines validated defaults and domain contracts; these settings do not alter execution behavior yet.
 
+The initial Trader Desk planner is available through the authenticated `POST /api/v1/trader/plans/refresh` route; plans are read from `GET /api/v1/trader/plans`. Apply the new `trade_plans` migration before using these endpoints. Planner refreshes analyze the configured crypto universe with closed 1d/4h/trigger timeframe data, preserve the configured watchlist cap, and default to no plan when evidence is incomplete or conflicting. Refresh currently runs on demand; candle-close scheduling is a later phase.
+
 ### 3. Database setup
 
 Run the migrations in `supabase/migrations/` against your Supabase project (via the SQL Editor or Supabase CLI).
