@@ -16,8 +16,8 @@ function timeframeSeconds(timeframe: EngineContext['timeframe']): number {
   const configured = TIMEFRAMES.find((item) => item.value === timeframe);
   if (configured) {
     const units: Record<string, number> = { m: 60, h: 3600, d: 86400, w: 604800, M: 2592000 };
-    const unit = configured.binance.slice(-1);
-    const amount = Number.parseInt(configured.binance, 10);
+    const unit = configured.value.slice(-1);
+    const amount = Number.parseInt(configured.value, 10);
     return amount * (units[unit] ?? 60);
   }
   return 60;

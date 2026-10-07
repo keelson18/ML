@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { config } from '../config';
-import { fetchMarketData } from './marketDataService';
+import { fetchMarketData, clearMarketDataCache } from './marketDataService';
 
 const originalMassiveKey = config.massiveApiKey;
 const originalTwelveDataKey = config.twelveDataApiKey;
@@ -9,6 +9,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   config.massiveApiKey = originalMassiveKey;
   config.twelveDataApiKey = originalTwelveDataKey;
+  clearMarketDataCache();
 });
 
 describe('market data instrument mapping', () => {
@@ -76,18 +77,20 @@ describe('market data instrument mapping', () => {
     expect(result.dataset).toMatchObject({ provider: 'massive', sourceInstrument: 'AAPL', quoteCurrency: 'USD' });
   });
 
-  it('keeps Binance USDT candles distinct from USD candles', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([
-      [1_700_000_000_000, '100', '102', '99', '101', '3.5'],
-    ]), { status: 200 }));
+  it('resolves legacy USDT symbols to canonical USD symbols via Massive', async () => {
+    config.massiveApiKey = 'test-key';
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      status: 'OK',
+      results: [{ t: 1_700_000_000_000, o: 100, h: 102, l: 99, c: 101, v: 50 }],
+    }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await fetchMarketData('BTCUSDT', '1h', 100);
+    const requestUrl = String(fetchMock.mock.calls[0][0]);
 
-    expect(String(fetchMock.mock.calls[0][0])).toContain('symbol=BTCUSDT');
-    expect(result.instrument).toMatchObject({ canonicalSymbol: 'BTCUSDT', sourceSymbol: 'BTCUSDT', quoteAsset: 'USDT' });
-    expect(result.dataset).toMatchObject({ provider: 'binance', sourceInstrument: 'BTCUSDT', quoteCurrency: 'USDT' });
-    expect(result.dataset.id).not.toContain('BTCUSD:');
+    expect(requestUrl).toContain('/ticker/X%3ABTCUSD/');
+    expect(result.instrument).toMatchObject({ canonicalSymbol: 'BTCUSD', quoteAsset: 'USD' });
+    expect(result.dataset).toMatchObject({ provider: 'massive', quoteCurrency: 'USD' });
   });
 
   it('rejects a target instrument with no verified provider mapping', async () => {

@@ -42,7 +42,7 @@ export default function Dashboard() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [marketType, setMarketType] = useState<MarketType>('crypto');
-  const [symbol, setSymbol] = useState<string>('BTCUSDT');
+  const [symbol, setSymbol] = useState<string>('BTCUSD');
   const [timeframe, setTimeframe] = useState<Timeframe>('1h');
   const [candles, setCandles] = useState<Candle[]>([]);
   const [decisionCandles, setDecisionCandles] = useState<Candle[]>([]);

@@ -38,7 +38,7 @@ describe('market candle route', () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    const response = await app.inject('/api/v1/market/candles/BTCUSDT?timeframe=1h');
+    const response = await app.inject('/api/v1/market/candles/BTCUSD?timeframe=1h');
 
     expect(response.statusCode).toBe(401);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -55,11 +55,11 @@ describe('market candle route', () => {
       headers: { authorization: 'Bearer test-token' },
     });
     const invalidLimit = await app.inject({
-      url: '/api/v1/market/candles/BTCUSDT?timeframe=1h&limit=1001',
+      url: '/api/v1/market/candles/BTCUSD?timeframe=1h&limit=1001',
       headers: { authorization: 'Bearer test-token' },
     });
     const invalidTimeframe = await app.inject({
-      url: '/api/v1/market/candles/BTCUSDT?timeframe=2h&limit=100',
+      url: '/api/v1/market/candles/BTCUSD?timeframe=2h&limit=100',
       headers: { authorization: 'Bearer test-token' },
     });
 
@@ -101,7 +101,7 @@ describe('market candle route', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('upstream secret detail', { status: 503 })));
 
     const response = await app.inject({
-      url: '/api/v1/market/candles/BTCUSDT?timeframe=1h&limit=100',
+      url: '/api/v1/market/candles/BTCUSD?timeframe=1h&limit=100',
       headers: { authorization: 'Bearer test-token' },
     });
 

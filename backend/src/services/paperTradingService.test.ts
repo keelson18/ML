@@ -22,7 +22,7 @@ function buyDecision(): TradeDecision {
 describe('backend paper position lifecycle', () => {
   it('rejects non-USD-quoted markets for USD paper accounts', async () => {
     const accountId = `non-usd-${Date.now()}`;
-    const result = await executeDecision({ accountId, symbol: 'BTCUSDT', decision: buyDecision(), quantity: 1 });
+    const result = await executeDecision({ accountId, symbol: 'USDJPY', decision: buyDecision(), quantity: 1 });
 
     expect(result.accepted).toBe(false);
     expect(result.reason).toBe('Paper accounts support USD-quoted markets only.');

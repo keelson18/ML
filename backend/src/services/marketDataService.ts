@@ -3,9 +3,9 @@ import { getMarket } from '../../../src/lib/markets';
 import { config } from '../config';
 import { fetchWithTimeout } from '../../../src/lib/providers/request';
 
-const BINANCE_REST = 'https://api.binance.com';
-const MASSIVE_REST = 'https://api.massive.com';
-const TWELVEDATA_REST = 'https://api.twelvedata.com';
+// Provider base URLs — configurable via env for testing overrides
+const MASSIVE_REST = process.env.MASSIVE_REST_URL ?? 'https://api.massive.com';
+const TWELVEDATA_REST = process.env.TWELVEDATA_REST_URL ?? 'https://api.twelvedata.com';
 const TWELVEDATA_TIMEFRAMES: Record<Timeframe, string> = {
   '1m': '1min', '3m': '3min', '5m': '5min', '15m': '15min', '30m': '30min',
   '1h': '1h', '4h': '4h', '1d': '1day', '1w': '1week', '1M': '1month',
@@ -23,6 +23,19 @@ const MASSIVE_TIMEFRAMES: Record<Timeframe, { multiplier: number; timespan: 'min
   '1M': { multiplier: 1, timespan: 'month', minutes: 43200 },
 };
 
+// TTL cache for market data — avoids hammering provider APIs under polling load
+const CACHE_TTL_MS: Record<Timeframe, number> = {
+  '1m': 5_000, '3m': 5_000, '5m': 10_000, '15m': 15_000, '30m': 30_000,
+  '1h': 60_000, '4h': 120_000, '1d': 300_000, '1w': 600_000, '1M': 3_600_000,
+};
+
+interface CacheEntry {
+  series: MarketDataSeries;
+  fetchedAt: number;
+  expiresAt: number;
+}
+const marketDataCache = new Map<string, CacheEntry>();
+
 export class MarketDataProviderError extends Error {
   constructor(readonly provider: string, readonly status: number, readonly retryAfter: string | null) {
     super(`${provider} market data failed (${status}).`);
@@ -30,6 +43,10 @@ export class MarketDataProviderError extends Error {
 }
 
 const inFlightMarketRequests = new Map<string, Map<number, Promise<MarketDataSeries>>>();
+
+export function clearMarketDataCache(): void {
+  marketDataCache.clear();
+}
 
 export function isTimeframe(value: unknown): value is Timeframe {
   return typeof value === 'string' && TIMEFRAMES.some((timeframe) => timeframe.value === value);
@@ -50,13 +67,26 @@ export interface MarketDataSeries {
     dataVersion: string;
   };
   candles: Candle[];
+  fetchedAt: number;
+  stale: boolean;
 }
 
 export function fetchMarketData(canonicalSymbol: string, timeframe: Timeframe, limit = 1000): Promise<MarketDataSeries> {
   if (!Number.isInteger(limit) || limit < 1 || limit > 1000) return Promise.reject(new Error('Candle limit must be an integer between 1 and 1000.'));
 
-  const key = JSON.stringify([canonicalSymbol, timeframe]);
-  const requests = inFlightMarketRequests.get(key);
+  // Check TTL cache first — return fresh or stale entry
+  const cacheKey = JSON.stringify([canonicalSymbol, timeframe, limit]);
+  const cached = marketDataCache.get(cacheKey);
+  if (cached) {
+    const now = Date.now();
+    const stale = now > cached.expiresAt;
+    // Return cached data (stale flag indicates freshness)
+    return Promise.resolve({ ...cached.series, fetchedAt: cached.fetchedAt, stale });
+  }
+
+  // De-duplicate in-flight requests
+  const inflightKey = JSON.stringify([canonicalSymbol, timeframe]);
+  const requests = inFlightMarketRequests.get(inflightKey);
   const matchingRequest = [...(requests ?? [])]
     .filter(([requestedLimit]) => requestedLimit >= limit)
     .sort(([left], [right]) => left - right)[0]?.[1];
@@ -65,10 +95,10 @@ export function fetchMarketData(canonicalSymbol: string, timeframe: Timeframe, l
   const pending = requests ?? new Map<number, Promise<MarketDataSeries>>();
   const request = fetchMarketDataUncoalesced(canonicalSymbol, timeframe, limit);
   pending.set(limit, request);
-  inFlightMarketRequests.set(key, pending);
+  inFlightMarketRequests.set(inflightKey, pending);
   return request.finally(() => {
     pending.delete(limit);
-    if (pending.size === 0) inFlightMarketRequests.delete(key);
+    if (pending.size === 0) inFlightMarketRequests.delete(inflightKey);
   });
 }
 
@@ -76,13 +106,11 @@ async function fetchMarketDataUncoalesced(canonicalSymbol: string, timeframe: Ti
   const configuredInstrument = getMarket(canonicalSymbol);
   if (!configuredInstrument) throw new Error(`Unknown canonical instrument: ${canonicalSymbol}`);
   const sourceSymbol = configuredInstrument.sourceSymbol ?? (
-    configuredInstrument.provider === 'binance'
-      ? configuredInstrument.symbol
-      : configuredInstrument.provider === 'twelvedata'
-        ? `${configuredInstrument.baseAsset}/${configuredInstrument.quoteAsset}`
-        : configuredInstrument.provider === 'massive' && configuredInstrument.marketType === 'stock'
-          ? configuredInstrument.symbol
-          : undefined
+    configuredInstrument.provider === 'twelvedata'
+      ? `${configuredInstrument.baseAsset}/${configuredInstrument.quoteAsset}`
+      : configuredInstrument.provider === 'massive'
+        ? configuredInstrument.symbol
+        : undefined
   );
   if (!configuredInstrument.provider || !sourceSymbol) throw new Error(`No market-data source is configured for ${canonicalSymbol}.`);
   if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw new Error('Candle limit must be an integer between 1 and 1000.');
@@ -117,7 +145,8 @@ async function fetchMarketDataUncoalesced(canonicalSymbol: string, timeframe: Ti
     dataVersion,
   };
 
-  return {
+  const fetchedAt = Date.now();
+  const series: MarketDataSeries = {
     instrument: {
       id: instrument.id,
       canonicalSymbol: instrument.canonicalSymbol,
@@ -141,28 +170,21 @@ async function fetchMarketDataUncoalesced(canonicalSymbol: string, timeframe: Ti
       dataVersion,
     },
     candles,
+    fetchedAt,
+    stale: false,
   };
+
+  // Store in TTL cache
+  const ttl = CACHE_TTL_MS[timeframe] ?? 15_000;
+  const cacheKey = JSON.stringify([canonicalSymbol, timeframe, limit]);
+  marketDataCache.set(cacheKey, { series, fetchedAt, expiresAt: fetchedAt + ttl });
+
+  return series;
 }
 
 async function fetchFromProvider(instrument: Market, timeframe: Timeframe, requestedLimit: number): Promise<Candle[]> {
   const sourceSymbol = instrument.sourceSymbol;
   if (!sourceSymbol) throw new Error(`No source symbol is configured for ${instrument.canonicalSymbol}.`);
-
-  if (instrument.provider === 'binance') {
-    const limit = Math.min(requestedLimit, 1000);
-    const query = new URLSearchParams({ symbol: sourceSymbol, interval: timeframe, limit: String(limit) });
-    const response = await fetchWithTimeout(`${BINANCE_REST}/api/v3/klines?${query}`);
-    if (!response.ok) throw new MarketDataProviderError('Binance', response.status, response.headers.get('retry-after'));
-    const rows = await response.json() as unknown[][];
-    return rows.map((row) => ({
-      time: Math.floor(Number(row[0]) / 1000),
-      open: Number(row[1]),
-      high: Number(row[2]),
-      low: Number(row[3]),
-      close: Number(row[4]),
-      volume: Number(row[5]),
-    }));
-  }
 
   if (instrument.provider === 'massive') {
     const apiKey = config.massiveApiKey;
@@ -174,6 +196,7 @@ async function fetchFromProvider(instrument: Market, timeframe: Timeframe, reque
     const to = new Date().toISOString().slice(0, 10);
     const query = new URLSearchParams({ adjusted: 'true', sort: 'asc', limit: String(limit) });
     const url = `${MASSIVE_REST}/v2/aggs/ticker/${encodeURIComponent(sourceSymbol)}/range/${interval.multiplier}/${interval.timespan}/${from}/${to}?${query}`;
+    // API key in Authorization header, never in URL query string
     const response = await fetchWithTimeout(url, { headers: { Authorization: `Bearer ${apiKey}` } });
     if (!response.ok) throw new MarketDataProviderError('Massive', response.status, response.headers.get('retry-after'));
     const body = await response.json() as {

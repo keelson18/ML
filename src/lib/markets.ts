@@ -1,30 +1,29 @@
 import type { Market, MarketType } from './types';
 
-// Full market universe definition
+// Full market universe — single source of truth for all instruments
 export const MARKET_UNIVERSE: Market[] = [
-  // ---- Crypto ----
-  { symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', marketType: 'crypto', exchange: 'Binance', label: 'BTC/USDT', provider: 'binance', category: 'Major', isActive: true },
-  { symbol: 'ETHUSDT', baseAsset: 'ETH', quoteAsset: 'USDT', marketType: 'crypto', exchange: 'Binance', label: 'ETH/USDT', provider: 'binance', category: 'Major', isActive: true },
-  { symbol: 'SOLUSDT', baseAsset: 'SOL', quoteAsset: 'USDT', marketType: 'crypto', exchange: 'Binance', label: 'SOL/USDT', provider: 'binance', category: 'Major', isActive: true },
-  { symbol: 'XRPUSDT', baseAsset: 'XRP', quoteAsset: 'USDT', marketType: 'crypto', exchange: 'Binance', label: 'XRP/USDT', provider: 'binance', category: 'Major', isActive: true },
-  { symbol: 'BNBUSDT', baseAsset: 'BNB', quoteAsset: 'USDT', marketType: 'crypto', exchange: 'Binance', label: 'BNB/USDT', provider: 'binance', category: 'Major', isActive: true },
-  { symbol: 'ADAUSDT', baseAsset: 'ADA', quoteAsset: 'USDT', marketType: 'crypto', exchange: 'Binance', label: 'ADA/USDT', provider: 'binance', category: 'Major', isActive: true },
-  { symbol: 'DOGEUSDT', baseAsset: 'DOGE', quoteAsset: 'USDT', marketType: 'crypto', exchange: 'Binance', label: 'DOGE/USDT', provider: 'binance', category: 'Major', isActive: true },
-  { symbol: 'AVAXUSDT', baseAsset: 'AVAX', quoteAsset: 'USDT', marketType: 'crypto', exchange: 'Binance', label: 'AVAX/USDT', provider: 'binance', category: 'Altcoin', isActive: true },
-  { symbol: 'LINKUSDT', baseAsset: 'LINK', quoteAsset: 'USDT', marketType: 'crypto', exchange: 'Binance', label: 'LINK/USDT', provider: 'binance', category: 'Altcoin', isActive: true },
-  { symbol: 'DOTUSDT', baseAsset: 'DOT', quoteAsset: 'USDT', marketType: 'crypto', exchange: 'Binance', label: 'DOT/USDT', provider: 'binance', category: 'Altcoin', isActive: true },
-  { symbol: 'MATICUSDT', baseAsset: 'MATIC', quoteAsset: 'USDT', marketType: 'crypto', exchange: 'Binance', label: 'MATIC/USDT', provider: 'binance', category: 'Altcoin', isActive: true },
-  { symbol: 'LTCUSDT', baseAsset: 'LTC', quoteAsset: 'USDT', marketType: 'crypto', exchange: 'Binance', label: 'LTC/USDT', provider: 'binance', category: 'Altcoin', isActive: true },
-  { symbol: 'BCHUSDT', baseAsset: 'BCH', quoteAsset: 'USDT', marketType: 'crypto', exchange: 'Binance', label: 'BCH/USDT', provider: 'binance', category: 'Altcoin', isActive: true },
-  { symbol: 'XLMUSDT', baseAsset: 'XLM', quoteAsset: 'USDT', marketType: 'crypto', exchange: 'Binance', label: 'XLM/USDT', provider: 'binance', category: 'Altcoin', isActive: true },
-  { symbol: 'UNIUSDT', baseAsset: 'UNI', quoteAsset: 'USDT', marketType: 'crypto', exchange: 'Binance', label: 'UNI/USDT', provider: 'binance', category: 'Altcoin', isActive: true },
-  { symbol: 'ATOMUSDT', baseAsset: 'ATOM', quoteAsset: 'USDT', marketType: 'crypto', exchange: 'Binance', label: 'ATOM/USDT', provider: 'binance', category: 'Altcoin', isActive: true },
-  { symbol: 'ETCUSDT', baseAsset: 'ETC', quoteAsset: 'USDT', marketType: 'crypto', exchange: 'Binance', label: 'ETC/USDT', provider: 'binance', category: 'Altcoin', isActive: true },
-  { symbol: 'FILUSDT', baseAsset: 'FIL', quoteAsset: 'USDT', marketType: 'crypto', exchange: 'Binance', label: 'FIL/USDT', provider: 'binance', category: 'Altcoin', isActive: true },
-  { symbol: 'NEARUSDT', baseAsset: 'NEAR', quoteAsset: 'USDT', marketType: 'crypto', exchange: 'Binance', label: 'NEAR/USDT', provider: 'binance', category: 'Altcoin', isActive: true },
-  { symbol: 'APTUSDT', baseAsset: 'APT', quoteAsset: 'USDT', marketType: 'crypto', exchange: 'Binance', label: 'APT/USDT', provider: 'binance', category: 'Altcoin', isActive: true },
-
+  // ---- Crypto (USD-settled via Massive, ticker format X:<BASE>USD) ----
   { symbol: 'BTCUSD', canonicalSymbol: 'BTCUSD', sourceSymbol: 'X:BTCUSD', id: 'crypto-btc-usd', baseAsset: 'BTC', quoteAsset: 'USD', priceCurrency: 'USD', marketType: 'crypto', exchange: 'Massive', label: 'BTC/USD', provider: 'massive', category: 'Major', isActive: true },
+  { symbol: 'ETHUSD', canonicalSymbol: 'ETHUSD', sourceSymbol: 'X:ETHUSD', id: 'crypto-eth-usd', baseAsset: 'ETH', quoteAsset: 'USD', priceCurrency: 'USD', marketType: 'crypto', exchange: 'Massive', label: 'ETH/USD', provider: 'massive', category: 'Major', isActive: true },
+  { symbol: 'SOLUSD', canonicalSymbol: 'SOLUSD', sourceSymbol: 'X:SOLUSD', id: 'crypto-sol-usd', baseAsset: 'SOL', quoteAsset: 'USD', priceCurrency: 'USD', marketType: 'crypto', exchange: 'Massive', label: 'SOL/USD', provider: 'massive', category: 'Major', isActive: true },
+  { symbol: 'XRPUSD', canonicalSymbol: 'XRPUSD', sourceSymbol: 'X:XRPUSD', id: 'crypto-xrp-usd', baseAsset: 'XRP', quoteAsset: 'USD', priceCurrency: 'USD', marketType: 'crypto', exchange: 'Massive', label: 'XRP/USD', provider: 'massive', category: 'Major', isActive: true },
+  { symbol: 'BNBUSD', canonicalSymbol: 'BNBUSD', sourceSymbol: 'X:BNBUSD', id: 'crypto-bnb-usd', baseAsset: 'BNB', quoteAsset: 'USD', priceCurrency: 'USD', marketType: 'crypto', exchange: 'Massive', label: 'BNB/USD', provider: 'massive', category: 'Major', isActive: true },
+  { symbol: 'ADAUSD', canonicalSymbol: 'ADAUSD', sourceSymbol: 'X:ADAUSD', id: 'crypto-ada-usd', baseAsset: 'ADA', quoteAsset: 'USD', priceCurrency: 'USD', marketType: 'crypto', exchange: 'Massive', label: 'ADA/USD', provider: 'massive', category: 'Major', isActive: true },
+  { symbol: 'DOGEUSD', canonicalSymbol: 'DOGEUSD', sourceSymbol: 'X:DOGEUSD', id: 'crypto-doge-usd', baseAsset: 'DOGE', quoteAsset: 'USD', priceCurrency: 'USD', marketType: 'crypto', exchange: 'Massive', label: 'DOGE/USD', provider: 'massive', category: 'Major', isActive: true },
+  { symbol: 'AVAXUSD', canonicalSymbol: 'AVAXUSD', sourceSymbol: 'X:AVAXUSD', id: 'crypto-avax-usd', baseAsset: 'AVAX', quoteAsset: 'USD', priceCurrency: 'USD', marketType: 'crypto', exchange: 'Massive', label: 'AVAX/USD', provider: 'massive', category: 'Altcoin', isActive: true },
+  { symbol: 'LINKUSD', canonicalSymbol: 'LINKUSD', sourceSymbol: 'X:LINKUSD', id: 'crypto-link-usd', baseAsset: 'LINK', quoteAsset: 'USD', priceCurrency: 'USD', marketType: 'crypto', exchange: 'Massive', label: 'LINK/USD', provider: 'massive', category: 'Altcoin', isActive: true },
+  { symbol: 'DOTUSD', canonicalSymbol: 'DOTUSD', sourceSymbol: 'X:DOTUSD', id: 'crypto-dot-usd', baseAsset: 'DOT', quoteAsset: 'USD', priceCurrency: 'USD', marketType: 'crypto', exchange: 'Massive', label: 'DOT/USD', provider: 'massive', category: 'Altcoin', isActive: true },
+  // MATIC was renamed to POL by Polygon; using POL ticker
+  { symbol: 'POLUSD', canonicalSymbol: 'POLUSD', sourceSymbol: 'X:POLUSD', id: 'crypto-pol-usd', baseAsset: 'POL', quoteAsset: 'USD', priceCurrency: 'USD', marketType: 'crypto', exchange: 'Massive', label: 'POL/USD', provider: 'massive', category: 'Altcoin', isActive: true },
+  { symbol: 'LTCUSD', canonicalSymbol: 'LTCUSD', sourceSymbol: 'X:LTCUSD', id: 'crypto-ltc-usd', baseAsset: 'LTC', quoteAsset: 'USD', priceCurrency: 'USD', marketType: 'crypto', exchange: 'Massive', label: 'LTC/USD', provider: 'massive', category: 'Altcoin', isActive: true },
+  { symbol: 'BCHUSD', canonicalSymbol: 'BCHUSD', sourceSymbol: 'X:BCHUSD', id: 'crypto-bch-usd', baseAsset: 'BCH', quoteAsset: 'USD', priceCurrency: 'USD', marketType: 'crypto', exchange: 'Massive', label: 'BCH/USD', provider: 'massive', category: 'Altcoin', isActive: true },
+  { symbol: 'XLMUSD', canonicalSymbol: 'XLMUSD', sourceSymbol: 'X:XLMUSD', id: 'crypto-xlm-usd', baseAsset: 'XLM', quoteAsset: 'USD', priceCurrency: 'USD', marketType: 'crypto', exchange: 'Massive', label: 'XLM/USD', provider: 'massive', category: 'Altcoin', isActive: true },
+  { symbol: 'UNIUSD', canonicalSymbol: 'UNIUSD', sourceSymbol: 'X:UNIUSD', id: 'crypto-uni-usd', baseAsset: 'UNI', quoteAsset: 'USD', priceCurrency: 'USD', marketType: 'crypto', exchange: 'Massive', label: 'UNI/USD', provider: 'massive', category: 'Altcoin', isActive: true },
+  { symbol: 'ATOMUSD', canonicalSymbol: 'ATOMUSD', sourceSymbol: 'X:ATOMUSD', id: 'crypto-atom-usd', baseAsset: 'ATOM', quoteAsset: 'USD', priceCurrency: 'USD', marketType: 'crypto', exchange: 'Massive', label: 'ATOM/USD', provider: 'massive', category: 'Altcoin', isActive: true },
+  { symbol: 'ETCUSD', canonicalSymbol: 'ETCUSD', sourceSymbol: 'X:ETCUSD', id: 'crypto-etc-usd', baseAsset: 'ETC', quoteAsset: 'USD', priceCurrency: 'USD', marketType: 'crypto', exchange: 'Massive', label: 'ETC/USD', provider: 'massive', category: 'Altcoin', isActive: true },
+  { symbol: 'FILUSD', canonicalSymbol: 'FILUSD', sourceSymbol: 'X:FILUSD', id: 'crypto-fil-usd', baseAsset: 'FIL', quoteAsset: 'USD', priceCurrency: 'USD', marketType: 'crypto', exchange: 'Massive', label: 'FIL/USD', provider: 'massive', category: 'Altcoin', isActive: true },
+  { symbol: 'NEARUSD', canonicalSymbol: 'NEARUSD', sourceSymbol: 'X:NEARUSD', id: 'crypto-near-usd', baseAsset: 'NEAR', quoteAsset: 'USD', priceCurrency: 'USD', marketType: 'crypto', exchange: 'Massive', label: 'NEAR/USD', provider: 'massive', category: 'Altcoin', isActive: true },
+  { symbol: 'APTUSD', canonicalSymbol: 'APTUSD', sourceSymbol: 'X:APTUSD', id: 'crypto-apt-usd', baseAsset: 'APT', quoteAsset: 'USD', priceCurrency: 'USD', marketType: 'crypto', exchange: 'Massive', label: 'APT/USD', provider: 'massive', category: 'Altcoin', isActive: true },
 
   // ---- Forex Majors ----
   { symbol: 'EURUSD', sourceSymbol: 'EUR/USD', baseAsset: 'EUR', quoteAsset: 'USD', marketType: 'forex', exchange: 'Twelve Data', label: 'EUR/USD', provider: 'twelvedata', category: 'Major', isActive: true },
@@ -92,18 +91,40 @@ export const MARKET_UNIVERSE: Market[] = [
   { symbol: 'INTC', baseAsset: 'INTC', quoteAsset: 'USD', marketType: 'stock', exchange: 'NASDAQ', label: 'Intel Corp.', provider: 'massive', category: 'Technology', sector: 'Semiconductors', isActive: true },
 ];
 
+// Legacy USDT symbol → canonical USD symbol mapping for backward compatibility
+const LEGACY_SYMBOL_MAP: Record<string, string> = {
+  BTCUSDT: 'BTCUSD', ETHUSDT: 'ETHUSD', SOLUSDT: 'SOLUSD', XRPUSDT: 'XRPUSD',
+  ADAUSDT: 'ADAUSD', DOGEUSDT: 'DOGEUSD', AVAXUSDT: 'AVAXUSD',
+  LINKUSDT: 'LINKUSD', DOTUSDT: 'DOTUSD', MATICUSDT: 'POLUSD', LTCUSDT: 'LTCUSD',
+  BCHUSDT: 'BCHUSD', XLMUSDT: 'XLMUSD', UNIUSDT: 'UNIUSD', ATOMUSDT: 'ATOMUSD',
+  ETCUSDT: 'ETCUSD', FILUSDT: 'FILUSD', NEARUSDT: 'NEARUSD', APTUSDT: 'APTUSD',
+};
+
+const legacyUsageLog = new Set<string>();
+
+export function resolveLegacySymbol(symbol: string): string {
+  const canonical = LEGACY_SYMBOL_MAP[symbol];
+  if (canonical && !legacyUsageLog.has(symbol)) {
+    legacyUsageLog.add(symbol);
+    console.warn(`[markets] Resolved legacy symbol "${symbol}" → "${canonical}". Update references to use the canonical USD symbol.`);
+  }
+  return canonical ?? symbol;
+}
+
 // Lookup helpers
 export function getMarketsByType(type: MarketType): Market[] {
   return MARKET_UNIVERSE.filter((m) => m.marketType === type && m.isActive);
 }
 
 export function getMarket(symbol: string): Market | undefined {
-  return MARKET_UNIVERSE.find((m) => m.symbol === symbol);
+  const resolved = resolveLegacySymbol(symbol);
+  return MARKET_UNIVERSE.find((m) => m.symbol === resolved);
 }
 
 export function formatMarketPrice(symbol: string, price: number | null | undefined, maximumFractionDigits = 2): string {
   if (price == null) return '--';
-  const currency = getMarket(symbol)?.priceCurrency ?? getMarket(symbol)?.quoteAsset;
+  const resolved = resolveLegacySymbol(symbol);
+  const currency = getMarket(resolved)?.priceCurrency ?? getMarket(resolved)?.quoteAsset;
   const formattedPrice = price.toLocaleString(undefined, { maximumFractionDigits });
   return currency === 'USD' ? `$${formattedPrice}` : `${formattedPrice} ${currency ?? ''}`.trim();
 }

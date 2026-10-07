@@ -5,7 +5,7 @@ import { fetchMarketData, isTimeframe, MarketDataProviderError } from '../servic
 
 export async function marketRoutes(app: FastifyInstance) {
   app.get<{ Params: { symbol: string }; Querystring: { timeframe?: string; limit?: string } }>('/api/v1/market/candles/:symbol', {
-    onRequest: app.requireAuth,
+    preHandler: app.requireAuth,
     config: { rateLimit: { max: config.marketRateLimitMax, timeWindow: config.rateLimitWindowMs } },
   }, async (request, reply) => {
     const { symbol } = request.params;

@@ -4,7 +4,7 @@ import PriceChart from './PriceChart';
 import TradingTerminal from './TradingTerminal';
 import type { AutonomyStatus, BackendDecision } from '../lib/backend-api';
 import { executePaperTrade, fetchAutonomyStatus } from '../lib/backend-api';
-import type { Candle, Recommendation, Signal, Timeframe } from '../lib/types';
+import type { Candle, Market, Recommendation, Signal, Timeframe } from '../lib/types';
 import { formatMarketPrice } from '../lib/markets';
 
 interface Props {
@@ -18,7 +18,7 @@ interface Props {
   serverDecision: BackendDecision | null;
   serverDecisionError: string | null;
   signals: Signal[];
-  markets: { symbol: string; label: string }[];
+  markets: Pick<Market, 'symbol' | 'label' | 'baseAsset'>[];
   onSymbolChange: (symbol: string) => void;
   theme: 'light' | 'dark';
   risk: { entry: number; stopLoss: number; takeProfit: number; atr: number } | null;
@@ -73,7 +73,7 @@ export default function AutonomousCommandCenter({ symbol, timeframe, marketType,
       <div className="command-center-grid">
         <aside className="command-panel context-panel">
           <PanelTitle label="WATCHLIST / 4H BIAS" icon={<Activity className="w-3.5 h-3.5" />} />
-          <div className="command-watchlist">{markets.slice(0, 6).map((market) => <button key={market.symbol} className={market.symbol === symbol ? 'is-active' : ''} onClick={() => onSymbolChange(market.symbol)}><span>{market.symbol.replace('USDT', '')}</span><small>{market.symbol === symbol ? 'ACTIVE' : market.label}</small></button>)}</div>
+          <div className="command-watchlist">{markets.slice(0, 6).map((market) => <button key={market.symbol} className={market.symbol === symbol ? 'is-active' : ''} onClick={() => onSymbolChange(market.symbol)}><span>{market.baseAsset}</span><small>{market.symbol === symbol ? 'ACTIVE' : market.label}</small></button>)}</div>
 
           <div className={`bias-badge ${direction === 'buy' ? 'bullish' : direction === 'sell' ? 'bearish' : 'neutral'}`}>{direction === 'buy' ? <TrendingUp className="w-4 h-4" /> : direction === 'sell' ? <TrendingDown className="w-4 h-4" /> : <Target className="w-4 h-4" />} {direction.toUpperCase()}</div>
           <ContextRow label="Structure" value={serverDecision?.strategy ?? (signals[0]?.side === 'buy' ? 'Higher highs' : signals[0]?.side === 'sell' ? 'Lower lows' : 'Awaiting')} />

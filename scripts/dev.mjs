@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 
-const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const root = fileURLToPath(new URL('..', import.meta.url));
 const autonomyPort = process.env.AUTONOMY_PORT ?? '8787';
 const children = [];
 let stopping = false;
@@ -14,9 +16,9 @@ function stop(signal = 'SIGTERM') {
 }
 
 function launchService(name, args, overrides = {}) {
-  const child = spawn(npm, args, {
+  const child = spawn(process.execPath, args, {
     stdio: 'inherit',
-    shell: process.platform === 'win32',
+    cwd: root,
     env: { ...process.env, ...overrides },
   });
   children.push(child);
@@ -46,9 +48,9 @@ async function waitUntilReady(name, url) {
 }
 
 async function start() {
-  launchService('Autonomy API', ['run', 'backend:dev'], { AUTONOMY_PORT: autonomyPort });
+  launchService('Autonomy API', [resolve(root, 'node_modules/tsx/dist/cli.mjs'), 'watch', 'backend/src/server.ts'], { AUTONOMY_PORT: autonomyPort });
   await waitUntilReady('Autonomy API', `http://127.0.0.1:${autonomyPort}/health`);
-  if (!stopping) launchService('Web', ['run', 'dev:web']);
+  if (!stopping) launchService('Web', [resolve(root, 'node_modules/vite/bin/vite.js')]);
 }
 
 start().catch((error) => {
