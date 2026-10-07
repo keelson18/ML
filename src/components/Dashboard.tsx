@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Activity, Sun, Moon, LogOut, Wifi, WifiOff, TrendingUp, TrendingDown,
+  Activity, Sun, Moon, Wifi, WifiOff, TrendingUp, TrendingDown,
   Menu, X,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -33,6 +33,7 @@ import TraderDesk from './pages/TraderDesk';
 import MultiTimeframeTerminal from './MultiTimeframeTerminal';
 import AutonomousCommandCenter from './AutonomousCommandCenter';
 import { fetchMarketAvailability, requestBackendDecision, type BackendDecision } from '../lib/backend-api';
+import { resolveAvatarUrl } from '../lib/avatar';
 
 type WsStatus = 'connecting' | 'open' | 'closed' | 'reconnecting';
 
@@ -393,10 +394,7 @@ export default function Dashboard() {
             <button onClick={toggle} aria-label="Toggle theme" className="p-2 rounded-lg hover:bg-bg transition-colors text-muted hover:text-text" title="Toggle theme">
               {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
-            <div className="hidden sm:block text-xs text-muted font-medium">{user?.email}</div>
-            <button onClick={signOut} aria-label="Sign out" className="p-2 rounded-lg hover:bg-bg transition-colors text-muted hover:text-text" title="Sign out">
-              <LogOut className="w-4 h-4" />
-            </button>
+            <AvatarMenu email={user?.email ?? ''} displayName={profile?.displayName} avatarPath={profile?.avatarUrl} role={profile?.role ?? 'user'} onSettings={() => navigateToTab('settings')} onSignOut={signOut} />
           </div>
         </header>
 
@@ -425,6 +423,30 @@ function WsIndicator({ status }: { status: WsStatus }) {
       <span className="hidden md:inline">{label}</span>
     </div>
   );
+}
+
+function AvatarMenu({ email, displayName, avatarPath, role, onSettings, onSignOut }: { email: string; displayName?: string; avatarPath?: string; role: string; onSettings: () => void; onSignOut: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [avatar, setAvatar] = useState<string | null>(null);
+  useEffect(() => { let active = true; void resolveAvatarUrl(avatarPath).then((url) => { if (active) setAvatar(url); }); return () => { active = false; }; }, [avatarPath]);
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false); };
+    window.addEventListener('keydown', close);
+    return () => window.removeEventListener('keydown', close);
+  }, [open]);
+  const initials = (displayName || email).split(/[\s@._-]+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'U';
+  return <div className="relative">
+    <button type="button" onClick={() => setOpen((value) => !value)} aria-haspopup="menu" aria-expanded={open} aria-label="Open account menu" className="flex items-center gap-2 rounded-full p-1.5 text-muted hover:bg-bg hover:text-text">
+      {avatar ? <img src={avatar} alt="" className="h-8 w-8 rounded-full object-cover" /> : <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">{initials}</span>}
+      <span className="hidden max-w-40 truncate text-xs font-medium sm:block">{displayName || email}</span>
+    </button>
+    {open && <div role="menu" className="absolute right-0 top-full z-50 mt-2 w-64 rounded-xl border border-border bg-surface p-2 shadow-xl">
+      <div className="border-b border-border px-3 py-2"><div className="truncate text-sm font-medium text-text">{displayName || 'Account details'}</div><div className="truncate text-xs text-muted">{email}</div><div className="mt-1 text-[10px] uppercase tracking-wide text-muted">{role}</div></div>
+      <button type="button" role="menuitem" onClick={() => { setOpen(false); onSettings(); }} className="mt-1 w-full rounded-lg px-3 py-2 text-left text-sm text-text hover:bg-bg">Profile & settings</button>
+      <button type="button" role="menuitem" onClick={onSignOut} className="w-full rounded-lg px-3 py-2 text-left text-sm text-text hover:bg-bg">Sign out</button>
+    </div>}
+  </div>;
 }
 
 // Published articles list — shown to non-admin users under the CMS/knowledge-base tab.

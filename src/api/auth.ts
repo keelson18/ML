@@ -2,6 +2,22 @@ import { supabase } from '../lib/supabase';
 import type { Session } from '../lib/supabase';
 import type { UserProfile, UserRole } from '../lib/types';
 
+export interface AdminUser extends UserProfile { email: string }
+export interface AdminUserPage { users: AdminUser[]; page: number; limit: number; total: number; pages: number }
+export interface AdminAuditEvent { id: string; actor_id: string; target_user_id: string | null; action: string; details: Record<string, unknown>; created_at: string }
+
+async function adminRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Authentication required.');
+  const headers = new Headers(init.headers);
+  headers.set('Content-Type', 'application/json');
+  headers.set('Authorization', `Bearer ${session.access_token}`);
+  const response = await fetch(path, { ...init, headers });
+  const payload = await response.json() as T & { error?: string };
+  if (!response.ok) throw new Error(payload.error ?? `Admin request failed (${response.status}).`);
+  return payload;
+}
+
 export interface AuthSession {
   session: Session;
   user: { id: string; email: string };
@@ -55,25 +71,16 @@ export const authApi = {
     return { profile };
   },
 
-  async getAllProfiles(): Promise<{ profiles: UserProfile[] }> {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('id, role, display_name, avatar_url, created_at')
-      .order('created_at', { ascending: false });
-    if (error) throw error;
-    return {
-      profiles: data.map((p) => ({
-        id: p.id,
-        role: p.role as UserRole,
-        displayName: p.display_name ?? undefined,
-        avatarUrl: p.avatar_url ?? undefined,
-        createdAt: p.created_at,
-      })),
-    };
+  async getAllProfiles(page = 1, limit = 20, search = ''): Promise<AdminUserPage> {
+    const query = new URLSearchParams({ page: String(page), limit: String(limit), search });
+    return adminRequest<AdminUserPage>(`/api/v1/admin/users?${query}`);
   },
 
   async updateProfileRole(userId: string, role: string): Promise<void> {
-    const { error } = await supabase.from('profiles').update({ role }).eq('id', userId);
-    if (error) throw error;
+    await adminRequest(`/api/v1/admin/users/${encodeURIComponent(userId)}/role`, { method: 'PATCH', body: JSON.stringify({ role }) });
+  },
+
+  async getAdminAuditEvents(): Promise<{ events: AdminAuditEvent[] }> {
+    return adminRequest('/api/v1/admin/audit-events');
   },
 };

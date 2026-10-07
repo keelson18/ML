@@ -76,4 +76,16 @@ describe('Fastify security headers', () => {
     expect(plans.statusCode).toBe(401);
     await app.close();
   });
+
+  it('protects the admin user directory, role changes, and audit trail', async () => {
+    process.env.NODE_ENV = 'test';
+    const { app } = buildServer();
+    const users = await app.inject('/api/v1/admin/users');
+    const role = await app.inject({ method: 'PATCH', url: '/api/v1/admin/users/00000000-0000-4000-8000-000000000001/role', payload: { role: 'user' } });
+    const audit = await app.inject('/api/v1/admin/audit-events');
+    expect(users.statusCode).toBe(401);
+    expect(role.statusCode).toBe(401);
+    expect(audit.statusCode).toBe(401);
+    await app.close();
+  });
 });
