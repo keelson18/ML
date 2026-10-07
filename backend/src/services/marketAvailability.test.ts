@@ -1,3 +1,4 @@
+// Protects the unknown-by-default status and provider-confirmed availability transitions.
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { config } from '../config';
 import { MARKET_UNIVERSE } from '../../../src/lib/markets';

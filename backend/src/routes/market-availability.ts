@@ -1,3 +1,4 @@
+// Exposes authenticated availability reads and throttled admin-only probes.
 import type { FastifyInstance } from 'fastify';
 import { config } from '../config';
 import { getMarketAvailability, probeAllMarkets } from '../services/marketAvailability';

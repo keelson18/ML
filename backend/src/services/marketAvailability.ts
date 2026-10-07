@@ -1,3 +1,4 @@
+// Holds server-side verification state for active Massive USD crypto markets.
 import { MARKET_UNIVERSE } from '../../../src/lib/markets';
 import { marketsVerifiedOverride, config } from '../config';
 import { MarketDataProviderError, probeMarketData } from './marketDataService';
