@@ -97,6 +97,8 @@ Fill in `.env`:
 
 For the local Supabase Edge Function runtime, set `BACKEND_URL` to a URL reachable from its container (for example `http://host.docker.internal:8787` on Docker Desktop) and set `ML_FUNCTION_ENV=development`. Hosted Edge Functions require `BACKEND_URL` to be an HTTPS URL; configure `BACKEND_URL` and `ML_FUNCTION_ENV=production` as server-side function secrets. If `BACKEND_URL` is missing, ML prediction/retraining returns a generic 503 instead of calling localhost.
 
+Trader Desk paper parameters are server-side and environment-overridable through the `TRADER_*`, `RISK_*`, `MAX_*`, and related settings shown in `.env.example`. Phase 1 defines validated defaults and domain contracts; these settings do not alter execution behavior yet.
+
 ### 3. Database setup
 
 Run the migrations in `supabase/migrations/` against your Supabase project (via the SQL Editor or Supabase CLI).
