@@ -22,7 +22,7 @@ function buyDecision(): TradeDecision {
 describe('backend paper position lifecycle', () => {
   it('rejects non-USD-quoted markets for USD paper accounts', async () => {
     const accountId = `non-usd-${Date.now()}`;
-    const result = await executeDecision({ accountId, symbol: 'USDJPY', decision: buyDecision(), quantity: 1 });
+    const result = await executeDecision({ accountId, symbol: 'USDJPY', decision: buyDecision() });
 
     expect(result.accepted).toBe(false);
     expect(result.reason).toBe('Paper accounts support USD-quoted markets only.');
@@ -31,7 +31,7 @@ describe('backend paper position lifecycle', () => {
 
   it('rejects new positions when market data is stale', async () => {
     const accountId = `stale-${Date.now()}`;
-    const result = await executeDecision({ accountId, symbol: 'BTCUSD', decision: buyDecision(), quantity: 1, marketDataStale: true });
+    const result = await executeDecision({ accountId, symbol: 'BTCUSD', decision: buyDecision(), marketDataStale: true });
 
     expect(result.accepted).toBe(false);
     expect((await getAccount(accountId)).positions).toHaveLength(0);
@@ -39,7 +39,7 @@ describe('backend paper position lifecycle', () => {
 
   it('closes a position automatically when its stop is touched', async () => {
     const accountId = `lifecycle-${Date.now()}`;
-    await executeDecision({ accountId, symbol: 'BTCUSD', decision: buyDecision(), quantity: 1 });
+    await executeDecision({ accountId, symbol: 'BTCUSD', decision: buyDecision() });
 
     const trades = await manageOpenPositions(accountId, 'BTCUSD', {
       time: Math.floor(Date.now() / 1000), open: 100, high: 101, low: 94, close: 96, volume: 10,

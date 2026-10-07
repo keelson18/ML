@@ -4,6 +4,8 @@ import { getMarket } from '../../../src/lib/markets';
 import type { TradeDecision } from '../engines/decision-engine';
 import { getSupabaseClient, getSupabaseClientWithToken } from '../db';
 import { fetchMarketData } from './marketDataService';
+import { traderConfig } from '../trader/config';
+import { calculatePositionSize, markToMarket } from '../trader/risk';
 
 const testAccounts = new Map<string, PaperAccountState>();
 
@@ -17,7 +19,7 @@ async function loadAccount(accountId: string, accessToken?: string): Promise<Loa
   if (process.env.NODE_ENV === 'test') {
     const account = testAccounts.get(accountId);
     if (account) return { account, version: 0 };
-    const created = { accountId, cash: 100_000, positions: [], trades: [] };
+    const created = { accountId, cash: traderConfig.TRADER_STARTING_EQUITY, positions: [], trades: [] };
     testAccounts.set(accountId, created);
     return { account: created, version: 0 };
   }
@@ -31,7 +33,7 @@ async function loadAccount(accountId: string, accessToken?: string): Promise<Loa
     if (error) throw new Error(`Could not load paper account: ${error.message}`);
     if (data?.state) return { account: data.state as PaperAccountState, version: Number(data.version) };
 
-    const account: PaperAccountState = { accountId, cash: 100_000, positions: [], trades: [] };
+    const account: PaperAccountState = { accountId, cash: traderConfig.TRADER_STARTING_EQUITY, positions: [], trades: [] };
     const { error: insertError } = await supabase.from('paper_sim_accounts').insert({ account_id: accountId, state: account, version: 0 });
     if (!insertError) return { account, version: 0 };
     if (insertError.code !== '23505') throw new Error(`Could not create paper account: ${insertError.message}`);
@@ -74,7 +76,7 @@ export async function closeOpenPaperPosition(accountId: string, symbol: string, 
   const exitPrice = candles.at(-1)?.close;
   if (!exitPrice || !Number.isFinite(exitPrice)) throw new Error('A current market price is unavailable.');
   return updateAccount(accountId, (account) => {
-    const result = closePaperPosition(account, symbol, exitPrice, 0.001, 'paper-simulator-1.0.0', `trade-${Date.now()}`);
+    const result = closePaperPosition(account, symbol, exitPrice, traderConfig.FEE_RATE, 'paper-simulator-1.0.0', `trade-${Date.now()}`);
     if ('error' in result) throw new Error(result.error);
     return { account: result.account, result: result.trade };
   }, accessToken);
@@ -95,7 +97,7 @@ export async function manageOpenPositions(accountId: string, symbol: string, can
       const exitPrice = stopHit ? position.stopLoss : targetHit ? position.takeProfit : undefined;
       if (exitPrice === undefined) continue;
 
-      const result = closePaperPosition(account, symbol, exitPrice, 0.001, 'paper-simulator-1.0.0', `trade-${Date.now()}`, new Date(candle.time * 1000).toISOString());
+      const result = closePaperPosition(account, symbol, exitPrice, traderConfig.FEE_RATE, 'paper-simulator-1.0.0', `trade-${Date.now()}`, new Date(candle.time * 1000).toISOString());
       if ('trade' in result) {
         account = result.account;
         closedTrades.push(result.trade);
@@ -128,7 +130,6 @@ export async function executeDecision(input: {
   accountId?: string;
   symbol: string;
   decision: TradeDecision;
-  quantity?: number;
   processedCandle?: { timeframe: string; time: number };
     marketDataStale?: boolean;
   accessToken?: string;
@@ -140,6 +141,18 @@ export async function executeDecision(input: {
   const quoteCurrency = market?.priceCurrency ?? market?.quoteAsset;
   const orderId = `paper-${Date.now()}`;
   const checkpoint = input.processedCandle ? candleCheckpoint(input.symbol, input.processedCandle.timeframe) : undefined;
+  const accountSnapshot = await getAccount(accountId, input.accessToken);
+  const markPrices: Record<string, number> = { [input.symbol]: requestedPrice };
+  if (process.env.NODE_ENV !== 'test') {
+    await Promise.all(accountSnapshot.positions.filter((position) => position.status === 'open').map(async (position) => {
+      const candles = (await fetchMarketData(position.symbol, '1m', 2)).candles;
+      const mark = candles.at(-1)?.close;
+      if (!mark || !Number.isFinite(mark)) throw new Error('A mark-to-market price is unavailable for an open position.');
+      markPrices[position.symbol] = mark;
+    }));
+  } else {
+    for (const position of accountSnapshot.positions.filter((candidate) => candidate.status === 'open')) markPrices[position.symbol] = position.entryPrice;
+  }
 
   return updateAccount<PaperOrderResult>(accountId, (account) => {
     if (quoteCurrency !== 'USD') {
@@ -155,13 +168,19 @@ export async function executeDecision(input: {
         quantity: 0, requestedPrice: 0, feeRate: 0, slippageRate: 0, executionVersion: 'paper-simulator-1.0.0',
       }) };
     }
-    const currentExposure = account.positions
-      .filter((position) => position.status === 'open')
-      .reduce((sum, position) => sum + position.quantity * position.entryPrice, 0);
-    const equity = Math.max(0, account.cash + currentExposure);
-    const quantity = input.quantity ?? (requestedPrice > 0 ? equity * 0.05 / requestedPrice : 0);
+    const snapshot = markToMarket(account, markPrices);
     const stop = decision.invalidation;
     const target = decision.targets?.[0]?.price;
+    const sizing = stop === undefined ? { accepted: false, quantity: 0, reason: 'Invalid stop distance.' } : calculatePositionSize({
+      equity: snapshot.equity,
+      entry: requestedPrice,
+      invalidation: stop,
+      cash: account.cash,
+      grossExposure: snapshot.grossExposure,
+      symbolExposure: snapshot.positions.filter((item) => item.position.symbol === input.symbol)
+        .reduce((sum, item) => sum + item.currentPrice * item.position.quantity, 0),
+    });
+    const quantity = sizing.quantity;
     const riskDistance = stop === undefined ? 0 : Math.abs(requestedPrice - stop);
     const rewardDistance = target === undefined ? 0 : Math.abs(target - requestedPrice);
     const directionValid = decision.decision === 'BUY'
@@ -174,11 +193,10 @@ export async function executeDecision(input: {
       && requestedPrice > 0
       && stop !== undefined && stop > 0
       && target !== undefined && target > 0
-      && directionValid && riskDistance > 0 && rewardDistance / riskDistance >= 1.5
+      && directionValid && riskDistance > 0 && rewardDistance / riskDistance >= traderConfig.MIN_RR
+      && sizing.accepted
       && quantity > 0
-      && account.cash >= requestedPrice * quantity
-      && equity > 0
-      && (currentExposure + requestedPrice * quantity) / equity <= 0.5;
+      && snapshot.equity > 0;
     const request: PaperOrderRequest = {
       orderId,
       positionId: `position-${Date.now()}`,
@@ -190,8 +208,8 @@ export async function executeDecision(input: {
       portfolioApproved: riskApproved,
       quantity,
       requestedPrice,
-      feeRate: 0.001,
-      slippageRate: 0.0005,
+      feeRate: traderConfig.FEE_RATE,
+      slippageRate: traderConfig.SLIPPAGE_RATE,
       stopLoss: decision.invalidation,
       takeProfit: decision.targets?.[0]?.price,
       executionVersion: 'paper-simulator-1.0.0',

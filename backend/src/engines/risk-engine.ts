@@ -12,8 +12,8 @@ export interface RiskTradeProposal {
 export interface RiskEngineContext extends EngineContext {
   risk: {
     trade: RiskTradeProposal;
-    state: RiskState;
-    limits: RiskLimits;
+    state: RiskState & { currentWeeklyPnL?: number };
+    limits: RiskLimits & { maxWeeklyLoss?: number };
     ruleVersion: string;
   };
 }
@@ -79,13 +79,17 @@ export const riskIntelligenceEngine: IntelligenceEngine<RiskDecision> & {
     const limitResult = invalidTradeReasons.length === 0
       ? checkRiskLimits(context.risk.trade, context.risk.state, context.risk.limits)
       : { allowed: false, reasons: invalidTradeReasons };
-    const violatedRules = limitResult.reasons;
+    const weeklyStopReached = context.risk.limits.maxWeeklyLoss !== undefined
+      && (context.risk.state.currentWeeklyPnL ?? 0) <= context.risk.limits.maxWeeklyLoss;
+    const violatedRules = weeklyStopReached
+      ? [...limitResult.reasons, 'Weekly loss limit reached']
+      : limitResult.reasons;
     const riskScore = Math.min(1, violatedRules.length / 4);
     const requiredAdjustments = violatedRules.length > 0
       ? ['Resolve every violated risk rule before paper execution.']
       : [];
     const decision: RiskDecision = {
-      approved: limitResult.allowed,
+      approved: limitResult.allowed && !weeklyStopReached,
       riskScore,
       violatedRules,
       requiredAdjustments,
