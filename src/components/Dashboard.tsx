@@ -16,7 +16,7 @@ import CMSManager from './CMS/CMSManager';
 import CMSViewer from './CMS/CMSViewer';
 import Sidebar from './Sidebar';
 import { pathForSidebarTab, sidebarTabFromPath, type SidebarTab } from '../lib/routes';
-import { formatMarketPrice, getDefaultMarketSymbol, getMarketsByType, getMarketAvailability, setMarketAvailability } from '../lib/markets';
+import { formatMarketPrice, getDefaultMarketSymbol, getMarketsByType, setMarketAvailability } from '../lib/markets';
 import { fetchPublishedContent } from '../lib/cms';
 import MarketsPage from './pages/MarketsPage';
 import AIAnalysis from './pages/AIAnalysis';
@@ -83,7 +83,7 @@ export default function Dashboard() {
 
   const availableMarkets = useMemo(() => {
     void availabilityRevision;
-    return getMarketsByType(marketType).filter((market) => getMarketAvailability(market.symbol).status !== 'unavailable');
+    return getMarketsByType(marketType);
   }, [marketType, availabilityRevision]);
   const dataProvider = useMemo(() => getDataProvider(symbol), [symbol]);
 
@@ -96,9 +96,12 @@ export default function Dashboard() {
       if (!active) return;
       setMarketAvailability(records);
       setAvailabilityRevision((revision) => revision + 1);
+      setSymbol((current) => records.find((record) => record.symbol === current)?.status === 'unavailable'
+        ? getMarketsByType(marketType)[0]?.symbol ?? current
+        : current);
     }).catch(() => undefined);
     return () => { active = false; };
-  }, [user]);
+  }, [user, marketType]);
 
   // Load historical candles + subscribe to live kline stream
   useEffect(() => {
@@ -318,9 +321,7 @@ export default function Dashboard() {
               onChange={(e) => setSymbol(e.target.value)}
               className="dashboard-select"
             >
-              {availableMarkets.length > 0
-                ? availableMarkets.map((p) => <option key={p.symbol} value={p.symbol}>{p.label}</option>)
-                : getMarketsByType(marketType).map((p) => <option key={p.symbol} value={p.symbol}>{p.label}</option>)}
+              {availableMarkets.map((p) => <option key={p.symbol} value={p.symbol}>{p.label}</option>)}
             </select>
           </div>
 

@@ -3,7 +3,7 @@ import { BarChart3, RefreshCw } from 'lucide-react';
 import type { MarketType } from '../../lib/types';
 import { MARKET_TYPES } from '../../lib/types';
 import { getDataProvider } from '../../lib/providers';
-import { getMarketsByType } from '../../lib/markets';
+import { getMarketsByType, getMarketAvailabilityRevision } from '../../lib/markets';
 
 type Quote = { price: number; change: number };
 
@@ -13,7 +13,11 @@ export default function MarketsPage() {
   const [quotes, setQuotes] = useState<Record<string, Quote>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const markets = useMemo(() => getMarketsByType(selectedType), [selectedType]);
+  const availabilityRevision = getMarketAvailabilityRevision();
+  const markets = useMemo(() => {
+    void availabilityRevision;
+    return getMarketsByType(selectedType);
+  }, [selectedType, availabilityRevision]);
   const pageSize = 12;
   const pageCount = Math.max(1, Math.ceil(markets.length / pageSize));
   const visibleMarkets = useMemo(() => markets.slice(page * pageSize, (page + 1) * pageSize), [markets, page]);

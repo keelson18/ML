@@ -213,7 +213,7 @@ function predictProba(model: { weights: number[]; bias: number; mean: number[]; 
 
 // ---- Data fetching ----
 // Routes through the backend market data service so ML predictions use the same
-// provider (Massive/Twelve Data) as the UI, not a separate Binance feed.
+// provider (Massive/Twelve Data) as the UI, not a separate legacy feed.
 async function fetchCandles(symbol: string, timeframe: string, limit: number, accessToken: string): Promise<{ candles: Candle[]; provider: string; quoteCurrency: string }> {
   if (!BACKEND_URL) throw new Error('Market data service is not configured.');
   const url = `${BACKEND_URL}/api/v1/market/candles/${encodeURIComponent(symbol)}?timeframe=${encodeURIComponent(timeframe)}&limit=${limit}`;
@@ -338,7 +338,12 @@ Deno.serve(async (req: Request) => {
         return jsonResponse({ error: 'Unauthorized' }, 401);
       }
       if (!(await checkRate(supabase, 'retrain', 2))) return jsonResponse({ error: 'Rate limit exceeded' }, 429);
-      const { pair = 'BTCUSD', timeframe = '1h' } = await req.json().catch(() => ({}));
+      const requestBody = await req.json().catch(() => ({})) as { pair?: unknown; timeframe?: unknown };
+      const pair = requestBody.pair ?? Deno.env.get('DEFAULT_SYMBOL')?.trim();
+      const timeframe = requestBody.timeframe ?? '1h';
+      if (typeof pair !== 'string' || pair.length === 0) {
+        return jsonResponse({ error: 'Default market is not configured.' }, 503);
+      }
       if (typeof pair !== 'string' || !/^[A-Z0-9]{2,20}$/.test(pair)
         || typeof timeframe !== 'string' || !['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d', '1w', '1M'].includes(timeframe)) {
         return jsonResponse({ error: 'A valid pair and timeframe are required' }, 400);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatMarketPrice, MARKET_UNIVERSE, getMarket, resolveLegacySymbol } from './markets';
+import { formatMarketPrice, MARKET_UNIVERSE, getMarket, getMarketsByType, resolveLegacySymbol, setMarketAvailability } from './markets';
 
 describe('market price formatting', () => {
   it('formats USD prices with a dollar sign', () => {
@@ -26,6 +26,13 @@ describe('crypto market universe', () => {
     expect(cryptoMarkets.length).toBeGreaterThan(0);
     expect(cryptoMarkets.every((m) => m.provider === 'massive')).toBe(true);
     expect(cryptoMarkets.every((m) => m.sourceSymbol?.startsWith('X:'))).toBe(true);
+  });
+
+  it('hides confirmed unavailable markets from market pickers but retains unknown markets', () => {
+    setMarketAvailability([{ symbol: 'APTUSD', status: 'unavailable', checkedAt: Date.now() }]);
+    expect(getMarketsByType('crypto').some((market) => market.symbol === 'APTUSD')).toBe(false);
+    expect(getMarketsByType('crypto').some((market) => market.symbol === 'BTCUSD')).toBe(true);
+    setMarketAvailability([{ symbol: 'APTUSD', status: 'unverified', checkedAt: null }]);
   });
 });
 
