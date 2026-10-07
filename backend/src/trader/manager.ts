@@ -26,6 +26,7 @@ export function managePaperPosition(input: {
   swingLow?: number;
   barIndex: number;
   invalidationObservedAtBar?: number;
+  feeRate?: number;
 }): ManagementResult {
   const { position, candle } = input;
   if (position.status !== 'open') return { position, exits: [], actions: [] };
@@ -70,8 +71,9 @@ export function managePaperPosition(input: {
   if (positive(initialRisk)) {
     const favorableR = (candle.high - position.entryPrice) / initialRisk;
     if (favorableR >= traderConfig.BREAK_EVEN_R) {
-      const breakEven = traderConfig.FEE_RATE < 1
-        ? position.entryPrice * (1 + traderConfig.FEE_RATE) / (1 - traderConfig.FEE_RATE)
+      const feeRate = input.feeRate ?? traderConfig.FEE_RATE;
+      const breakEven = feeRate < 1
+        ? position.entryPrice * (1 + feeRate) / (1 - feeRate)
         : position.entryPrice;
       const nextStop = Math.max(updated.stopLoss ?? Number.NEGATIVE_INFINITY, breakEven);
       if (updated.stopLoss === undefined || nextStop > updated.stopLoss) {

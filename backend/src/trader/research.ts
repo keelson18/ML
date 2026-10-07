@@ -143,3 +143,69 @@ export function createDailyReview(input: {
     generatedAt: new Date().toISOString(),
   };
 }
+
+export interface PromotionEvidence {
+  hypothesisRegisteredAt: string;
+  forwardStartAt: string;
+  forwardEndAt: string;
+  forwardTrades: Array<{ rMultipleAfterCosts: number; costsIncluded: boolean }>;
+  buyAndHoldExpectancyR: number;
+  randomBaselineExpectancyR: number;
+  randomBaselineRuns: number;
+  triedSetupCount: number;
+}
+
+export interface PromotionDecision {
+  promoted: boolean;
+  reasons: string[];
+  forwardTradeCount: number;
+  forwardDays: number;
+  multipleTestingNote: string;
+}
+
+/** Reproducible bootstrap of random entry indices; callers score each index with the same replay core. */
+export function seededRandomEntryRuns(input: { candleCount: number; entriesPerRun: number; runs?: number; seed?: number }): number[][] {
+  const runs = input.runs ?? traderConfig.MIN_RANDOM_BASELINE_RUNS;
+  if (![input.candleCount, input.entriesPerRun, runs].every(Number.isInteger)
+    || input.candleCount < 1 || input.entriesPerRun < 1 || input.entriesPerRun > input.candleCount || runs < 1) {
+    throw new Error('Random baseline sizes must be positive integers and entries cannot exceed candles.');
+  }
+  let state = (input.seed ?? traderConfig.RESEARCH_RANDOM_SEED) >>> 0;
+  const random = () => { state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0; return state / 4_294_967_296; };
+  return Array.from({ length: runs }, () => {
+    const indices = Array.from({ length: input.candleCount }, (_, index) => index);
+    for (let index = 0; index < input.entriesPerRun; index += 1) {
+      const swapIndex = index + Math.floor(random() * (input.candleCount - index));
+      [indices[index], indices[swapIndex]] = [indices[swapIndex]!, indices[index]!];
+    }
+    return indices.slice(0, input.entriesPerRun).sort((a, b) => a - b);
+  });
+}
+
+export function evaluateSetupPromotion(evidence: PromotionEvidence): PromotionDecision {
+  const registered = Date.parse(evidence.hypothesisRegisteredAt);
+  const forwardStart = Date.parse(evidence.forwardStartAt);
+  const forwardEnd = Date.parse(evidence.forwardEndAt);
+  const forwardDays = Number.isFinite(forwardStart) && Number.isFinite(forwardEnd)
+    ? Math.max(0, (forwardEnd - forwardStart) / 86_400_000)
+    : 0;
+  const trades = evidence.forwardTrades.filter((trade) => Number.isFinite(trade.rMultipleAfterCosts));
+  const expectancy = trades.length ? trades.reduce((sum, trade) => sum + trade.rMultipleAfterCosts, 0) / trades.length : Number.NEGATIVE_INFINITY;
+  const reasons: string[] = [];
+  if (!Number.isFinite(registered) || !Number.isFinite(forwardStart) || registered >= forwardStart) reasons.push('Hypothesis was not registered before the forward test began.');
+  if (trades.length < traderConfig.MIN_FORWARD_TRADES) reasons.push(`Forward trade count is below ${traderConfig.MIN_FORWARD_TRADES}.`);
+  if (forwardDays < traderConfig.MIN_FORWARD_DAYS) reasons.push(`Forward test duration is below ${traderConfig.MIN_FORWARD_DAYS} days.`);
+  if (trades.some((trade) => !trade.costsIncluded)) reasons.push('At least one forward result is missing fees or slippage.');
+  if (!(expectancy > 0)) reasons.push('Forward expectancy after costs is not positive.');
+  if (!(expectancy > evidence.buyAndHoldExpectancyR)) reasons.push('Forward expectancy does not beat buy-and-hold.');
+  if (!(expectancy > evidence.randomBaselineExpectancyR)) reasons.push('Forward expectancy does not beat the random-entry baseline.');
+  if (evidence.randomBaselineRuns < traderConfig.MIN_RANDOM_BASELINE_RUNS) reasons.push(`Random baseline has fewer than ${traderConfig.MIN_RANDOM_BASELINE_RUNS} seeded runs.`);
+  if (!Number.isInteger(evidence.triedSetupCount) || evidence.triedSetupCount < 1) reasons.push('Tried setup count is missing.');
+  return {
+    promoted: reasons.length === 0,
+    reasons,
+    forwardTradeCount: trades.length,
+    forwardDays,
+    multipleTestingNote: `${evidence.triedSetupCount} setup/parameter variant(s) tried; multiple testing can inflate apparent results.`,
+  };
+}
