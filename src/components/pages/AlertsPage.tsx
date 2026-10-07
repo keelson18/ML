@@ -2,13 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Bell, Plus, Trash2, X, Radio } from 'lucide-react';
 import PageFrame from '../PageFrame';
-import { TRACKED_PAIRS } from '../../lib/types';
+import { getTrackedMarkets, getDefaultMarketSymbol } from '../../lib/markets';
 import { getDataProvider } from '../../lib/providers';
 import { workspaceApi, type PriceAlert } from '../../api/workspace';
 
 export default function AlertsPage() {
   const [alerts, setAlerts] = useState<PriceAlert[]>([]);
-  const [symbol, setSymbol] = useState<string>(TRACKED_PAIRS[0].symbol);
+  const trackedMarkets = getTrackedMarkets();
+  const [symbol, setSymbol] = useState<string>(getDefaultMarketSymbol());
   const [price, setPrice] = useState('');
   const [direction, setDirection] = useState<PriceAlert['direction']>('above');
   const [creating, setCreating] = useState(false);
@@ -96,7 +97,7 @@ export default function AlertsPage() {
       )}
     >
       {creating && <form id="create-alert-form" onSubmit={(event) => void createAlert(event)} className="bg-surface border border-border rounded-xl p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end" aria-label="Create price alert">
-        <label className="text-[10px] text-muted" htmlFor="alert-symbol">Symbol<select id="alert-symbol" value={symbol} onChange={(event) => setSymbol(event.target.value)} className="mt-1 w-full px-2 py-2 rounded bg-bg border border-border text-text text-xs">{TRACKED_PAIRS.map((pair) => <option key={pair.symbol} value={pair.symbol}>{pair.label}</option>)}</select></label>
+        <label className="text-[10px] text-muted" htmlFor="alert-symbol">Symbol<select id="alert-symbol" value={symbol} onChange={(event) => setSymbol(event.target.value)} className="mt-1 w-full px-2 py-2 rounded bg-bg border border-border text-text text-xs">{trackedMarkets.map((pair) => <option key={pair.symbol} value={pair.symbol}>{pair.label}</option>)}</select></label>
         <label className="text-[10px] text-muted" htmlFor="alert-direction">Condition<select id="alert-direction" value={direction} onChange={(event) => setDirection(event.target.value as PriceAlert['direction'])} className="mt-1 w-full px-2 py-2 rounded bg-bg border border-border text-text text-xs"><option value="above">Price above</option><option value="below">Price below</option></select></label>
         <label className="text-[10px] text-muted" htmlFor="alert-price">Price<input id="alert-price" value={price} onChange={(event) => { setPrice(event.target.value); setError(null); }} type="number" min="0" step="any" inputMode="decimal" required className="mt-1 w-full px-2 py-2 rounded bg-bg border border-border text-text text-xs" /></label>
         <div className="flex items-center gap-2"><button type="button" onClick={() => setCreating(false)} className="px-3 py-2 rounded border border-border text-muted text-xs font-medium hover:text-text hover:bg-bg transition-colors">Cancel</button><button type="submit" disabled={saving} className="px-3 py-2 rounded bg-primary text-black text-xs font-medium disabled:opacity-50">{saving ? 'Saving…' : 'Create'}</button></div>

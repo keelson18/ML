@@ -16,13 +16,14 @@ export async function paperRoutes(app: FastifyInstance) {
 
     try {
       const series = await fetchMarketData(symbol, timeframe, 501);
+      if (series.stale) return reply.code(503).send({ error: 'Market data is temporarily stale; paper entries are paused.' });
       const candles = series.candles.slice(0, -1);
       if (candles.length < 60) return reply.code(422).send({ error: 'Not enough closed candles to evaluate a paper trade.' });
       const { decision } = await analyze({ symbol, timeframe, candles }, accountId, accessToken);
       if (decision.result.decision !== 'BUY' && decision.result.decision !== 'SELL') {
         return { accepted: false, status: 'rejected', reason: decision.result.explanation };
       }
-      return await executeDecision({ symbol, decision: decision.result, accountId, accessToken });
+      return await executeDecision({ symbol, decision: decision.result, accountId, accessToken, marketDataStale: series.stale });
     } catch (error) {
       const reason = error instanceof Error ? error.message.replace(/https?:\/\/\S+/g, '[upstream URL redacted]') : 'Unknown error.';
       request.log.error({ reason, userId: accountId, symbol, timeframe }, 'paper execution failed');

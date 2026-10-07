@@ -46,6 +46,18 @@ const inFlightMarketRequests = new Map<string, Map<number, Promise<MarketDataSer
 
 export function clearMarketDataCache(): void {
   marketDataCache.clear();
+  inFlightMarketRequests.clear();
+}
+
+export async function probeMarketData(canonicalSymbol: string): Promise<{ candleCount: number }> {
+  const instrument = getMarket(canonicalSymbol);
+  if (!instrument || instrument.marketType !== 'crypto' || instrument.provider !== 'massive' || !instrument.sourceSymbol) {
+    throw new Error('Market probe is not configured for this instrument.');
+  }
+  const candles = await fetchFromProvider(instrument, '1m', 5);
+  validateCandles(candles, canonicalSymbol);
+  if (candles.length === 0) throw new Error('Provider returned no candles.');
+  return { candleCount: candles.length };
 }
 
 export function isTimeframe(value: unknown): value is Timeframe {
@@ -77,11 +89,10 @@ export function fetchMarketData(canonicalSymbol: string, timeframe: Timeframe, l
   // Check TTL cache first — return fresh or stale entry
   const cacheKey = JSON.stringify([canonicalSymbol, timeframe, limit]);
   const cached = marketDataCache.get(cacheKey);
-  if (cached) {
-    const now = Date.now();
-    const stale = now > cached.expiresAt;
-    // Return cached data (stale flag indicates freshness)
-    return Promise.resolve({ ...cached.series, fetchedAt: cached.fetchedAt, stale });
+  if (cached && Date.now() <= cached.expiresAt) {
+    marketDataCache.delete(cacheKey);
+    marketDataCache.set(cacheKey, cached);
+    return Promise.resolve({ ...cached.series, fetchedAt: cached.fetchedAt, stale: false });
   }
 
   // De-duplicate in-flight requests
@@ -90,7 +101,11 @@ export function fetchMarketData(canonicalSymbol: string, timeframe: Timeframe, l
   const matchingRequest = [...(requests ?? [])]
     .filter(([requestedLimit]) => requestedLimit >= limit)
     .sort(([left], [right]) => left - right)[0]?.[1];
-  if (matchingRequest) return matchingRequest.then((series) => limitMarketDataSeries(series, limit));
+  if (matchingRequest) {
+    return matchingRequest
+      .then((series) => limitMarketDataSeries(series, limit))
+      .catch((error: unknown) => returnStaleOrThrow(cacheKey, cached, timeframe, canonicalSymbol, error));
+  }
 
   const pending = requests ?? new Map<number, Promise<MarketDataSeries>>();
   const request = fetchMarketDataUncoalesced(canonicalSymbol, timeframe, limit);
@@ -99,7 +114,30 @@ export function fetchMarketData(canonicalSymbol: string, timeframe: Timeframe, l
   return request.finally(() => {
     pending.delete(limit);
     if (pending.size === 0) inFlightMarketRequests.delete(inflightKey);
-  });
+  }).catch((error: unknown) => returnStaleOrThrow(cacheKey, cached, timeframe, canonicalSymbol, error));
+}
+
+function returnStaleOrThrow(cacheKey: string, cached: CacheEntry | undefined, timeframe: Timeframe, symbol: string, error: unknown): Promise<MarketDataSeries> {
+  if (!cached) return Promise.reject(error);
+  const ttl = CACHE_TTL_MS[timeframe] ?? 15_000;
+  const ageMs = Date.now() - cached.fetchedAt;
+  const maxStaleMs = ttl * config.marketDataMaxStaleTtlMultiplier;
+  if (ageMs > maxStaleMs) return Promise.reject(error);
+
+  // Keep the fallback in the LRU queue without extending its original age.
+  marketDataCache.delete(cacheKey);
+  marketDataCache.set(cacheKey, cached);
+  evictOldestCacheEntries();
+  console.warn({ symbol, timeframe, ageMs }, 'serving stale market data after provider failure');
+  return Promise.resolve({ ...cached.series, fetchedAt: cached.fetchedAt, stale: true });
+}
+
+function evictOldestCacheEntries(): void {
+  while (marketDataCache.size > config.marketDataCacheMaxEntries) {
+    const oldestKey = marketDataCache.keys().next().value as string | undefined;
+    if (!oldestKey) return;
+    marketDataCache.delete(oldestKey);
+  }
 }
 
 async function fetchMarketDataUncoalesced(canonicalSymbol: string, timeframe: Timeframe, limit: number): Promise<MarketDataSeries> {
@@ -177,7 +215,9 @@ async function fetchMarketDataUncoalesced(canonicalSymbol: string, timeframe: Ti
   // Store in TTL cache
   const ttl = CACHE_TTL_MS[timeframe] ?? 15_000;
   const cacheKey = JSON.stringify([canonicalSymbol, timeframe, limit]);
+  marketDataCache.delete(cacheKey);
   marketDataCache.set(cacheKey, { series, fetchedAt, expiresAt: fetchedAt + ttl });
+  evictOldestCacheEntries();
 
   return series;
 }

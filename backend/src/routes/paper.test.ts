@@ -49,7 +49,7 @@ afterEach(() => vi.clearAllMocks());
 
 describe('paper trade route', () => {
   it('ignores a client-provided decision and evaluates closed server candles', async () => {
-    vi.mocked(fetchMarketData).mockResolvedValue({ candles } as never);
+    vi.mocked(fetchMarketData).mockResolvedValue({ candles, stale: false } as never);
     vi.mocked(analyze).mockResolvedValue({ decision: { result: serverDecision } } as never);
     vi.mocked(executeDecision).mockResolvedValue({ accepted: true, status: 'filled' } as never);
     const app = await createApp();
@@ -64,12 +64,12 @@ describe('paper trade route', () => {
     expect(response.statusCode).toBe(200);
     expect(fetchMarketData).toHaveBeenCalledWith('BTCUSDT', '15m', 501);
     expect(analyze).toHaveBeenCalledWith({ symbol: 'BTCUSDT', timeframe: '15m', candles: candles.slice(0, -1) }, 'user-123', 'test-token');
-    expect(executeDecision).toHaveBeenCalledWith({ symbol: 'BTCUSDT', decision: serverDecision, accountId: 'user-123', accessToken: 'test-token' });
+    expect(executeDecision).toHaveBeenCalledWith({ symbol: 'BTCUSDT', decision: serverDecision, accountId: 'user-123', accessToken: 'test-token', marketDataStale: false });
     await app.close();
   });
 
   it('does not create an order when server analysis has no directional decision', async () => {
-    vi.mocked(fetchMarketData).mockResolvedValue({ candles } as never);
+    vi.mocked(fetchMarketData).mockResolvedValue({ candles, stale: false } as never);
     vi.mocked(analyze).mockResolvedValue({ decision: { result: { ...serverDecision, decision: 'NO_TRADE' } } } as never);
     const app = await createApp();
 
@@ -82,6 +82,24 @@ describe('paper trade route', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ accepted: false, status: 'rejected' });
+    expect(executeDecision).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('refuses new paper entries when only stale market data is available', async () => {
+    vi.mocked(fetchMarketData).mockResolvedValue({ candles, stale: true } as never);
+    const app = await createApp();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/paper/execute',
+      headers: { authorization: 'Bearer test-token' },
+      payload: { symbol: 'BTCUSD', timeframe: '15m' },
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ error: 'Market data is temporarily stale; paper entries are paused.' });
+    expect(analyze).not.toHaveBeenCalled();
     expect(executeDecision).not.toHaveBeenCalled();
     await app.close();
   });

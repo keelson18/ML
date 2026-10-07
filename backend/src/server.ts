@@ -10,6 +10,9 @@ import { marketRoutes } from './routes/market';
 import { paperRoutes } from './routes/paper';
 import { positionRoutes } from './routes/positions';
 import { registerAuthGuards } from './middleware/fastify-auth';
+import { getDefaultSymbols } from './constants/markets';
+import { marketAvailabilityRoutes } from './routes/market-availability';
+import { probeAllMarkets } from './services/marketAvailability';
 
 // Allowed CORS origins from env, defaults to local dev
 function allowedOrigins(): string[] {
@@ -39,35 +42,19 @@ export function buildServer() {
   registerAuthGuards(app);
   const pipeline = new AutonomousPipeline({ enableExecution: autonomyEnabled() });
 
-  // Helmet: HSTS and standard security headers
-  void app.register(helmet, {
-    contentSecurityPolicy: false, // Disable CSP — Vite injects inline styles in dev
-  });
-
-  // Rate limiting: per-user, stricter on market and decision routes
-  void app.register(rateLimit, {
-    max: 100,
-    timeWindow: '1 minute',
-    keyGenerator: (req) => req.authenticatedUserId ?? req.ip,
-    addHeaders: {
-      'x-ratelimit-limit': true,
-      'x-ratelimit-remaining': true,
-      'x-ratelimit-reset': true,
-    },
-  });
-
   void app.register(cors, { origin: allowedOrigins() });
   void app.register(decisionRoutes, pipeline);
   void app.register(marketRoutes);
   void app.register(paperRoutes);
   void app.register(positionRoutes);
+  void app.register(marketAvailabilityRoutes);
   app.get('/health', async () => ({ status: 'ok', service: 'quantum-api', autonomy: pipeline.getSnapshot() }));
   return { app, pipeline };
 }
 
 export async function startServer() {
   const { app, pipeline } = buildServer();
-  const scheduler = new AutonomousScheduler(pipeline, ['BTCUSD'], '15m');
+  const scheduler = new AutonomousScheduler(pipeline, getDefaultSymbols(), '15m');
   const port = Number(process.env.AUTONOMY_PORT ?? process.env.PORT ?? 8787);
   try {
     await app.listen({ port, host: '0.0.0.0' });
@@ -88,6 +75,7 @@ export async function startServer() {
     throw error;
   }
   if (autonomyEnabled()) scheduler.start();
+  if (config.massiveApiKey) void probeAllMarkets().catch(() => app.log.warn('market availability probe failed'));
   const shutdown = async () => { scheduler.stop(); await app.close(); };
   process.once('SIGINT', shutdown);
   process.once('SIGTERM', shutdown);

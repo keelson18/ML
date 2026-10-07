@@ -3,9 +3,10 @@ import { analyze } from '../services/decisionService';
 import { executeDecision, getAccount, manageOpenPositions, markCandleProcessed, wasCandleProcessed } from '../services/paperTradingService';
 import { fetchMarketData } from '../services/marketDataService';
 import type { AutonomousConfig, AutonomousState, PipelineResult, PipelineSnapshot } from './types';
+import { getDefaultSymbols } from '../constants/markets';
 
 const DEFAULT_CONFIG: AutonomousConfig = {
-  symbols: ['BTCUSD', 'ETHUSD'],
+  symbols: getDefaultSymbols(),
   timeframe: '15m',
   accountId: 'autonomy:default',
   enableExecution: true,
@@ -46,11 +47,15 @@ export class AutonomousPipeline {
   }
 
   async runOnce(symbol: string, timeframe: Timeframe = this.config.timeframe, candles?: Candle[]): Promise<PipelineResult> {
-    const series = candles ?? (await fetchMarketData(symbol, timeframe, 501)).candles;
+    const fetchedSeries = candles ? undefined : await fetchMarketData(symbol, timeframe, 501);
+    const series = candles ?? fetchedSeries!.candles;
     const closedCandle = series[series.length - 2];
     if (!closedCandle) throw new Error(`No closed candle available for ${symbol}.`);
     if (this.state === 'PAUSED' || this.state === 'OFFLINE') return { symbol, timeframe, candle: closedCandle, skipped: `Pipeline is ${this.state}.`, state: this.state };
     const closedTrades = await manageOpenPositions(this.config.accountId, symbol, closedCandle);
+    if (fetchedSeries?.stale) {
+      return { ...this.skip(symbol, timeframe, closedCandle, 'Stale market data; new paper positions are paused.'), closedTrades, marketDataStale: true };
+    }
     const candleKey = `${symbol}:${timeframe}`;
     if (this.processedCandles.get(candleKey) === closedCandle.time) return { symbol, timeframe, candle: closedCandle, skipped: 'Closed candle already processed.', closedTrades, state: this.state };
     if (await wasCandleProcessed(this.config.accountId, symbol, timeframe, closedCandle.time)) {
@@ -67,7 +72,7 @@ export class AutonomousPipeline {
       this.failures = 0;
 
       if (this.config.enableExecution && (decision.decision === 'BUY' || decision.decision === 'SELL')) {
-        const order = await executeDecision({ accountId: this.config.accountId, symbol, decision, processedCandle: { timeframe, time: closedCandle.time } });
+        const order = await executeDecision({ accountId: this.config.accountId, symbol, decision, processedCandle: { timeframe, time: closedCandle.time }, marketDataStale: fetchedSeries?.stale ?? false });
         this.processedCandles.set(candleKey, closedCandle.time);
         this.snapshot = { ...this.snapshot, executedOrders: this.snapshot.executedOrders + (order.accepted ? 1 : 0) };
         return { symbol, timeframe, candle: closedCandle, decision, order, closedTrades, state: this.state };

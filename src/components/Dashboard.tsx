@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { TRACKED_PAIRS, TIMEFRAMES, MARKET_TYPES, type Candle, type Timeframe, type Signal, type Recommendation, type MLPrediction, type MarketType, type CMSContent } from '../lib/types';
+import { TIMEFRAMES, MARKET_TYPES, type Candle, type Timeframe, type Signal, type Recommendation, type MLPrediction, type MarketType, type CMSContent } from '../lib/types';
 import { getDataProvider } from '../lib/providers';
 import { riskLevels } from '../lib/strategies';
 import { runAllStrategies } from '../lib/strategies/index';
@@ -16,7 +16,7 @@ import CMSManager from './CMS/CMSManager';
 import CMSViewer from './CMS/CMSViewer';
 import Sidebar from './Sidebar';
 import { pathForSidebarTab, sidebarTabFromPath, type SidebarTab } from '../lib/routes';
-import { formatMarketPrice, getMarketsByType } from '../lib/markets';
+import { formatMarketPrice, getDefaultMarketSymbol, getMarketsByType, getMarketAvailability, setMarketAvailability } from '../lib/markets';
 import { fetchPublishedContent } from '../lib/cms';
 import MarketsPage from './pages/MarketsPage';
 import AIAnalysis from './pages/AIAnalysis';
@@ -31,7 +31,7 @@ import AILearning from './pages/AILearning';
 import SettingsPage from './pages/SettingsPage';
 import MultiTimeframeTerminal from './MultiTimeframeTerminal';
 import AutonomousCommandCenter from './AutonomousCommandCenter';
-import { requestBackendDecision, type BackendDecision } from '../lib/backend-api';
+import { fetchMarketAvailability, requestBackendDecision, type BackendDecision } from '../lib/backend-api';
 
 type WsStatus = 'connecting' | 'open' | 'closed' | 'reconnecting';
 
@@ -42,7 +42,8 @@ export default function Dashboard() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [marketType, setMarketType] = useState<MarketType>('crypto');
-  const [symbol, setSymbol] = useState<string>('BTCUSD');
+  const [symbol, setSymbol] = useState<string>(getDefaultMarketSymbol());
+  const [availabilityRevision, setAvailabilityRevision] = useState(0);
   const [timeframe, setTimeframe] = useState<Timeframe>('1h');
   const [candles, setCandles] = useState<Candle[]>([]);
   const [decisionCandles, setDecisionCandles] = useState<Candle[]>([]);
@@ -80,10 +81,24 @@ export default function Dashboard() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, [isAdmin, profile]);
 
-  const availableMarkets = useMemo(() => getMarketsByType(marketType), [marketType]);
+  const availableMarkets = useMemo(() => {
+    void availabilityRevision;
+    return getMarketsByType(marketType).filter((market) => getMarketAvailability(market.symbol).status !== 'unavailable');
+  }, [marketType, availabilityRevision]);
   const dataProvider = useMemo(() => getDataProvider(symbol), [symbol]);
 
   useEffect(() => { candlesRef.current = candles; }, [candles]);
+
+  useEffect(() => {
+    if (!user) return;
+    let active = true;
+    void fetchMarketAvailability().then((records) => {
+      if (!active) return;
+      setMarketAvailability(records);
+      setAvailabilityRevision((revision) => revision + 1);
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [user]);
 
   // Load historical candles + subscribe to live kline stream
   useEffect(() => {
@@ -305,7 +320,7 @@ export default function Dashboard() {
             >
               {availableMarkets.length > 0
                 ? availableMarkets.map((p) => <option key={p.symbol} value={p.symbol}>{p.label}</option>)
-                : TRACKED_PAIRS.map((p) => <option key={p.symbol} value={p.symbol}>{p.label}</option>)}
+                : getMarketsByType(marketType).map((p) => <option key={p.symbol} value={p.symbol}>{p.label}</option>)}
             </select>
           </div>
 

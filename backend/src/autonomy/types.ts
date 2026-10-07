@@ -32,6 +32,7 @@ export interface PipelineResult {
   order?: PaperOrderResult;
   closedTrades?: PaperTrade[];
   skipped?: string;
+  marketDataStale?: boolean;
   state: AutonomousState;
 }
 

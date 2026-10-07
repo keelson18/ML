@@ -91,6 +91,28 @@ export const MARKET_UNIVERSE: Market[] = [
   { symbol: 'INTC', baseAsset: 'INTC', quoteAsset: 'USD', marketType: 'stock', exchange: 'NASDAQ', label: 'Intel Corp.', provider: 'massive', category: 'Technology', sector: 'Semiconductors', isActive: true },
 ];
 
+export type MarketAvailabilityStatus = 'available' | 'unavailable' | 'unverified';
+export interface MarketAvailabilityRecord { symbol: string; status: MarketAvailabilityStatus; checkedAt: number | null }
+const marketAvailability = new Map<string, MarketAvailabilityRecord>();
+
+export function setMarketAvailability(records: MarketAvailabilityRecord[]): void {
+  for (const record of records) {
+    if (getMarket(record.symbol)) marketAvailability.set(record.symbol, record);
+  }
+}
+
+export function getMarketAvailability(symbol: string): MarketAvailabilityRecord {
+  return marketAvailability.get(symbol) ?? { symbol, status: 'unverified', checkedAt: null };
+}
+
+export function getDefaultMarketSymbol(): string {
+  return MARKET_UNIVERSE.find((market) => market.isActive)?.symbol ?? '';
+}
+
+export function getTrackedMarkets(): Market[] {
+  return MARKET_UNIVERSE.filter((market) => market.isActive && market.marketType === 'crypto');
+}
+
 // Legacy USDT symbol → canonical USD symbol mapping for backward compatibility
 const LEGACY_SYMBOL_MAP: Record<string, string> = {
   BTCUSDT: 'BTCUSD', ETHUSDT: 'ETHUSD', SOLUSDT: 'SOLUSD', XRPUSDT: 'XRPUSD',

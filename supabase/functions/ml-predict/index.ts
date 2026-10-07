@@ -24,7 +24,30 @@ const corsHeaders = {
 function maintenanceApiKey(): string | null {
   return Deno.env.get("ML_SERVICE_API_KEY") ?? null;
 }
-const BACKEND_URL = Deno.env.get("BACKEND_URL") ?? "http://localhost:8787";
+
+function backendUrl(): string | null {
+  const value = Deno.env.get('BACKEND_URL')?.trim();
+  if (!value) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error('BACKEND_URL must be a valid absolute URL.');
+  }
+  const functionEnvironment = Deno.env.get('ML_FUNCTION_ENV') ?? 'production';
+  if (!['development', 'production'].includes(functionEnvironment)) {
+    throw new Error('ML_FUNCTION_ENV must be development or production.');
+  }
+  if (functionEnvironment === 'production' && parsed.protocol !== 'https:') {
+    throw new Error('BACKEND_URL must use HTTPS in production.');
+  }
+  if (functionEnvironment === 'development' && !['http:', 'https:'].includes(parsed.protocol)) {
+    throw new Error('BACKEND_URL must use HTTP or HTTPS.');
+  }
+  return parsed.toString().replace(/\/$/, '');
+}
+
+const BACKEND_URL = backendUrl();
 const PRED_HORIZON = 5; // candles ahead to predict
 const TRAIN_FRACTION = 0.7; // chronological split, no shuffling
 
@@ -192,6 +215,7 @@ function predictProba(model: { weights: number[]; bias: number; mean: number[]; 
 // Routes through the backend market data service so ML predictions use the same
 // provider (Massive/Twelve Data) as the UI, not a separate Binance feed.
 async function fetchCandles(symbol: string, timeframe: string, limit: number, accessToken: string): Promise<{ candles: Candle[]; provider: string; quoteCurrency: string }> {
+  if (!BACKEND_URL) throw new Error('Market data service is not configured.');
   const url = `${BACKEND_URL}/api/v1/market/candles/${encodeURIComponent(symbol)}?timeframe=${encodeURIComponent(timeframe)}&limit=${limit}`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
   if (!res.ok) throw new Error(`Market data service ${res.status}`);
@@ -327,6 +351,10 @@ Deno.serve(async (req: Request) => {
 
     return jsonResponse({ error: 'Not found' }, 404);
   } catch (err) {
+    if (err instanceof Error && err.message === 'Market data service is not configured.') {
+      console.error('[ml] market data backend URL is not configured');
+      return jsonResponse({ error: 'Market data service not configured.' }, 503);
+    }
     console.error('[ml]', err);
     return jsonResponse({ error: 'Internal error' }, 500);
   }

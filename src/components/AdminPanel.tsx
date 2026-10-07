@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Shield, Activity, Users, Brain, BookOpen, FileText, Settings, Play, Pause, RefreshCw } from 'lucide-react';
-import { fetchAutonomyStatus, setAutonomyState, type AutonomyStatus } from '../lib/backend-api';
+import { Shield, Activity, Users, Brain, BookOpen, FileText, Settings, Play, Pause, RefreshCw, Database } from 'lucide-react';
+import { fetchAutonomyStatus, fetchMarketAvailability, probeMarkets, setAutonomyState, type AutonomyStatus, type MarketAvailabilityRecord } from '../lib/backend-api';
 import AdminRoute from './AdminRoute';
 import SystemMetrics from './Admin/SystemMetrics';
 import UserManagement from './Admin/UserManagement';
@@ -8,7 +8,7 @@ import ModelManagement from './Admin/ModelManagement';
 import CMSManager from './CMS/CMSManager';
 import Logs from './Admin/Logs';
 
-type AdminTab = 'metrics' | 'users' | 'models' | 'cms' | 'logs' | 'settings';
+type AdminTab = 'metrics' | 'users' | 'models' | 'cms' | 'logs' | 'markets' | 'settings';
 
 const TABS: { key: AdminTab; label: string; icon: typeof Activity }[] = [
   { key: 'metrics', label: 'System Metrics', icon: Activity },
@@ -16,6 +16,7 @@ const TABS: { key: AdminTab; label: string; icon: typeof Activity }[] = [
   { key: 'models', label: 'ML Models', icon: Brain },
   { key: 'cms', label: 'Content (CMS)', icon: BookOpen },
   { key: 'logs', label: 'System Logs', icon: FileText },
+  { key: 'markets', label: 'Market Availability', icon: Database },
   { key: 'settings', label: 'Settings', icon: Settings },
 ];
 
@@ -83,11 +84,36 @@ export default function AdminPanel() {
           {activeTab === 'models' && <ModelManagement />}
           {activeTab === 'cms' && <CMSManager />}
           {activeTab === 'logs' && <Logs />}
+          {activeTab === 'markets' && <MarketAvailabilityPanel />}
           {activeTab === 'settings' && <AutonomySettings />}
         </div>
       </div>
     </AdminRoute>
   );
+}
+
+function MarketAvailabilityPanel() {
+  const [markets, setMarkets] = useState<MarketAvailabilityRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [probing, setProbing] = useState(false);
+  const [error, setError] = useState(false);
+  const refresh = useCallback(async () => {
+    try { setMarkets(await fetchMarketAvailability(true)); setError(false); }
+    catch { setError(true); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { void refresh(); }, [refresh]);
+  const probe = async () => {
+    setProbing(true);
+    try { setMarkets(await probeMarkets()); setError(false); }
+    catch { setError(true); }
+    finally { setProbing(false); }
+  };
+  return <section className="bg-bg/50 border border-border/50 rounded-xl p-4 space-y-4">
+    <div className="flex items-center justify-between gap-3"><div><h3 className="text-sm font-semibold">Massive USD market availability</h3><p className="text-xs text-muted mt-1">Unknown markets remain available for selection until a provider check confirms they are unavailable.</p></div><div className="flex gap-2"><button type="button" onClick={() => void refresh()} aria-label="Refresh market availability" className="p-2 rounded hover:bg-surface"><RefreshCw className="w-4 h-4 text-muted" /></button><button type="button" onClick={() => void probe()} disabled={probing} className="px-3 py-2 rounded-lg bg-primary text-black text-xs font-semibold disabled:opacity-50">{probing ? 'Checking…' : 'Probe markets'}</button></div></div>
+    {error && <p role="alert" className="text-xs text-danger">Market availability could not be loaded or checked.</p>}
+    {loading ? <p className="text-xs text-muted">Loading…</p> : <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">{markets.map((market) => <div key={market.symbol} className="rounded-lg bg-surface border border-border p-3"><div className="flex justify-between gap-2"><strong className="text-xs">{market.symbol}</strong><span className={`text-[10px] uppercase ${market.status === 'available' ? 'text-success' : market.status === 'unavailable' ? 'text-danger' : 'text-muted'}`}>{market.status}</span></div><p className="text-[10px] text-muted mt-1">{market.checkedAt ? `Checked ${new Date(market.checkedAt).toLocaleString()}` : 'Not checked'}</p></div>)}</div>}
+  </section>;
 }
 
 function AutonomySettings() {

@@ -4,6 +4,7 @@ import { AutonomousPipeline } from '../autonomy/pipeline';
 import { getAccount } from '../services/paperTradingService';
 import { TIMEFRAMES } from '../../../src/lib/types';
 import { config } from '../config.js';
+import { DEFAULT_SYMBOL } from '../constants/markets';
 
 const VALID_TIMEFRAMES = new Set<string>(TIMEFRAMES.map((t) => t.value));
 const SYMBOL_PATTERN = /^[A-Z0-9._-]{1,20}$/;
@@ -53,7 +54,7 @@ export async function decisionRoutes(app: FastifyInstance, pipeline: AutonomousP
   app.post('/api/v1/autonomy/pause', { preHandler: app.requireAdmin }, async () => { pipeline.pause(); return pipeline.getSnapshot(); });
   app.post('/api/v1/autonomy/run', { preHandler: app.requireAdmin }, async (request, reply) => {
     const body = (request.body ?? {}) as { symbol?: string; timeframe?: AnalyzeInput['timeframe']; candles?: AnalyzeInput['candles'] };
-    const symbol = body.symbol ?? 'BTCUSD';
+    const symbol = body.symbol ?? DEFAULT_SYMBOL;
     const invalid = validateAnalyzeInput({ ...body, symbol, timeframe: body.timeframe ?? '15m' }, false);
     if (invalid) return reply.code(400).send({ error: invalid });
     try {

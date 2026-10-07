@@ -29,6 +29,14 @@ describe('backend paper position lifecycle', () => {
     expect((await getAccount(accountId)).positions).toHaveLength(0);
   });
 
+  it('rejects new positions when market data is stale', async () => {
+    const accountId = `stale-${Date.now()}`;
+    const result = await executeDecision({ accountId, symbol: 'BTCUSD', decision: buyDecision(), quantity: 1, marketDataStale: true });
+
+    expect(result.accepted).toBe(false);
+    expect((await getAccount(accountId)).positions).toHaveLength(0);
+  });
+
   it('closes a position automatically when its stop is touched', async () => {
     const accountId = `lifecycle-${Date.now()}`;
     await executeDecision({ accountId, symbol: 'BTCUSD', decision: buyDecision(), quantity: 1 });

@@ -133,16 +133,6 @@ export interface CMSContent {
   updatedAt: string;
 }
 
-export const TRACKED_PAIRS = [
-  { symbol: 'BTCUSD', label: 'BTC/USD', marketType: 'crypto' as MarketType },
-  { symbol: 'ETHUSD', label: 'ETH/USD', marketType: 'crypto' as MarketType },
-  { symbol: 'SOLUSD', label: 'SOL/USD', marketType: 'crypto' as MarketType },
-  { symbol: 'BNBUSD', label: 'BNB/USD', marketType: 'crypto' as MarketType },
-  { symbol: 'ADAUSD', label: 'ADA/USD', marketType: 'crypto' as MarketType },
-  { symbol: 'XRPUSD', label: 'XRP/USD', marketType: 'crypto' as MarketType },
-  { symbol: 'DOTUSD', label: 'DOT/USD', marketType: 'crypto' as MarketType },
-] as const;
-
 export const TIMEFRAMES: { value: Timeframe; label: string }[] = [
   { value: '1m', label: '1m' },
   { value: '3m', label: '3m' },

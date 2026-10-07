@@ -15,7 +15,7 @@ export interface OHLCV {
 }
 
 export interface CandleMetadata {
-  source: string; // e.g., 'binance', 'provider-x'
+  source: string;
   qualityStatus: 'valid' | 'questionable' | 'suspicious';
   fetchedAt?: Date;
 }

@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { getMarket } from '../../../src/lib/markets';
 import { config } from '../config';
 import { fetchMarketData, isTimeframe, MarketDataProviderError } from '../services/marketDataService';
+import { getMarketAvailability } from '../services/marketAvailability';
 
 export async function marketRoutes(app: FastifyInstance) {
   app.get<{ Params: { symbol: string }; Querystring: { timeframe?: string; limit?: string } }>('/api/v1/market/candles/:symbol', {
@@ -13,6 +14,9 @@ export async function marketRoutes(app: FastifyInstance) {
     const limit = request.query.limit === undefined ? 500 : Number(request.query.limit);
 
     if (!getMarket(symbol)) return reply.code(400).send({ error: 'Unknown market symbol.' });
+    if (getMarketAvailability().find((market) => market.symbol === symbol)?.status === 'unavailable') {
+      return reply.code(404).send({ error: 'Market not available.' });
+    }
     if (!isTimeframe(timeframe)) return reply.code(400).send({ error: 'Invalid timeframe.' });
     if (!Number.isInteger(limit) || limit < 1 || limit > 1000) {
       return reply.code(400).send({ error: 'Limit must be an integer between 1 and 1000.' });
@@ -20,7 +24,7 @@ export async function marketRoutes(app: FastifyInstance) {
 
     try {
       const series = await fetchMarketData(symbol, timeframe, limit);
-      return { symbol, timeframe, candles: series.candles, identity: series.identity, dataset: series.dataset };
+      return { symbol, timeframe, candles: series.candles, identity: series.identity, dataset: series.dataset, fetchedAt: series.fetchedAt, stale: series.stale };
     } catch (error) {
       if (error instanceof MarketDataProviderError && error.status === 429) {
         if (error.retryAfter) reply.header('Retry-After', error.retryAfter);

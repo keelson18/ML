@@ -109,6 +109,26 @@ export interface MarketDataResponse {
   symbol: string;
   timeframe: Timeframe;
   candles: Candle[];
+  fetchedAt: number;
+  stale: boolean;
+}
+
+export interface MarketAvailabilityRecord {
+  symbol: string;
+  status: 'available' | 'unavailable' | 'unverified';
+  checkedAt: number | null;
+  candleCount?: number;
+}
+
+export async function fetchMarketAvailability(admin = false): Promise<MarketAvailabilityRecord[]> {
+  const path = admin ? '/api/v1/admin/markets/availability' : '/api/v1/market/availability';
+  const payload = await authenticatedBackendRequest<{ markets: MarketAvailabilityRecord[] }>(path);
+  return payload.markets;
+}
+
+export async function probeMarkets(): Promise<MarketAvailabilityRecord[]> {
+  const payload = await authenticatedBackendRequest<{ markets: MarketAvailabilityRecord[] }>('/api/v1/admin/markets/probe', { method: 'POST' });
+  return payload.markets;
 }
 
 export async function fetchCanonicalMarketData(symbol: string, timeframe: Timeframe, limit = 1000): Promise<MarketDataResponse> {

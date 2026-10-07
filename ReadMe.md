@@ -95,6 +95,8 @@ Fill in `.env`:
 | `CORS_ORIGIN` | `http://localhost:5173` for local dev |
 | `VITE_BACKEND_URL` | `http://localhost:8787` for local backend |
 
+For the local Supabase Edge Function runtime, set `BACKEND_URL` to a URL reachable from its container (for example `http://host.docker.internal:8787` on Docker Desktop) and set `ML_FUNCTION_ENV=development`. Hosted Edge Functions require `BACKEND_URL` to be an HTTPS URL; configure `BACKEND_URL` and `ML_FUNCTION_ENV=production` as server-side function secrets. If `BACKEND_URL` is missing, ML prediction/retraining returns a generic 503 instead of calling localhost.
+
 ### 3. Database setup
 
 Run the migrations in `supabase/migrations/` against your Supabase project (via the SQL Editor or Supabase CLI).

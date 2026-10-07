@@ -130,6 +130,7 @@ export async function executeDecision(input: {
   decision: TradeDecision;
   quantity?: number;
   processedCandle?: { timeframe: string; time: number };
+    marketDataStale?: boolean;
   accessToken?: string;
 }) {
   const accountId = input.accountId ?? 'autonomy:default';
@@ -168,7 +169,8 @@ export async function executeDecision(input: {
       : decision.decision === 'SELL'
         ? stop !== undefined && target !== undefined && stop > requestedPrice && target < requestedPrice
         : false;
-    const riskApproved = (decision.decision === 'BUY' || decision.decision === 'SELL')
+    const riskApproved = !input.marketDataStale
+      && (decision.decision === 'BUY' || decision.decision === 'SELL')
       && requestedPrice > 0
       && stop !== undefined && stop > 0
       && target !== undefined && target > 0

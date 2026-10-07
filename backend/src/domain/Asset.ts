@@ -90,16 +90,17 @@ export class AssetRegistry {
   static bootstrap(): AssetRegistry {
     const registry = new AssetRegistry();
 
-    // Initial market universe per specification
-    const assets = [
-      Asset.create('BTCUSD', 'Bitcoin', 'BTC', 'USD', 'crypto', { exchange: 'Binance' }),
-      Asset.create('ETHUSD', 'Ethereum', 'ETH', 'USD', 'crypto', { exchange: 'Binance' }),
-      Asset.create('XAUUSD', 'Gold Spot', 'XAU', 'USD', 'commodity'),
-      Asset.create('XAGUSD', 'Silver Spot', 'XAG', 'USD', 'commodity'),
-      Asset.create('EURUSD', 'EUR/USD', 'EUR', 'USD', 'forex', { sessionTZ: 'UTC' }),
-    ];
+    const assets = MARKET_UNIVERSE.filter((market) => market.isActive).map((market) => Asset.create(
+      market.symbol,
+      market.label,
+      market.baseAsset,
+      market.quoteAsset,
+      market.marketType,
+      { exchange: market.exchange, sector: market.sector, category: market.category, provider: market.provider },
+    ));
 
     assets.forEach((a) => registry.register(a));
     return registry;
   }
 }
+import { MARKET_UNIVERSE } from '../../../src/lib/markets';
