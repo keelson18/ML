@@ -49,4 +49,16 @@ describe('backend paper position lifecycle', () => {
     expect(trades[0].realizedPnl).toBeLessThan(0);
     expect((await getAccount(accountId)).positions[0].status).toBe('closed');
   });
+
+  it('does not open a short on a spot crypto SELL decision', async () => {
+    const accountId = `short-${Date.now()}`;
+    const result = await executeDecision({
+      accountId,
+      symbol: 'BTCUSD',
+      decision: { ...buyDecision(), decision: 'SELL', invalidation: 105, targets: [{ price: 90 }] },
+    });
+    expect(result.accepted).toBe(false);
+    expect(result.reason).toContain('Short paper positions are not enabled');
+    expect((await getAccount(accountId)).positions).toHaveLength(0);
+  });
 });

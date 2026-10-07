@@ -1,11 +1,14 @@
-import { closePaperPosition, simulatePaperOrder, type PaperAccountState, type PaperOrderRequest, type PaperOrderResult, type PaperTrade } from '../engines/paper-execution';
+import { closePaperPosition, reducePaperPosition, simulatePaperOrder, type PaperAccountState, type PaperOrderRequest, type PaperOrderResult, type PaperTrade } from '../engines/paper-execution';
 import type { Candle } from '../../../src/lib/types';
 import { getMarket } from '../../../src/lib/markets';
 import type { TradeDecision } from '../engines/decision-engine';
+import { atr } from '../../../src/lib/indicators';
+import { analyzeMarketStructure } from '../../../src/lib/market-structure';
 import { getSupabaseClient, getSupabaseClientWithToken } from '../db';
 import { fetchMarketData } from './marketDataService';
 import { traderConfig } from '../trader/config';
 import { calculatePositionSize, markToMarket } from '../trader/risk';
+import { managePaperPosition } from '../trader/manager';
 
 const testAccounts = new Map<string, PaperAccountState>();
 
@@ -82,25 +85,57 @@ export async function closeOpenPaperPosition(accountId: string, symbol: string, 
   }, accessToken);
 }
 
-export async function manageOpenPositions(accountId: string, symbol: string, candle: Candle): Promise<PaperTrade[]> {
+export async function manageOpenPositions(accountId: string, symbol: string, candle: Candle, history: Candle[] = [candle], thesisInvalidated = false): Promise<PaperTrade[]> {
   return updateAccount(accountId, (startingAccount) => {
     let account = startingAccount;
     const closedTrades: PaperTrade[] = [];
     const openPositions = account.positions.filter((position) => position.status === 'open' && position.symbol === symbol);
+    const atrSeries = atr(history, 14);
+    const currentAtr = atrSeries.at(-1);
+    const swingLow = analyzeMarketStructure(history).lows.at(-1)?.value;
     for (const position of openPositions) {
-      const stopHit = position.stopLoss !== undefined && (position.side === 'buy'
-        ? candle.low <= position.stopLoss
-        : candle.high >= position.stopLoss);
-      const targetHit = !stopHit && position.takeProfit !== undefined && (position.side === 'buy'
-        ? candle.high >= position.takeProfit
-        : candle.low <= position.takeProfit);
-      const exitPrice = stopHit ? position.stopLoss : targetHit ? position.takeProfit : undefined;
-      if (exitPrice === undefined) continue;
-
-      const result = closePaperPosition(account, symbol, exitPrice, traderConfig.FEE_RATE, 'paper-simulator-1.0.0', `trade-${Date.now()}`, new Date(candle.time * 1000).toISOString());
-      if ('trade' in result) {
-        account = result.account;
-        closedTrades.push(result.trade);
+      const managed = managePaperPosition({
+        position,
+        candle,
+        atr: currentAtr,
+        swingLow,
+        barIndex: (position.barsHeld ?? 0) + 1,
+        invalidationObservedAtBar: thesisInvalidated ? position.barsHeld ?? 0 : undefined,
+      });
+      account = { ...account, positions: account.positions.map((candidate) => candidate.id === position.id
+        ? {
+            ...candidate,
+            stopLoss: managed.position.stopLoss,
+            targetsTaken: managed.position.targetsTaken,
+            barsHeld: managed.position.barsHeld,
+            maxFavorablePrice: managed.position.maxFavorablePrice,
+            managementEvents: [...(position.managementEvents ?? []), ...managed.actions.map((action) => ({
+              occurredAt: new Date(candle.time * 1000).toISOString(),
+              action,
+            }))],
+          }
+        : candidate) };
+      for (const exit of managed.exits) {
+        const result = reducePaperPosition(account, position.id, exit.quantity, exit.price, traderConfig.FEE_RATE,
+          'paper-simulator-1.0.0', `trade-${Date.now()}-${closedTrades.length}`, new Date(candle.time * 1000).toISOString(), exit.reason);
+        if ('trade' in result) {
+          account = result.account;
+          closedTrades.push(result.trade);
+        }
+      }
+      const current = account.positions.find((candidate) => candidate.id === position.id);
+      if (current && current.status === 'open') {
+        account = { ...account, positions: account.positions.map((candidate) => candidate.id === position.id
+          ? {
+              ...managed.position,
+              quantity: current.quantity,
+              entryFee: current.entryFee,
+              managementEvents: [...(position.managementEvents ?? []), ...managed.actions.map((action) => ({
+                occurredAt: new Date(candle.time * 1000).toISOString(),
+                action,
+              }))],
+            }
+          : candidate) };
       }
     }
     return { account, result: closedTrades };

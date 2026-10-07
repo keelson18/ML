@@ -13,6 +13,14 @@ export interface PaperPosition {
   entryFee: number;
   stopLoss?: number;
   takeProfit?: number;
+  initialRisk?: number;
+  initialQuantity?: number;
+  targets?: { price: number; fractionOfPosition: number }[];
+  targetsTaken?: number[];
+  barsHeld?: number;
+  maxFavorablePrice?: number;
+  planId?: string;
+  managementEvents?: Array<{ occurredAt: string; action: string }>;
   status: PaperPositionStatus;
   openedAt: string;
   closedAt?: string;
@@ -32,6 +40,7 @@ export interface PaperTrade {
   executionVersion: string;
   openedAt: string;
   closedAt: string;
+  exitReason?: string;
 }
 
 export interface PaperAccountState {
@@ -57,6 +66,8 @@ export interface PaperOrderRequest {
   slippageRate: number;
   stopLoss?: number;
   takeProfit?: number;
+  targets?: { price: number; fractionOfPosition: number }[];
+  planId?: string;
   executionVersion: string;
   timestamp?: string;
 }
@@ -90,7 +101,8 @@ export function simulatePaperOrder(
   request: PaperOrderRequest,
 ): PaperOrderResult {
   const side = orderSide(request.decision.decision);
-  if (!side) return rejected(account, request.orderId, 'Only BUY and SELL decisions can create paper orders.');
+  if (!side) return rejected(account, request.orderId, 'Only directional decisions can be considered for a paper order.');
+  if (side !== 'buy') return rejected(account, request.orderId, 'Short paper positions are not enabled for this account; SELL only closes or reduces a long.');
   if (!request.riskApproved || !request.portfolioApproved) {
     return rejected(account, request.orderId, 'Paper execution requires approved risk and portfolio gates.');
   }
@@ -125,6 +137,13 @@ export function simulatePaperOrder(
     entryFee: fee,
     stopLoss: request.stopLoss,
     takeProfit: request.takeProfit,
+    initialRisk: request.stopLoss === undefined ? undefined : Math.abs(fillPrice - request.stopLoss),
+    initialQuantity: request.quantity,
+    targets: request.targets ?? (request.takeProfit === undefined ? [] : [{ price: request.takeProfit, fractionOfPosition: 1 }]),
+    targetsTaken: [],
+    barsHeld: 0,
+    maxFavorablePrice: fillPrice,
+    planId: request.planId,
     status: 'open',
     openedAt: timestamp,
   };
@@ -155,30 +174,48 @@ export function closePaperPosition(
 ): { account: PaperAccountState; trade: PaperTrade } | { account: PaperAccountState; error: string } {
   const position = account.positions.find((candidate) => candidate.status === 'open' && candidate.symbol === symbol);
   if (!position) return { account, error: 'No open paper position exists for this symbol.' };
-  if (!validPositive(exitPrice) || !Number.isFinite(feeRate) || feeRate < 0) {
+  return reducePaperPosition(account, position.id, position.quantity, exitPrice, feeRate, executionVersion, tradeId, timestamp, 'stop-or-target');
+}
+
+export function reducePaperPosition(
+  account: PaperAccountState,
+  positionId: string,
+  requestedQuantity: number,
+  exitPrice: number,
+  feeRate: number,
+  executionVersion: string,
+  tradeId: string,
+  timestamp = new Date().toISOString(),
+  exitReason = 'manual-reduction',
+): { account: PaperAccountState; trade: PaperTrade } | { account: PaperAccountState; error: string } {
+  const position = account.positions.find((candidate) => candidate.status === 'open' && candidate.id === positionId);
+  if (!position) return { account, error: 'No open paper position exists for this symbol.' };
+  if (!validPositive(requestedQuantity) || !validPositive(exitPrice) || !Number.isFinite(feeRate) || feeRate < 0) {
     return { account, error: 'Exit price must be positive and fee rate must be non-negative.' };
   }
 
-  const exitNotional = exitPrice * position.quantity;
+  const quantity = Math.min(position.quantity, requestedQuantity);
+  const exitNotional = exitPrice * quantity;
   const exitFee = exitNotional * feeRate;
-  const pricePnl = position.side === 'buy'
-    ? (exitPrice - position.entryPrice) * position.quantity
-    : (position.entryPrice - exitPrice) * position.quantity;
-  const realizedPnl = pricePnl - position.entryFee - exitFee;
-  const releasedCash = position.side === 'buy'
-    ? exitNotional - exitFee
-    : position.entryPrice * position.quantity + pricePnl - exitFee;
+  const allocatedEntryFee = position.quantity > 0 ? position.entryFee * quantity / position.quantity : 0;
+  const pricePnl = position.side === 'buy' ? (exitPrice - position.entryPrice) * quantity : (position.entryPrice - exitPrice) * quantity;
+  const realizedPnl = pricePnl - allocatedEntryFee - exitFee;
+  const releasedCash = position.side === 'buy' ? exitNotional - exitFee : position.entryPrice * quantity + pricePnl - exitFee;
+  const remainingQuantity = Math.max(0, position.quantity - quantity);
+  const isClosed = remainingQuantity <= Number.EPSILON * Math.max(1, position.quantity);
   const closedPosition: PaperPosition = {
     ...position,
-    status: 'closed',
-    closedAt: timestamp,
+    quantity: isClosed ? 0 : remainingQuantity,
+    entryFee: Math.max(0, position.entryFee - allocatedEntryFee),
+    status: isClosed ? 'closed' : 'open',
+    closedAt: isClosed ? timestamp : undefined,
   };
   const trade: PaperTrade = {
     id: tradeId,
     positionId: position.id,
     symbol: position.symbol,
     side: position.side,
-    quantity: position.quantity,
+    quantity,
     entryPrice: position.entryPrice,
     exitPrice,
     fees: position.entryFee + exitFee,
@@ -187,6 +224,7 @@ export function closePaperPosition(
     executionVersion,
     openedAt: position.openedAt,
     closedAt: timestamp,
+    exitReason,
   };
 
   return {

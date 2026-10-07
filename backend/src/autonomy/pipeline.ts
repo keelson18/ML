@@ -52,7 +52,7 @@ export class AutonomousPipeline {
     const closedCandle = series[series.length - 2];
     if (!closedCandle) throw new Error(`No closed candle available for ${symbol}.`);
     if (this.state === 'PAUSED' || this.state === 'OFFLINE') return { symbol, timeframe, candle: closedCandle, skipped: `Pipeline is ${this.state}.`, state: this.state };
-    const closedTrades = await manageOpenPositions(this.config.accountId, symbol, closedCandle);
+    const closedTrades = await manageOpenPositions(this.config.accountId, symbol, closedCandle, series.slice(0, -1));
     if (fetchedSeries?.stale) {
       return { ...this.skip(symbol, timeframe, closedCandle, 'Stale market data; new paper positions are paused.'), closedTrades, marketDataStale: true };
     }
