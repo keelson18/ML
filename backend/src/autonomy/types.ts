@@ -9,7 +9,6 @@ export interface AutonomousConfig {
   timeframe: Timeframe;
   accountId: string;
   enableExecution: boolean;
-  killZonesUtc: Array<{ startHour: number; endHour: number }>;
   maxConsecutiveFailures: number;
 }
 

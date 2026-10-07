@@ -25,6 +25,29 @@ const rateLimitSettings = z.object({
   MARKET_PROBE_RATE_LIMIT_MAX: process.env.MARKET_PROBE_RATE_LIMIT_MAX ?? 1,
 });
 
+const sessionCalendarEntry = z.object({
+  timezone: z.string().min(1).max(64),
+  open: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  close: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  weekdays: z.array(z.number().int().min(0).max(6)).min(1),
+  holidays: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).default([]),
+  openAuctionBlackoutMinutes: z.number().int().nonnegative().max(240).default(10),
+  closeAuctionBlackoutMinutes: z.number().int().nonnegative().max(240).default(10),
+  scoreMultiplier: z.number().finite().positive().max(1).default(1),
+});
+const parsedSessionCalendar = (() => {
+  let raw: unknown;
+  try { raw = JSON.parse(process.env.MARKET_SESSION_CALENDAR_JSON ?? '{}'); }
+  catch { throw new Error('MARKET_SESSION_CALENDAR_JSON must be valid JSON.'); }
+  const result = z.record(z.string(), sessionCalendarEntry).safeParse(raw);
+  if (!result.success) throw new Error('MARKET_SESSION_CALENDAR_JSON has an invalid calendar entry.');
+  for (const [exchange, calendar] of Object.entries(result.data)) {
+    try { new Intl.DateTimeFormat('en-US', { timeZone: calendar.timezone }); }
+    catch { throw new Error(`MARKET_SESSION_CALENDAR_JSON has an invalid timezone for ${exchange}.`); }
+  }
+  return result.data;
+})();
+
 if (!rateLimitSettings.success) {
   const variable = rateLimitSettings.error.issues[0]?.path[0] ?? 'rate-limit configuration';
   throw new Error(`${String(variable)} must be a positive number.`);
@@ -47,6 +70,7 @@ export const config = {
   marketDataMaxStaleTtlMultiplier: rateLimitSettings.data.MARKET_DATA_MAX_STALE_TTL_MULTIPLIER,
   marketProbeIntervalMs: rateLimitSettings.data.MARKET_PROBE_INTERVAL_MS,
   marketProbeRateLimitMax: rateLimitSettings.data.MARKET_PROBE_RATE_LIMIT_MAX,
+  marketSessionCalendar: parsedSessionCalendar,
 };
 
 // Validate default and probe override symbols against the same active market registry used by the API.

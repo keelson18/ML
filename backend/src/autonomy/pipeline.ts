@@ -4,13 +4,14 @@ import { getAccount, manageOpenPositions, markCandleProcessed, wasCandleProcesse
 import { fetchMarketData } from '../services/marketDataService';
 import type { AutonomousConfig, AutonomousState, PipelineResult, PipelineSnapshot } from './types';
 import { getDefaultSymbols } from '../constants/markets';
+import { getMarket } from '../../../src/lib/markets';
+import { evaluateMarketSession } from '../trader/sessions';
 
 const DEFAULT_CONFIG: AutonomousConfig = {
   symbols: getDefaultSymbols(),
   timeframe: '15m',
   accountId: 'autonomy:default',
   enableExecution: true,
-  killZonesUtc: [{ startHour: 8, endHour: 10 }, { startHour: 14, endHour: 17 }],
   maxConsecutiveFailures: 3,
 };
 
@@ -62,7 +63,9 @@ export class AutonomousPipeline {
       this.processedCandles.set(candleKey, closedCandle.time);
       return { symbol, timeframe, candle: closedCandle, skipped: 'Closed candle already processed.', closedTrades, state: this.state };
     }
-    if (!this.inKillZone()) return { ...this.skip(symbol, timeframe, closedCandle, 'Outside configured kill zone.'), closedTrades };
+    const market = getMarket(symbol);
+    const session = market ? evaluateMarketSession(market) : undefined;
+    if (session && !session.allowed) return { ...this.skip(symbol, timeframe, closedCandle, session.reason), closedTrades };
 
     this.transition('DECIDING');
     try {
@@ -99,11 +102,6 @@ export class AutonomousPipeline {
   private skip(symbol: string, timeframe: Timeframe, candle: Candle, reason: string): PipelineResult {
     this.snapshot = { ...this.snapshot, skippedRuns: this.snapshot.skippedRuns + 1, lastRunAt: new Date().toISOString() };
     return { symbol, timeframe, candle, skipped: reason, state: this.state };
-  }
-
-  private inKillZone() {
-    const hour = new Date().getUTCHours();
-    return this.config.killZonesUtc.some((zone) => hour >= zone.startHour && hour < zone.endHour);
   }
 
   private transition(state: AutonomousState) {
