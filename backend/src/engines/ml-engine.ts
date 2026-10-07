@@ -5,6 +5,13 @@ export interface MLEngineContext extends EngineContext {
   prediction?: MLPrediction;
   featureSnapshot?: Record<string, number>;
   datasetId?: string;
+  calibration?: {
+    modelVersion: string;
+    timeframe: string;
+    sampleCount: number;
+    brierScore: number;
+    measuredAt: string;
+  };
 }
 
 export interface MLPredictionAnalysis {
@@ -12,6 +19,7 @@ export interface MLPredictionAnalysis {
   prediction?: MLPrediction;
   featureCount: number;
   lineageComplete: boolean;
+  calibrated: boolean;
 }
 
 const ENGINE_NAME = 'ml-intelligence';
@@ -28,11 +36,21 @@ export const mlIntelligenceEngine: IntelligenceEngine<MLPredictionAnalysis> & {
     const prediction = context.prediction;
     const featureCount = context.featureSnapshot ? Object.keys(context.featureSnapshot).length : 0;
     const lineageComplete = Boolean(prediction?.model_version && context.datasetId && featureCount > 0);
+    const calibrated = Boolean(prediction
+      && context.calibration
+      && context.calibration.modelVersion === prediction.model_version
+      && context.calibration.timeframe === prediction.timeframe
+      && context.calibration.sampleCount > 0
+      && Number.isFinite(context.calibration.brierScore)
+      && context.calibration.brierScore >= 0
+      && context.calibration.brierScore <= 1
+      && Number.isFinite(Date.parse(context.calibration.measuredAt)));
     const result: MLPredictionAnalysis = {
       available: prediction !== undefined,
       prediction,
       featureCount,
       lineageComplete,
+      calibrated,
     };
     const warnings: string[] = [];
     if (!prediction) warnings.push('No ML prediction was supplied.');

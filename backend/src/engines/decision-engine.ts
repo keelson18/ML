@@ -19,6 +19,13 @@ export interface DecisionEngineContext extends EngineContext {
     prediction?: MLPredictionAnalysis['prediction'];
     featureSnapshot?: Record<string, number>;
     datasetId?: string;
+    calibration?: {
+      modelVersion: string;
+      timeframe: string;
+      sampleCount: number;
+      brierScore: number;
+      measuredAt: string;
+    };
   };
   historical?: {
     currentFeatureVector: number[];
@@ -169,7 +176,7 @@ export const masterDecisionEngine: IntelligenceEngine<TradeDecision> & {
       decisionDirection: direction,
       historicalSampleQuality: historical?.result.sampleQuality,
       modelProbability: ml?.result.prediction?.probability,
-      modelCalibrated: ml?.result.lineageComplete,
+      modelCalibrated: ml?.result.calibrated,
     });
     const confidence = confidenceResult.result.overall;
 

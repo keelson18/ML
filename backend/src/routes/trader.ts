@@ -11,6 +11,7 @@ import { traderConfig } from '../trader/config';
 import { createTradePlan, rankPlannerResults } from '../trader/planner';
 
 const listQuery = z.object({ status: z.enum(['WATCHING', 'ARMED', 'PENDING_ORDER', 'OPEN', 'MANAGING', 'CLOSED']).optional() }).strict();
+const historyQuery = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) }).strict();
 const timeframeSeconds: Record<Timeframe, number> = {
   '1m': 60, '3m': 180, '5m': 300, '15m': 900, '30m': 1_800,
   '1h': 3_600, '4h': 14_400, '1d': 86_400, '1w': 604_800, '1M': 2_592_000,
@@ -74,16 +75,7 @@ export async function traderRoutes(app: FastifyInstance) {
     const plans = ranked.flatMap((result) => result.plan ? [result.plan] : []);
     if (plans.length > 0) {
       const supabase = getSupabaseClientWithToken(request.accessToken);
-      const rows = plans.map((plan) => ({
-        id: plan.id,
-        account_id: plan.accountId,
-        symbol: plan.symbol,
-        status: plan.status,
-        plan,
-        created_at: plan.createdAt,
-        updated_at: plan.updatedAt,
-      }));
-      const { error } = await supabase.from('trade_plans').upsert(rows, { onConflict: 'id' });
+      const { error } = await supabase.rpc('save_trade_plans', { p_plans: plans });
       if (error) {
         request.log.error({ code: error.code }, 'Trader plan persistence failed');
         return reply.code(503).send({ error: 'Trader plans are temporarily unavailable.' });
@@ -91,4 +83,30 @@ export async function traderRoutes(app: FastifyInstance) {
     }
     return { plans, watchlist: ranked.map(({ bias, regime, keyLevels, qualityScore, reason }) => ({ bias, regime, keyLevels, qualityScore, reason })), count: plans.length };
   });
+
+  const registerOwnedHistory = (path: string, table: 'plan_events' | 'paper_orders' | 'trade_journal' | 'daily_reviews', orderColumn: string, responseKey: string) => {
+    app.get(path, {
+      preHandler: app.requireAuth,
+      config: { rateLimit: { max: config.marketRateLimitMax, timeWindow: config.rateLimitWindowMs } },
+    }, async (request, reply) => {
+      const query = historyQuery.safeParse(request.query);
+      if (!query.success) return reply.code(400).send({ error: 'Invalid history query.' });
+      if (!request.accessToken || !request.authenticatedUserId) return reply.code(401).send({ error: 'Authentication required.' });
+      const supabase = getSupabaseClientWithToken(request.accessToken);
+      const { data, error } = await supabase.from(table).select('*')
+        .eq('account_id', request.authenticatedUserId)
+        .order(orderColumn, { ascending: false })
+        .limit(query.data.limit);
+      if (error) {
+        request.log.error({ code: error.code, table }, 'Trader history read failed');
+        return reply.code(503).send({ error: 'Trader history is temporarily unavailable.' });
+      }
+      return { [responseKey]: data ?? [] };
+    });
+  };
+
+  registerOwnedHistory('/api/v1/trader/events', 'plan_events', 'occurred_at', 'events');
+  registerOwnedHistory('/api/v1/trader/orders', 'paper_orders', 'created_at', 'orders');
+  registerOwnedHistory('/api/v1/trader/journal', 'trade_journal', 'created_at', 'entries');
+  registerOwnedHistory('/api/v1/trader/reviews', 'daily_reviews', 'review_date', 'reviews');
 }

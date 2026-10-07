@@ -565,7 +565,19 @@ describe('marketStructureEngine', () => {
 
     expect(result.status).toBe('degraded');
     expect(result.result.lineageComplete).toBe(false);
+    expect(result.result.calibrated).toBe(false);
     expect(result.warnings[0]).toContain('lineage is incomplete');
+  });
+
+  it('marks an ML model calibrated only when a matching measurement exists', () => {
+    const result = mlIntelligenceEngine.analyze({
+      inputContextId: 'ml-calibrated-context', symbol: 'BTCUSD', timeframe: '1h', candles: [], datasetId: 'dataset-1',
+      prediction: { pair: 'BTCUSD', timeframe: '1h', prediction: 'up', probability: 0.7, expected_move_pct: 1, model_version: 'model-1', confidence: 'medium' },
+      featureSnapshot: { momentum: 0.4 },
+      calibration: { modelVersion: 'model-1', timeframe: '1h', sampleCount: 120, brierScore: 0.18, measuredAt: '2026-10-06T00:00:00.000Z' },
+    });
+    expect(result.result.lineageComplete).toBe(true);
+    expect(result.result.calibrated).toBe(true);
   });
 
   it('keeps structured AI reasoning explicitly non-authoritative', () => {
