@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase';
 import type { Session } from '../lib/supabase';
 import type { UserProfile, UserRole } from '../lib/types';
+import { readJsonSafe } from '../../shared/http';
 
 export interface AdminUser extends UserProfile { email: string }
 export interface AdminUserPage { users: AdminUser[]; page: number; limit: number; total: number; pages: number }
@@ -10,11 +11,12 @@ async function adminRequest<T>(path: string, init: RequestInit = {}): Promise<T>
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('Authentication required.');
   const headers = new Headers(init.headers);
-  headers.set('Content-Type', 'application/json');
+  if (init.body !== undefined) headers.set('Content-Type', 'application/json');
   headers.set('Authorization', `Bearer ${session.access_token}`);
   const response = await fetch(path, { ...init, headers });
-  const payload = await response.json() as T & { error?: string };
-  if (!response.ok) throw new Error(payload.error ?? `Admin request failed (${response.status}).`);
+  const { payload } = await readJsonSafe<T & { error?: string }>(response);
+  if (!response.ok) throw new Error(payload?.error ?? `Admin request failed (${response.status}).`);
+  if (payload === null) throw new Error('The server returned an empty or invalid response.');
   return payload;
 }
 

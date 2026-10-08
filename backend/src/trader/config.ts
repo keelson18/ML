@@ -53,6 +53,7 @@ const traderConfigSchema = z.object({
   ALLOWED_SETUP_TYPES: csv(SETUP_TYPES.join(','), SETUP_TYPES),
   WATCHLIST_MAX_SIZE: z.coerce.number().int().positive().default(12),
   STALE_DATA_BLOCKS_ENTRIES: z.enum(['true', 'false']).default('true').transform((value) => value === 'true'),
+  EVENT_BLACKOUT_MIN_IMPACT: z.enum(['low', 'medium', 'high']).default('medium'),
 });
 
 export type TraderConfig = z.infer<typeof traderConfigSchema>;

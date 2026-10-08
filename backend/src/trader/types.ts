@@ -29,6 +29,7 @@ export interface TradePlan {
   expiresAtBar: number;
   createdAtBar?: number;
   lastReason?: string;
+  activeEventIds?: string[];
   thesis: string;
   falsification: string;
   grade: PlanGrade;

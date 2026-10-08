@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { readJsonSafe } from '../../shared/http';
 
 export async function apiRequest<T = unknown>(
   path: string,
@@ -13,16 +14,10 @@ export async function apiRequest<T = unknown>(
 
   const res = await fetch(path, { ...options, headers });
 
-  if (!res.ok) {
-    let message = `Request failed (${res.status})`;
-    try {
-      const body = await res.json();
-      if (body?.error) message = body.error;
-    } catch { /* ignore parse error */ }
-    throw new Error(message);
-  }
-
-  return res.json() as Promise<T>;
+  const { payload } = await readJsonSafe<T & { error?: string }>(res);
+  if (!res.ok) throw new Error(payload?.error ?? `Request failed (${res.status})`);
+  if (payload === null) throw new Error('The server returned an empty or invalid response.');
+  return payload;
 }
 
 export const api = {

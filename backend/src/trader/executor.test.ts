@@ -65,6 +65,22 @@ describe('plan executor', () => {
     expect(result.fill?.price).toBeLessThan(100);
   });
 
+  it('rejects a pending fill when the current entry gate blocks it', () => {
+    const pendingOrder: PendingPaperOrder = {
+      id: 'order-event', planId: plan.id, accountId: plan.accountId, symbol: plan.symbol, side: 'long',
+      orderType: 'stop_entry', price: 100, quantity: 1, createdAtBar: 19, expiresAtBar: 50, status: 'pending',
+    };
+    const result = advanceTradePlan({
+      plan: { ...plan, status: 'PENDING_ORDER' }, pendingOrder, candle: bar(900), recentCandles: [bar(900)],
+      barIndex: 20, timeframe: '15m',
+      gate: () => ({ approved: false, quantity: 0, reason: 'Entry blocked by event blackout.', activeEventIds: ['event-1'] }),
+    });
+    expect(result.fill).toBeUndefined();
+    expect(result.plan.status).toBe('PENDING_ORDER');
+    expect(result.plan.lastReason).toBe('Entry blocked by event blackout.');
+    expect(result.plan.activeEventIds).toEqual(['event-1']);
+  });
+
   it('rejects an entry when gates fail and keeps the plan armed', () => {
     const result = advanceTradePlan({
       plan, candle: bar(900), recentCandles: [bar(900)], barIndex: 20, timeframe: '15m',

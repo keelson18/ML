@@ -1,5 +1,6 @@
 import { DomainError } from './errors';
 import { createCorrelationId } from './observability';
+import { readJsonSafe } from '../../shared/http';
 import { supabase } from './supabase';
 import type { DecisionEngineContext } from '../../backend/src/engines/decision-engine';
 import type { DecisionServiceResult } from './application/decision-service';
@@ -32,5 +33,9 @@ export async function requestDecisionAnalysis(context: DecisionEngineContext): P
       correlationId,
     );
   }
-  return await response.json() as DecisionServiceResult;
+  const { payload } = await readJsonSafe<DecisionServiceResult>(response);
+  if (payload === null) {
+    throw new DomainError('INTELLIGENCE_ERROR', 'Decision analysis returned an empty or invalid response.', {}, correlationId);
+  }
+  return payload;
 }

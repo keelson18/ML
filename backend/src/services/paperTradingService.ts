@@ -16,6 +16,7 @@ import type { Timeframe } from '../../../src/lib/types';
 import { randomUUID, createHash } from 'node:crypto';
 import { computeResearchMetrics, createDailyReview, type JournalSample } from '../trader/research';
 import { getMarketAvailability } from './marketAvailability';
+import { evaluateEventEntryGate, getEventRiskStatus } from '../trader/event-risk';
 
 const testAccounts = new Map<string, PaperAccountState>();
 
@@ -89,6 +90,7 @@ export async function advanceStoredTradePlans(input: {
   shadowMode?: boolean;
   accessToken?: string;
 }): Promise<StoredPlanExecutionResult> {
+  const eventRisk = await getEventRiskStatus(input.symbol);
   return updateAccount(input.accountId, (startingAccount) => {
     let account = startingAccount;
     const checkpoint = candleCheckpoint(input.symbol, input.timeframe, 'executor');
@@ -109,6 +111,8 @@ export async function advanceStoredTradePlans(input: {
       if (plan.symbol !== input.symbol || !['WATCHING', 'ARMED', 'PENDING_ORDER'].includes(plan.status)) continue;
       let gateResult: EntryGateResult = { approved: false, quantity: 0, reason: 'Entry gates have not passed.' };
       const gate = (entryPrice: number): EntryGateResult => {
+        const eventDecision = evaluateEventEntryGate(eventRisk, traderConfig.EVENT_BLACKOUT_MIN_IMPACT);
+        if (!eventDecision.approved) return gateResult = { approved: false, quantity: 0, reason: eventDecision.reason, activeEventIds: eventDecision.activeEventIds };
         const market = getMarket(plan.symbol);
         const availability = getMarketAvailability().find((candidate) => candidate.symbol === plan.symbol)?.status;
         if (!market?.isActive || market.priceCurrency !== 'USD' || availability !== 'available') return gateResult = { approved: false, quantity: 0, reason: availability === 'unavailable' ? 'Market is unavailable from the configured provider.' : availability === 'unverified' ? 'Market availability is unverified; entry is blocked.' : 'Market is inactive or not USD quoted.' };
@@ -174,7 +178,7 @@ export async function advanceStoredTradePlans(input: {
           timeframe: input.timeframe, occurredAt: new Date(input.candle.time * 1000).toISOString(),
         });
       } else {
-        nextPlan = { ...step.plan, lastReason: step.reason };
+        nextPlan = { ...step.plan, lastReason: step.reason, activeEventIds: step.plan.activeEventIds ?? [] };
         events.push(...step.events);
         if (step.pendingOrder) {
           const existing = pendingOrders.findIndex((order) => order.id === step.pendingOrder!.id);
@@ -253,6 +257,7 @@ function recordPaperTrade(account: PaperAccountState, trade: PaperTrade, timefra
     id: trade.id, planId: position?.planId, accountId: account.accountId, symbol: trade.symbol,
     datasetId: plan?.datasetId ?? 'manual-paper', configHash: createHash('sha256').update(JSON.stringify(traderConfig)).digest('hex'),
     engineVersions: plan?.engineVersions ?? {},
+    activeEventIds: plan?.activeEventIds ?? [],
     metrics: { rMultiple: risk > 0 ? trade.realizedPnl / risk : 0, pnl: trade.realizedPnl, fees: trade.fees, quantity: trade.quantity,
       barsHeld: position?.barsHeld ?? 0, entryPrice: trade.entryPrice, exitPrice: trade.exitPrice, exitReason: trade.exitReason ?? 'paper-exit' },
     createdAt: timestamp,

@@ -5,6 +5,7 @@
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.57.4";
+import { readJsonSafe } from "../../../shared/http.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": Deno.env.get("CORS_ORIGIN") ?? "*",
@@ -103,13 +104,13 @@ Deno.serve(async (req: Request) => {
       body: JSON.stringify({ contents, generationConfig: { temperature: 0.7, maxOutputTokens: 1024 } }),
     });
 
+    const { payload } = await readJsonSafe<{ candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> }>(res);
     if (!res.ok) {
-      const errText = await res.text();
-      console.error("[kinetic-coach] Gemini error:", res.status, errText);
+      console.error("[kinetic-coach] Gemini request failed:", res.status);
       return jsonResponse({ error: "Gemini request failed" }, 502);
     }
-    const data = await res.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "No response generated.";
+    if (payload === null) throw new Error('Gemini returned an empty or invalid response.');
+    const text = payload.candidates?.[0]?.content?.parts?.[0]?.text ?? "No response generated.";
     return jsonResponse({ reply: text });
   } catch (err) {
     console.error("[kinetic-coach]", err);

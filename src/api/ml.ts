@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import type { MLPrediction, Timeframe } from '../lib/types';
+import { readJsonSafe } from '../../shared/http';
 
 export interface CoachMessage { role: 'user' | 'assistant'; content: string }
 
@@ -17,8 +18,10 @@ async function callEdgeFunction<T>(slug: string, body: unknown): Promise<T> {
     },
     body: JSON.stringify(body),
   });
+  const { payload } = await readJsonSafe<T>(res);
   if (!res.ok) throw new Error(`Edge function ${slug} failed (${res.status})`);
-  return res.json() as Promise<T>;
+  if (payload === null) throw new Error('The Edge Function returned an empty or invalid response.');
+  return payload;
 }
 
 export const mlApi = {

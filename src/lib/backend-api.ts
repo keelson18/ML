@@ -1,15 +1,23 @@
 import { supabase } from './supabase';
+import { readJsonSafe } from '../../shared/http';
 import type { Candle, Timeframe } from './types';
 
 async function authenticatedBackendRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('Authentication required.');
   const headers = new Headers(init.headers);
-  headers.set('Content-Type', 'application/json');
+  if (init.body !== undefined) headers.set('Content-Type', 'application/json');
   headers.set('Authorization', `Bearer ${session.access_token}`);
   const response = await fetch(path, { ...init, headers });
-  const payload = await response.json() as T & { error?: string };
-  if (!response.ok) throw new Error(payload.error ?? `Backend request failed (${response.status}).`);
+  const { raw, payload } = await readJsonSafe<T & { error?: string }>(response);
+  if (!response.ok) {
+    if (payload?.error) throw new Error(payload.error);
+    if (response.status !== 401 && (!raw || [502, 503, 504].includes(response.status))) {
+      throw new Error('The trading backend is unreachable. Check that it is running, then retry.');
+    }
+    throw new Error(`Backend request failed (${response.status}).`);
+  }
+  if (payload === null) throw new Error('The backend returned an empty or invalid response.');
   return payload;
 }
 
@@ -113,6 +121,65 @@ export interface MarketDataResponse {
   stale: boolean;
 }
 
+export interface EventBlackout {
+  id: string;
+  title: string;
+  impact: 'low' | 'medium' | 'high';
+  asset_classes: string[];
+  starts_at: string;
+  ends_at: string;
+  active?: boolean;
+  created_at?: string;
+  cancelled_at?: string | null;
+}
+
+export interface NewsItem {
+  id: string;
+  provider: string;
+  title: string;
+  summary: string;
+  symbols: string[];
+  published_at: string | null;
+  ingested_at: string;
+}
+
+export interface CalendarEvent extends EventBlackout {
+  source: 'manual' | 'provider';
+}
+
+export async function fetchNewsItems(symbol?: string): Promise<{ items: NewsItem[]; availability: 'unverified' | 'available' | 'unavailable'; asOf: string }> {
+  const query = new URLSearchParams();
+  if (symbol) query.set('symbol', symbol);
+  return authenticatedBackendRequest(`/api/v1/news/items?${query}`);
+}
+
+export async function fetchCalendarEvents(): Promise<{ events: CalendarEvent[]; availability: 'unverified' | 'available' | 'unavailable'; asOf: string }> {
+  return authenticatedBackendRequest('/api/v1/calendar/events');
+}
+
+export async function fetchNewsProviderStatus(): Promise<{ news: Array<{ provider: string; availability: 'unverified' | 'available' | 'unavailable'; checkedAt: string | null }>; calendar: Array<{ provider: string; availability: 'unverified' | 'available' | 'unavailable'; checkedAt: string | null }> }> {
+  return authenticatedBackendRequest('/api/v1/news/status');
+}
+
+export async function fetchActiveEventBlackouts(): Promise<EventBlackout[]> {
+  const result = await authenticatedBackendRequest<{ events: EventBlackout[] }>('/api/v1/events/active');
+  return result.events;
+}
+
+export async function fetchAdminEventBlackouts(): Promise<EventBlackout[]> {
+  const result = await authenticatedBackendRequest<{ events: EventBlackout[] }>('/api/v1/admin/event-blackouts');
+  return result.events;
+}
+
+export async function createEventBlackout(input: { title: string; impact: EventBlackout['impact']; assetClasses: string[]; startsAt: string; endsAt: string }): Promise<string> {
+  const result = await authenticatedBackendRequest<{ id: string }>('/api/v1/admin/event-blackouts', { method: 'POST', body: JSON.stringify(input) });
+  return result.id;
+}
+
+export async function cancelEventBlackout(id: string): Promise<void> {
+  await authenticatedBackendRequest(`/api/v1/admin/event-blackouts/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
+}
+
 export interface MarketAvailabilityRecord {
   symbol: string;
   status: 'available' | 'unavailable' | 'unverified';
@@ -153,7 +220,7 @@ export interface TraderPlan {
   zone: { low: number; high: number }; trigger: { kind: string; level?: number };
   invalidation: number; targets: Array<{ price: number; fractionOfPosition: number }>;
   minRR: number; expiresAtBar: number; thesis: string; falsification: string;
-  grade: string; status: string; createdAt: string; updatedAt: string; datasetId: string; lastReason?: string;
+  grade: string; status: string; createdAt: string; updatedAt: string; datasetId: string; lastReason?: string; activeEventIds?: string[];
 }
 
 export interface TraderOverview {

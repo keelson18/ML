@@ -7,6 +7,7 @@
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.57.4";
+import { readJsonSafe } from "../../../shared/http.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": Deno.env.get("CORS_ORIGIN") ?? "*",
@@ -218,9 +219,10 @@ async function fetchCandles(symbol: string, timeframe: string, limit: number, ac
   if (!BACKEND_URL) throw new Error('Market data service is not configured.');
   const url = `${BACKEND_URL}/api/v1/market/candles/${encodeURIComponent(symbol)}?timeframe=${encodeURIComponent(timeframe)}&limit=${limit}`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  const { payload } = await readJsonSafe<{ candles: Candle[]; dataset: { provider: string; quoteCurrency: string } }>(res);
   if (!res.ok) throw new Error(`Market data service ${res.status}`);
-  const body = await res.json() as { candles: Candle[]; dataset: { provider: string; quoteCurrency: string } };
-  return { candles: body.candles, provider: body.dataset.provider, quoteCurrency: body.dataset.quoteCurrency };
+  if (payload === null) throw new Error('Market data service returned an empty or invalid response.');
+  return { candles: payload.candles, provider: payload.dataset.provider, quoteCurrency: payload.dataset.quoteCurrency };
 }
 
 // ---- Rate limiting (durable via Supabase table) ----

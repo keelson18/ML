@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, ClipboardList, Clock3, RefreshCw, ShieldCheck } from 'lucide-react';
 import PageFrame from '../PageFrame';
-import { advanceTraderPlans, fetchAutonomyStatus, fetchTraderHistory, fetchTraderOverview, fetchTraderPlans, refreshTraderPlans, type AutonomyStatus, type TraderAdvanceResult, type TraderOverview, type TraderPlan } from '../../lib/backend-api';
+import { advanceTraderPlans, fetchActiveEventBlackouts, fetchAutonomyStatus, fetchTraderHistory, fetchTraderOverview, fetchTraderPlans, refreshTraderPlans, type AutonomyStatus, type EventBlackout, type TraderAdvanceResult, type TraderOverview, type TraderPlan } from '../../lib/backend-api';
 
 type Review = { review_date?: string; reviewDate?: string; metrics?: { sampleSize?: number; sampleWarning?: string; expectancyR?: number | null } };
 type Journal = { id?: string; symbol?: string; setup_type?: string; outcome_r?: number; r_multiple?: number; created_at?: string; status?: string; metrics?: { rMultiple?: number; pnl?: number; exitReason?: string } };
@@ -17,6 +17,8 @@ export default function TraderDesk() {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [journal, setJournal] = useState<Journal[]>([]);
   const [bias, setBias] = useState<BiasRow[]>([]);
+  const [eventBlackouts, setEventBlackouts] = useState<EventBlackout[]>([]);
+  const [eventCalendarError, setEventCalendarError] = useState(false);
   const [advanceResult, setAdvanceResult] = useState<TraderAdvanceResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -30,14 +32,16 @@ export default function TraderDesk() {
       try { setAdvanceResult(await advanceTraderPlans()); }
       catch { /* existing saved plans and account data remain readable when the executor is offline */ }
     }
-    const [planResult, overviewResult, autonomyResult, reviewResult, journalResult] = await Promise.allSettled([
-      fetchTraderPlans(), fetchTraderOverview(), fetchAutonomyStatus(), fetchTraderHistory<Review>('reviews'), fetchTraderHistory<Journal>('journal'),
+    const [planResult, overviewResult, autonomyResult, reviewResult, journalResult, eventsResult] = await Promise.allSettled([
+      fetchTraderPlans(), fetchTraderOverview(), fetchAutonomyStatus(), fetchTraderHistory<Review>('reviews'), fetchTraderHistory<Journal>('journal'), fetchActiveEventBlackouts(),
     ]);
     if (planResult.status === 'fulfilled') setPlans(planResult.value);
     if (overviewResult.status === 'fulfilled') setOverview(overviewResult.value);
     if (autonomyResult.status === 'fulfilled') setAutonomy(autonomyResult.value);
     if (reviewResult.status === 'fulfilled') setReviews(reviewResult.value);
     if (journalResult.status === 'fulfilled') setJournal(journalResult.value);
+    if (eventsResult.status === 'fulfilled') { setEventBlackouts(eventsResult.value); setEventCalendarError(false); }
+    else setEventCalendarError(true);
     setHistoryError(reviewResult.status === 'rejected' || journalResult.status === 'rejected');
     if (planResult.status === 'rejected' && overviewResult.status === 'rejected') setError('Trader Desk data is unavailable. Check backend health and whether the latest Trader Desk migration has been applied.');
     setLoading(false);
@@ -81,6 +85,8 @@ export default function TraderDesk() {
         <Metric label="Weekly loss limit" value={overview ? `${money(Math.max(0, -overview.weeklyPnl))} / ${money(overview.equity * overview.weeklyLossLimitPct / 100)}` : '—'} detail={`${Math.min(100, weeklyLossUsed).toFixed(0)}% of configured limit used`} warning={weeklyLossUsed >= 75} />
       </section>
 
+      {eventCalendarError && <div role="alert" className="mb-5 rounded-xl border border-danger/30 bg-danger/10 p-3 text-sm text-danger">Event calendar health could not be verified. New entries are blocked until event-risk data is available.</div>}
+      {!!eventBlackouts.length && <div role="status" className="mb-5 rounded-xl border border-warning/30 bg-warning/10 p-3 text-sm text-warning"><strong>Event blackout active.</strong> {eventBlackouts.map((event) => `${event.title} (${Math.max(0, Math.ceil((Date.parse(event.ends_at) - Date.now()) / 60_000))} min remaining)`).join(' · ')} New entries matching the configured impact threshold are blocked.</div>}
       {!!overview?.staleSymbols.length && <div role="status" className="mb-5 rounded-xl border border-warning/30 bg-warning/10 p-3 text-sm text-warning">Stale price data: {overview.staleSymbols.join(', ')}. Open position marks use the last stored entry price until fresh data is available.</div>}
       {advanceResult?.shadowMode && <div role="status" className="mb-5 rounded-xl border border-primary/30 bg-primary/5 p-3 text-sm text-text">Shadow mode is enabled. Confirmed triggers are recorded for research, but they do not open paper positions.</div>}
       {!!advanceResult?.staleSymbols.length && <div role="status" className="mb-5 rounded-xl border border-warning/30 bg-warning/10 p-3 text-sm text-warning">Execution and management skipped stale candles for: {advanceResult.staleSymbols.join(', ')}.</div>}
@@ -109,7 +115,7 @@ export default function TraderDesk() {
 
         <section className="rounded-xl border border-border bg-surface p-4" aria-labelledby="why-title">
           <div className="mb-4 flex items-center justify-between"><div><h2 id="why-title" className="font-semibold text-text">Why no trade</h2><p className="mt-1 text-xs text-muted">Current reasons to wait or stand aside.</p></div><Clock3 className="h-4 w-4 text-muted" /></div>
-          {waitingPlans.length ? <div className="space-y-2">{waitingPlans.slice(0, 5).map((plan) => <div key={plan.id} className="rounded-lg bg-bg/60 p-3 text-sm text-text"><b>{plan.symbol}</b>: {plan.lastReason ?? `waiting for ${plan.trigger.kind.replaceAll('_', ' ')} inside the planned zone.`}</div>)}</div> : <Empty>{bias.length ? bias.slice(0, 5).map((row) => row.reason).join(' ') : 'No active setup is currently confirmed. Refresh plans for a new closed-candle scan.'}</Empty>}
+          {waitingPlans.length ? <div className="space-y-2">{waitingPlans.slice(0, 5).map((plan) => <div key={plan.id} className="rounded-lg bg-bg/60 p-3 text-sm text-text"><b>{plan.symbol}</b>: {plan.lastReason ?? `waiting for ${plan.trigger.kind.replaceAll('_', ' ')} inside the planned zone.`}{!!plan.activeEventIds?.length && <span className="mt-1 block text-[10px] text-warning">Active event IDs: {plan.activeEventIds.join(', ')}</span>}</div>)}</div> : <Empty>{eventBlackouts.length ? eventBlackouts.map((event) => event.title).join(' · ') : bias.length ? bias.slice(0, 5).map((row) => row.reason).join(' ') : 'No active setup is currently confirmed. Refresh plans for a new closed-candle scan.'}</Empty>}
           <div className="mt-3 border-t border-border pt-3 text-xs text-muted">Autonomy: <b className="text-text">{autonomy?.state ?? 'status unavailable'}</b>{autonomy?.lastRunAt ? ` · last run ${new Date(autonomy.lastRunAt).toLocaleString()}` : ''}</div>
         </section>
 

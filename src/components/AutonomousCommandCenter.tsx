@@ -13,6 +13,7 @@ interface Props {
   marketType: string;
   wsStatus: string;
   candles: Candle[];
+  candlesStale: boolean;
   overlays: Parameters<typeof PriceChart>[0]['overlays'];
   recommendation: Recommendation | null;
   serverDecision: BackendDecision | null;
@@ -28,7 +29,7 @@ interface Props {
 
 const initialStatus: AutonomyStatus = { state: 'OFFLINE', processedDecisions: 0, executedOrders: 0, skippedRuns: 0, consecutiveFailures: 0 };
 
-export default function AutonomousCommandCenter({ symbol, timeframe, marketType, wsStatus, candles, overlays, recommendation, serverDecision, serverDecisionError, signals, markets, onSymbolChange, theme, risk, livePrice, loading }: Props) {
+export default function AutonomousCommandCenter({ symbol, timeframe, marketType, wsStatus, candles, candlesStale, overlays, recommendation, serverDecision, serverDecisionError, signals, markets, onSymbolChange, theme, risk, livePrice, loading }: Props) {
   const [status, setStatus] = useState<AutonomyStatus>(initialStatus);
   const [statusError, setStatusError] = useState(false);
   const [executing, setExecuting] = useState(false);
@@ -83,7 +84,7 @@ export default function AutonomousCommandCenter({ symbol, timeframe, marketType,
         </aside>
 
         <div className="command-chart">
-          <div className="chart-caption"><span>EXECUTION CHART</span><span>{formatMarketPrice(symbol, livePrice)}</span></div>
+          <div className="chart-caption"><span>EXECUTION CHART</span><span className="flex items-center gap-2">{candlesStale && <span role="status" className="rounded border border-warning/30 px-1.5 py-0.5 text-warning">STALE</span>}{formatMarketPrice(symbol, livePrice)}</span></div>
           <div className="command-chart-canvas">{candles.length > 0 ? <TradingTerminal symbol={symbol} marketType={marketType} candles={candles} overlays={overlays} timeframe={timeframe} theme={theme} wsStatus={wsStatus} /> : <div className="command-empty">{loading ? 'Loading market data' : 'No market data available'}</div>}</div>
         </div>
 

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity, Sun, Moon, Wifi, WifiOff, TrendingUp, TrendingDown,
-  Menu, X,
+  Menu, X, Bell,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -34,6 +34,7 @@ import MultiTimeframeTerminal from './MultiTimeframeTerminal';
 import AutonomousCommandCenter from './AutonomousCommandCenter';
 import { fetchMarketAvailability, requestBackendDecision, type BackendDecision } from '../lib/backend-api';
 import { resolveAvatarUrl } from '../lib/avatar';
+import { fetchNotifications, markNotificationRead, type InAppNotification } from '../api/notifications';
 
 type WsStatus = 'connecting' | 'open' | 'closed' | 'reconnecting';
 
@@ -60,6 +61,7 @@ export default function Dashboard() {
   const [mlLoading, setMlLoading] = useState(false);
   const [mlStatus, setMlStatus] = useState<'idle' | 'loading' | 'ready' | 'cached' | 'unavailable'>('idle');
   const candlesRef = useRef<Candle[]>([]);
+  const candleCacheRef = useRef(new Map<string, Candle[]>());
 
   const isAdmin = profile?.role === 'admin';
   const navigateToTab = (tab: SidebarTab, replace = false) => {
@@ -108,11 +110,13 @@ export default function Dashboard() {
   // Load historical candles + subscribe to live kline stream
   useEffect(() => {
     let disposed = false;
+    const cacheKey = `${symbol}:${timeframe}`;
+    const cachedCandles = candleCacheRef.current.get(cacheKey) ?? [];
     setLoading(true);
-    candlesRef.current = [];
-    setCandles([]);
-    setDecisionCandles([]);
-    setLivePrice(null);
+    candlesRef.current = cachedCandles;
+    setCandles(cachedCandles);
+    setDecisionCandles(cachedCandles.slice(0, -1));
+    setLivePrice(cachedCandles.at(-1)?.close ?? null);
     setDataError(null);
     setWsStatus('connecting');
     setMl(null);
@@ -124,12 +128,12 @@ export default function Dashboard() {
         if (disposed) return;
         const merged = [...new Map([...data, ...candlesRef.current].map((candle) => [candle.time, candle])).values()].sort((a, b) => a.time - b.time);
         candlesRef.current = merged;
+        candleCacheRef.current.set(cacheKey, merged);
         setCandles(merged);
         setDecisionCandles(merged.slice(0, -1));
         setLivePrice(merged.length ? merged[merged.length - 1].close : null);
       } catch (error) {
         if (!disposed) {
-          if (!candlesRef.current.length) setCandles([]);
           setDataError(error instanceof Error ? error.message : 'Market data could not be loaded.');
         }
       } finally {
@@ -144,7 +148,9 @@ export default function Dashboard() {
       else if (!last || candle.time > last.time) arr.push(candle);
       if (arr.length > 1500) arr.shift();
       candlesRef.current = arr;
+      candleCacheRef.current.set(`${symbol}:${timeframe}`, arr);
       setCandles(arr);
+      setDataError(null);
       if (closed) {
         setDecisionCandles((previous) => {
           if (previous.at(-1) && previous[previous.length - 1].time > candle.time) return previous;
@@ -344,11 +350,11 @@ export default function Dashboard() {
 
         {dataError && (
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning" role="alert">
-            <span>Market data unavailable: {dataError}</span>
+            <span>Market data unavailable: {dataError}{candles.length > 0 && ' Showing last good candles (stale).'}</span>
             <button type="button" onClick={() => setReloadKey((key) => key + 1)} className="rounded border border-warning/40 px-2 py-1 font-medium hover:bg-warning/10">Retry</button>
           </div>
         )}
-        <AutonomousCommandCenter symbol={symbol} timeframe={timeframe} marketType={marketType} wsStatus={wsStatus} candles={candles} overlays={overlays} recommendation={recommendation} serverDecision={serverDecision} serverDecisionError={serverDecisionError} signals={signals} markets={availableMarkets} onSymbolChange={setSymbol} theme={theme} risk={risk} livePrice={livePrice} loading={loading} />
+        <AutonomousCommandCenter symbol={symbol} timeframe={timeframe} marketType={marketType} wsStatus={wsStatus} candles={candles} candlesStale={Boolean(dataError && candles.length)} overlays={overlays} recommendation={recommendation} serverDecision={serverDecision} serverDecisionError={serverDecisionError} signals={signals} markets={availableMarkets} onSymbolChange={setSymbol} theme={theme} risk={risk} livePrice={livePrice} loading={loading} />
       </div>
     );
   };
@@ -394,6 +400,7 @@ export default function Dashboard() {
             <button onClick={toggle} aria-label="Toggle theme" className="p-2 rounded-lg hover:bg-bg transition-colors text-muted hover:text-text" title="Toggle theme">
               {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
+            <NotificationBell userId={user?.id} onOpenNews={() => navigateToTab('news')} />
             <AvatarMenu email={user?.email ?? ''} displayName={profile?.displayName} avatarPath={profile?.avatarUrl} role={profile?.role ?? 'user'} onSettings={() => navigateToTab('settings')} onSignOut={signOut} />
           </div>
         </header>
@@ -423,6 +430,34 @@ function WsIndicator({ status }: { status: WsStatus }) {
       <span className="hidden md:inline">{label}</span>
     </div>
   );
+}
+
+function NotificationBell({ userId, onOpenNews }: { userId?: string; onOpenNews: () => void }) {
+  const [notifications, setNotifications] = useState<InAppNotification[]>([]);
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState(false);
+  useEffect(() => {
+    let active = true;
+    if (userId) void fetchNotifications(userId).then((items) => { if (active) { setNotifications(items); setError(false); } }).catch(() => { if (active) setError(true); });
+    return () => { active = false; };
+  }, [userId]);
+  const openNews = async (notification: InAppNotification) => {
+    if (userId && !notification.read_at) {
+      try {
+        await markNotificationRead(userId, notification.id);
+        setNotifications((items) => items.map((item) => item.id === notification.id ? { ...item, read_at: new Date().toISOString() } : item));
+      } catch { setError(true); }
+    }
+    setOpen(false);
+    onOpenNews();
+  };
+  return <div className="relative">
+    <button type="button" aria-label={`Notifications${notifications.some((item) => !item.read_at) ? `, ${notifications.filter((item) => !item.read_at).length} unread` : ''}`} aria-expanded={open} onClick={() => setOpen((value) => !value)} className="relative rounded-lg p-2 text-muted hover:bg-bg hover:text-text">
+      <Bell className="h-4 w-4" />
+      {!!notifications.filter((item) => !item.read_at).length && <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-primary" />}
+    </button>
+    {open && <div className="absolute right-0 top-full z-50 mt-2 w-80 rounded-xl border border-border bg-surface p-2 shadow-xl"><div className="px-3 py-2 text-xs font-semibold">News updates</div>{error && <p role="alert" className="px-3 py-2 text-xs text-warning">Notifications are unavailable.</p>}{notifications.length ? <div className="max-h-80 overflow-y-auto">{notifications.map((item) => <button type="button" key={item.id} onClick={() => void openNews(item)} className={`block w-full rounded-lg px-3 py-2 text-left hover:bg-bg ${item.read_at ? 'text-muted' : 'text-text'}`}><span className="block text-xs font-medium">{item.title}</span>{item.body && <span className="mt-1 block text-[10px] text-muted">{item.body}</span>}<time className="mt-1 block text-[10px] text-muted">{new Date(item.created_at).toLocaleString()}</time></button>)}</div> : !error && <p className="px-3 py-4 text-xs text-muted">No news updates yet.</p>}</div>}
+  </div>;
 }
 
 function AvatarMenu({ email, displayName, avatarPath, role, onSettings, onSignOut }: { email: string; displayName?: string; avatarPath?: string; role: string; onSettings: () => void; onSignOut: () => void }) {

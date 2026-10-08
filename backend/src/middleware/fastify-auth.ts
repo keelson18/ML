@@ -40,9 +40,10 @@ export function registerAuthGuards(app: FastifyInstance) {
   });
   app.decorate('requireAdmin', async (request: FastifyRequest, reply: FastifyReply) => {
     if (!request.authenticatedUserId || !request.accessToken) {
-      reply.code(401).send({ error: 'Authentication required' });
-      return;
+      await app.requireAuth(request, reply);
+      if (reply.sent) return;
     }
+    if (!request.authenticatedUserId || !request.accessToken) return;
     try {
       const supabase = getSupabaseClientWithToken(request.accessToken);
       const { data, error } = await supabase.from('profiles').select('role').eq('id', request.authenticatedUserId).maybeSingle();
