@@ -94,6 +94,7 @@ export function advanceTradePlan(input: {
   }
 
   if (!['WATCHING', 'ARMED'].includes(plan.status)) return { plan, events: [], reason: `Plan is ${plan.status}; executor made no change.` };
+  if (plan.createdAtBar !== undefined && barIndex <= plan.createdAtBar) return { plan, events: [], reason: 'Plan cannot evaluate its creation candle; waiting for the next closed candle.' };
   if (barIndex > plan.expiresAtBar) {
     const event = eventFor(plan, 'EXPIRED', 'executor', 'Plan expired before a trigger was confirmed.', candle, timeframe);
     return { plan: { ...plan, status: 'EXPIRED', updatedAt: event.occurredAt }, events: [event], reason: event.reason };

@@ -43,6 +43,7 @@ const traderConfigSchema = z.object({
   MIN_FORWARD_DAYS: z.coerce.number().int().positive().default(90),
   MIN_RANDOM_BASELINE_RUNS: z.coerce.number().int().positive().default(1_000),
   SHADOW_MODE_ENABLED: z.enum(['true', 'false']).default('true').transform((value) => value === 'true'),
+  PROMOTED_SETUP_TYPES: z.string().default('').transform((value) => value.split(',').map((entry) => entry.trim()).filter(Boolean)).pipe(z.array(z.enum(SETUP_TYPES))),
   BREAK_EVEN_R: z.coerce.number().finite().positive().default(1),
   TRAIL_START_R: z.coerce.number().finite().positive().default(2),
   TRAILING_ATR_MULTIPLE: z.coerce.number().finite().positive().default(2),

@@ -27,6 +27,8 @@ export interface TradePlan {
   targets: PlannedTarget[];
   minRR: number;
   expiresAtBar: number;
+  createdAtBar?: number;
+  lastReason?: string;
   thesis: string;
   falsification: string;
   grade: PlanGrade;
@@ -83,6 +85,7 @@ export interface PlannerInput {
   symbol: string;
   htfCandles: Partial<Record<Timeframe, Candle[]>>;
   triggerCandles: Candle[];
+  triggerTimeframe?: Timeframe;
   datasetId: string;
 }
 

@@ -54,6 +54,9 @@ export function createTradePlan(input: PlannerInput): PlannerResult {
     return { bias, regime: 'uncertain', keyLevels, qualityScore: 0, reason: bias === 'unclear' ? 'No plan: higher-timeframe bias is unclear or disagrees.' : 'No plan: no eligible trend-pullback support level.' };
   }
   const currentPrice = current as number;
+  const triggerTimeframe = input.triggerTimeframe ?? traderConfig.TRIGGER_TIMEFRAMES[0] as Timeframe;
+  const triggerSeconds: Partial<Record<Timeframe, number>> = { '1m': 60, '3m': 180, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h': 14400, '1d': 86400, '1w': 604800, '1M': 2592000 };
+  const lastTriggerBar = Math.floor((input.triggerCandles.at(-1)?.time ?? latest.time) / (triggerSeconds[triggerTimeframe] ?? 900));
 
   const analysis = analyzeMarketIntelligence({ inputContextId: `${input.datasetId}:4h`, symbol: input.symbol, timeframe: '4h', candles: fourHour });
   const atr = analysis.indicators.result.latest.atr;
@@ -95,7 +98,7 @@ export function createTradePlan(input: PlannerInput): PlannerResult {
     id: randomUUID(), accountId: input.accountId, symbol: input.symbol, side: 'long', setupType: 'trend-pullback', htfBias: bias,
     zone: entryZone, trigger: { kind: 'close_above_level', level: entryZone.high },
     invalidation, targets: [{ price: targetPrice, fractionOfPosition: 1 }],
-    minRR: traderConfig.MIN_RR, expiresAtBar: input.triggerCandles.length + traderConfig.PLAN_EXPIRY_BARS,
+    minRR: traderConfig.MIN_RR, createdAtBar: lastTriggerBar, expiresAtBar: lastTriggerBar + traderConfig.PLAN_EXPIRY_BARS,
     thesis: `${input.symbol} has aligned bullish 1d and 4h structure and is pulling back toward ${support}.`,
     falsification: `A closed 4h candle below ${invalidation} invalidates the bullish pullback thesis.`, grade, status: 'WATCHING',
     contextSnapshot: { currentPrice, support, atr, rr, qualityScore }, engineVersions, datasetId: input.datasetId,

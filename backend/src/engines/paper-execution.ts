@@ -1,4 +1,11 @@
 import type { TradeDecision } from './decision-engine';
+import type { PendingPaperOrder, PlanEvent, TradePlan } from '../trader/types';
+
+export interface PaperJournalEntry {
+  id: string; planId?: string; accountId: string; symbol: string; datasetId: string;
+  configHash: string; engineVersions: Record<string, string>; metrics: Record<string, number | string | boolean>;
+  createdAt: string;
+}
 
 export type PaperOrderSide = 'buy' | 'sell';
 export type PaperPositionStatus = 'open' | 'closed';
@@ -49,6 +56,12 @@ export interface PaperAccountState {
   positions: PaperPosition[];
   trades: PaperTrade[];
   processedCandles?: Record<string, number>;
+  tradePlans?: TradePlan[];
+  pendingPaperOrders?: PendingPaperOrder[];
+  planEvents?: PlanEvent[];
+  tradeJournal?: PaperJournalEntry[];
+  dailyReviews?: Array<{ reviewDate: string; metrics: unknown }>;
+  shadowSignals?: Array<{ planId: string; candleTime: number; reason: string }>;
 }
 
 export interface PaperOrderRequest {

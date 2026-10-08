@@ -9,8 +9,9 @@ import { fetchMarketData } from '../services/marketDataService';
 import { getMarketAvailability } from '../services/marketAvailability';
 import { traderConfig } from '../trader/config';
 import { createTradePlan, rankPlannerResults } from '../trader/planner';
-import { getAccount } from '../services/paperTradingService';
+import { advanceStoredTradePlans, generateDailyAccountReview, getAccount, listStoredTradePlans, manageOpenPositions, storeTradePlan, wasCandleProcessed, markCandleProcessed } from '../services/paperTradingService';
 import { markToMarket } from '../trader/risk';
+import type { TradePlan } from '../trader/types';
 
 const listQuery = z.object({ status: z.enum(['WATCHING', 'ARMED', 'PENDING_ORDER', 'OPEN', 'MANAGING', 'CLOSED']).optional() }).strict();
 const historyQuery = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) }).strict();
@@ -24,6 +25,54 @@ function closedCandles(candles: Awaited<ReturnType<typeof fetchMarketData>>['can
 }
 
 export async function traderRoutes(app: FastifyInstance) {
+  app.post('/api/v1/trader/advance', {
+    preHandler: app.requireAuth,
+    config: { rateLimit: { max: 2, timeWindow: config.rateLimitWindowMs } },
+  }, async (request, reply) => {
+    if (!request.accessToken || !request.authenticatedUserId) return reply.code(401).send({ error: 'Authentication required.' });
+    try {
+      const accountId = request.authenticatedUserId;
+      const triggerTimeframe = traderConfig.TRIGGER_TIMEFRAMES[0] as Timeframe;
+      const plans = (await listStoredTradePlans(accountId, request.accessToken)).filter((plan) => ['WATCHING', 'ARMED', 'PENDING_ORDER'].includes(plan.status));
+      const results = [];
+      const staleSymbols: string[] = [];
+      for (const symbol of [...new Set(plans.map((plan) => plan.symbol))]) {
+        const series = await fetchMarketData(symbol, triggerTimeframe, 100);
+        if (series.stale) { staleSymbols.push(symbol); continue; }
+        const candles = closedCandles(series.candles, triggerTimeframe);
+        const candle = candles.at(-1);
+        if (!candle) continue;
+        results.push(await advanceStoredTradePlans({ accountId, symbol, timeframe: triggerTimeframe, candle, candles, accessToken: request.accessToken }));
+      }
+
+      const account = await getAccount(accountId, request.accessToken);
+      const openSymbols = [...new Set(account.positions.filter((position) => position.status === 'open').map((position) => position.symbol))];
+      const managementTimeframe = traderConfig.MGMT_TIMEFRAME as Timeframe;
+      const closedTrades = [];
+      for (const symbol of openSymbols) {
+        const series = await fetchMarketData(symbol, managementTimeframe, 100);
+        if (series.stale) { staleSymbols.push(symbol); continue; }
+        const candles = closedCandles(series.candles, managementTimeframe);
+        const candle = candles.at(-1);
+        if (!candle || await wasCandleProcessed(accountId, symbol, managementTimeframe, candle.time, 'manager')) continue;
+        closedTrades.push(...await manageOpenPositions(accountId, symbol, candle, candles, false, managementTimeframe));
+        await markCandleProcessed(accountId, symbol, managementTimeframe, candle.time, 'manager');
+      }
+      const daily = await fetchMarketData(plans[0]?.symbol ?? MARKET_UNIVERSE.find((market) => market.marketType === 'crypto')!.symbol, '1d', 2).catch(() => undefined);
+      const lastDaily = daily && closedCandles(daily.candles, '1d').at(-1);
+      if (lastDaily) await generateDailyAccountReview(accountId, new Date(lastDaily.time * 1000).toISOString().slice(0, 10));
+      return {
+        advancedPlans: results.reduce((sum, result) => sum + result.plans.filter((plan) => plan.status === 'PENDING_ORDER' || plan.status === 'OPEN').length, 0),
+        filledOrders: results.reduce((sum, result) => sum + result.filled, 0),
+        shadowSignals: results.flatMap((result) => result.shadowSignals), closedTrades, staleSymbols: [...new Set(staleSymbols)],
+        shadowMode: traderConfig.SHADOW_MODE_ENABLED,
+      };
+    } catch (error) {
+      request.log.error({ reason: error instanceof Error ? error.message : 'unknown' }, 'Trader plan advancement failed');
+      return reply.code(503).send({ error: 'Trader plan advancement is temporarily unavailable.' });
+    }
+  });
+
   app.get('/api/v1/trader/overview', {
     preHandler: app.requireAuth,
     config: { rateLimit: { max: config.marketRateLimitMax, timeWindow: config.rateLimitWindowMs } },
@@ -79,11 +128,14 @@ export async function traderRoutes(app: FastifyInstance) {
     let plansQuery = supabase.from('trade_plans').select('plan').eq('account_id', request.authenticatedUserId).order('created_at', { ascending: false }).limit(100);
     if (query.data.status) plansQuery = plansQuery.eq('status', query.data.status);
     const { data, error } = await plansQuery;
-    if (error) {
-      request.log.error({ code: error.code }, 'Trader plan read failed');
-      return reply.code(503).send({ error: 'Trader plans are temporarily unavailable.' });
-    }
-    return { plans: (data ?? []).map((row) => row.plan) };
+    if (error) request.log.warn({ code: error.code }, 'SQL plan history unavailable; using paper account plan state');
+    const accountPlans = await listStoredTradePlans(request.authenticatedUserId, request.accessToken);
+    const plansById = new Map<string, TradePlan>();
+    for (const row of data ?? []) plansById.set((row.plan as TradePlan).id, row.plan as TradePlan);
+    for (const plan of accountPlans) plansById.set(plan.id, plan);
+    const plans = [...plansById.values()].filter((plan) => !query.data.status || plan.status === query.data.status)
+      .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt)).slice(0, 100);
+    return { plans };
   });
 
   app.post('/api/v1/trader/plans/refresh', {
@@ -119,12 +171,12 @@ export async function traderRoutes(app: FastifyInstance) {
     }
     const ranked = rankPlannerResults(results);
     const plans = ranked.flatMap((result) => result.plan ? [result.plan] : []);
+    for (const plan of plans) await storeTradePlan(request.authenticatedUserId, plan, request.accessToken);
     if (plans.length > 0) {
       const supabase = getSupabaseClientWithToken(request.accessToken);
       const { error } = await supabase.rpc('save_trade_plans', { p_plans: plans });
       if (error) {
-        request.log.error({ code: error.code }, 'Trader plan persistence failed');
-        return reply.code(503).send({ error: 'Trader plans are temporarily unavailable.' });
+        request.log.warn({ code: error.code }, 'SQL plan journal unavailable; plan remains in paper account state');
       }
     }
     return { plans, watchlist: ranked.map(({ bias, regime, keyLevels, qualityScore, reason }) => ({ bias, regime, keyLevels, qualityScore, reason })), count: plans.length };
@@ -143,11 +195,22 @@ export async function traderRoutes(app: FastifyInstance) {
         .eq('account_id', request.authenticatedUserId)
         .order(orderColumn, { ascending: false })
         .limit(query.data.limit);
+      const account = await getAccount(request.authenticatedUserId, request.accessToken);
+      const fallback = table === 'plan_events' ? account.planEvents
+        : table === 'paper_orders' ? account.pendingPaperOrders
+          : table === 'trade_journal' ? account.tradeJournal
+            : account.dailyReviews;
       if (error) {
-        request.log.error({ code: error.code, table }, 'Trader history read failed');
-        return reply.code(503).send({ error: 'Trader history is temporarily unavailable.' });
+        request.log.warn({ code: error.code, table }, 'SQL trader history unavailable; using paper account state');
+        return { [responseKey]: fallback ?? [] };
       }
-      return { [responseKey]: data ?? [] };
+      const rows = [...(data ?? [])] as Array<Record<string, unknown>>;
+      const fallbackRows = (fallback ?? []) as unknown as Array<Record<string, unknown>>;
+      const identity = (row: Record<string, unknown>) => String(row.id ?? row.review_date ?? row.reviewDate ?? '');
+      const combined = new Map<string, Record<string, unknown>>();
+      for (const row of fallbackRows) combined.set(identity(row), row);
+      for (const row of rows) combined.set(identity(row), row);
+      return { [responseKey]: [...combined.values()].sort((left, right) => String(right.created_at ?? right.createdAt ?? right.occurred_at ?? right.review_date ?? '').localeCompare(String(left.created_at ?? left.createdAt ?? left.occurred_at ?? left.review_date ?? ''))).slice(0, query.data.limit) };
     });
   };
 

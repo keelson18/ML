@@ -1,6 +1,6 @@
 import type { Candle, Timeframe } from '../../../src/lib/types';
 import { analyze } from '../services/decisionService';
-import { getAccount, manageOpenPositions, markCandleProcessed, wasCandleProcessed } from '../services/paperTradingService';
+import { advanceStoredTradePlans, generateDailyAccountReview, getAccount, manageOpenPositions, markCandleProcessed, storeTradePlan, wasCandleProcessed } from '../services/paperTradingService';
 import { fetchMarketData } from '../services/marketDataService';
 import type { AutonomousConfig, AutonomousState, PipelineResult, PipelineRole, PipelineSnapshot } from './types';
 import { getDefaultSymbols } from '../constants/markets';
@@ -91,7 +91,7 @@ export class AutonomousPipeline {
       return { role, symbol, timeframe, candle: closedCandle, skipped: 'Closed candle already processed.', closedTrades: [], state: this.state };
     }
     const closedTrades = role === 'manager'
-      ? await manageOpenPositions(this.config.accountId, symbol, closedCandle, series)
+      ? await manageOpenPositions(this.config.accountId, symbol, closedCandle, series, false, timeframe)
       : [];
     const market = getMarket(symbol);
     const session = market ? evaluateMarketSession(market) : undefined;
@@ -128,11 +128,30 @@ export class AutonomousPipeline {
       const plannerResult = createTradePlan({
         accountId: this.config.accountId, symbol,
         htfCandles: { '1d': closedDaily, '4h': closedFourHour }, triggerCandles: closedTrigger,
+        triggerTimeframe,
         datasetId: `${daily.dataset.id}:${fourHour.dataset.id}:${trigger.dataset.id}`,
       });
+      if (plannerResult.plan) await storeTradePlan(this.config.accountId, plannerResult.plan);
+      if (timeframe === '1d' && symbol === this.config.symbols[0]) {
+        await generateDailyAccountReview(this.config.accountId, new Date(closedCandle.time * 1000).toISOString().slice(0, 10));
+      }
       await markCandleProcessed(this.config.accountId, symbol, timeframe, closedCandle.time, role);
       this.processedCandles.set(candleKey, closedCandle.time);
       return { role, symbol, timeframe, candle: closedCandle, plan: plannerResult.plan, planReason: plannerResult.reason, closedTrades, state: this.state };
+    }
+
+    if (role === 'executor') {
+      const result = await advanceStoredTradePlans({
+        accountId: this.config.accountId, symbol, timeframe, candle: closedCandle, candles: series,
+        shadowMode: !this.config.enableExecution || traderConfig.SHADOW_MODE_ENABLED,
+      });
+      await markCandleProcessed(this.config.accountId, symbol, timeframe, closedCandle.time, role);
+      this.processedCandles.set(candleKey, closedCandle.time);
+      if (result.filled > 0) this.snapshot = { ...this.snapshot, executedOrders: this.snapshot.executedOrders + result.filled };
+      return {
+        role, symbol, timeframe, candle: closedCandle, closedTrades, state: this.state,
+        skipped: result.shadowSignals.length ? 'Trigger observed in shadow mode; no paper position was opened.' : undefined,
+      };
     }
 
     this.transition('DECIDING');

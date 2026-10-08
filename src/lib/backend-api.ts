@@ -153,7 +153,7 @@ export interface TraderPlan {
   zone: { low: number; high: number }; trigger: { kind: string; level?: number };
   invalidation: number; targets: Array<{ price: number; fractionOfPosition: number }>;
   minRR: number; expiresAtBar: number; thesis: string; falsification: string;
-  grade: string; status: string; createdAt: string; updatedAt: string; datasetId: string;
+  grade: string; status: string; createdAt: string; updatedAt: string; datasetId: string; lastReason?: string;
 }
 
 export interface TraderOverview {
@@ -175,6 +175,19 @@ export async function fetchTraderOverview(): Promise<TraderOverview> {
 
 export async function refreshTraderPlans(): Promise<{ plans: TraderPlan[]; watchlist: Array<{ bias: string; regime: string; keyLevels: number[]; qualityScore: number; reason: string }>; count: number }> {
   return authenticatedBackendRequest('/api/v1/trader/plans/refresh', { method: 'POST' });
+}
+
+export interface TraderAdvanceResult {
+  advancedPlans: number;
+  filledOrders: number;
+  shadowSignals: Array<{ planId: string; candleTime: number; reason: string }>;
+  closedTrades: PaperTrade[];
+  staleSymbols: string[];
+  shadowMode: boolean;
+}
+
+export async function advanceTraderPlans(): Promise<TraderAdvanceResult> {
+  return authenticatedBackendRequest<TraderAdvanceResult>('/api/v1/trader/advance', { method: 'POST' });
 }
 
 export async function fetchTraderHistory<T>(kind: 'journal' | 'reviews' | 'events' | 'orders'): Promise<T[]> {

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, ClipboardList, Clock3, RefreshCw, ShieldCheck } from 'lucide-react';
 import PageFrame from '../PageFrame';
-import { fetchAutonomyStatus, fetchTraderHistory, fetchTraderOverview, fetchTraderPlans, refreshTraderPlans, type AutonomyStatus, type TraderOverview, type TraderPlan } from '../../lib/backend-api';
+import { advanceTraderPlans, fetchAutonomyStatus, fetchTraderHistory, fetchTraderOverview, fetchTraderPlans, refreshTraderPlans, type AutonomyStatus, type TraderAdvanceResult, type TraderOverview, type TraderPlan } from '../../lib/backend-api';
 
 type Review = { review_date?: string; reviewDate?: string; metrics?: { sampleSize?: number; sampleWarning?: string; expectancyR?: number | null } };
-type Journal = { id?: string; symbol?: string; setup_type?: string; outcome_r?: number; r_multiple?: number; created_at?: string; status?: string };
+type Journal = { id?: string; symbol?: string; setup_type?: string; outcome_r?: number; r_multiple?: number; created_at?: string; status?: string; metrics?: { rMultiple?: number; pnl?: number; exitReason?: string } };
 type BiasRow = { bias: string; regime: string; keyLevels: number[]; qualityScore: number; reason: string };
 
 function money(value: number) { return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(value); }
@@ -17,14 +17,19 @@ export default function TraderDesk() {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [journal, setJournal] = useState<Journal[]>([]);
   const [bias, setBias] = useState<BiasRow[]>([]);
+  const [advanceResult, setAdvanceResult] = useState<TraderAdvanceResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (advance = true) => {
     setLoading(true);
     setError(null);
+    if (advance) {
+      try { setAdvanceResult(await advanceTraderPlans()); }
+      catch { /* existing saved plans and account data remain readable when the executor is offline */ }
+    }
     const [planResult, overviewResult, autonomyResult, reviewResult, journalResult] = await Promise.allSettled([
       fetchTraderPlans(), fetchTraderOverview(), fetchAutonomyStatus(), fetchTraderHistory<Review>('reviews'), fetchTraderHistory<Journal>('journal'),
     ]);
@@ -38,7 +43,7 @@ export default function TraderDesk() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void load(); const timer = window.setInterval(() => { void (async () => { try { setAdvanceResult(await advanceTraderPlans()); await load(false); } catch { /* the next tick retries */ } })(); }, 60_000); return () => window.clearInterval(timer); }, [load]);
 
   const refresh = async () => {
     setRefreshing(true);
@@ -47,6 +52,7 @@ export default function TraderDesk() {
       const result = await refreshTraderPlans();
       setPlans(result.plans);
       setBias(result.watchlist);
+      setAdvanceResult(await advanceTraderPlans());
       const fresh = await fetchTraderOverview();
       setOverview(fresh);
     } catch (cause) {
@@ -76,13 +82,16 @@ export default function TraderDesk() {
       </section>
 
       {!!overview?.staleSymbols.length && <div role="status" className="mb-5 rounded-xl border border-warning/30 bg-warning/10 p-3 text-sm text-warning">Stale price data: {overview.staleSymbols.join(', ')}. Open position marks use the last stored entry price until fresh data is available.</div>}
+      {advanceResult?.shadowMode && <div role="status" className="mb-5 rounded-xl border border-primary/30 bg-primary/5 p-3 text-sm text-text">Shadow mode is enabled. Confirmed triggers are recorded for research, but they do not open paper positions.</div>}
+      {!!advanceResult?.staleSymbols.length && <div role="status" className="mb-5 rounded-xl border border-warning/30 bg-warning/10 p-3 text-sm text-warning">Execution and management skipped stale candles for: {advanceResult.staleSymbols.join(', ')}.</div>}
+      {!!advanceResult?.shadowSignals.length && <div className="mb-5 rounded-xl border border-border bg-surface p-4"><h2 className="text-sm font-semibold text-text">Would-have-traded signals</h2><div className="mt-2 space-y-2">{advanceResult.shadowSignals.slice(-4).map((signal) => <p key={`${signal.planId}:${signal.candleTime}`} className="text-xs text-muted">{signal.reason} · {new Date(signal.candleTime * 1000).toLocaleString()}</p>)}</div></div>}
 
       <div className="grid gap-5 xl:grid-cols-[1.35fr_1fr]">
         <section className="rounded-xl border border-border bg-surface p-4" aria-labelledby="plans-title">
           <div className="mb-4 flex items-center justify-between gap-3"><div><h2 id="plans-title" className="font-semibold text-text">Plans</h2><p className="mt-1 text-xs text-muted">Wait for the written trigger; candle closes alone do not place orders.</p></div><span className="rounded-full bg-bg px-2.5 py-1 text-xs text-muted">{waitingPlans.length} active</span></div>
           {waitingPlans.length === 0 ? <Empty>No active plan. Most scans should end with no trade.</Empty> : <div className="space-y-3">{waitingPlans.map((plan) => <article key={plan.id} className="rounded-lg border border-border bg-bg/60 p-3">
             <div className="flex flex-wrap items-center justify-between gap-2"><div className="flex items-center gap-2"><strong className="text-sm text-text">{plan.symbol}</strong><Pill>{plan.status.replaceAll('_', ' ')}</Pill><Pill>{plan.grade} grade</Pill></div><span className="text-xs text-muted">{plan.setupType}</span></div>
-            <p className="mt-2 text-sm text-text">{plan.thesis}</p>
+            <p className="mt-2 text-sm text-text">{plan.thesis}</p>{plan.lastReason && <p className="mt-1 text-xs text-muted">Latest check: {plan.lastReason}</p>}
             <div className="mt-3 grid gap-2 text-xs text-muted sm:grid-cols-3"><span>Zone: <b className="text-text">{plan.zone.low.toPrecision(6)}–{plan.zone.high.toPrecision(6)}</b></span><span>Trigger: <b className="text-text">{plan.trigger.kind.replaceAll('_', ' ')}{plan.trigger.level ? ` ${plan.trigger.level}` : ''}</b></span><span>Invalidation: <b className="text-text">{plan.invalidation}</b></span></div>
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted"><span>HTF: {plan.htfBias}</span><span>R:R minimum: {plan.minRR}:1</span><span>Expires at bar {plan.expiresAtBar}</span><span>Target: {plan.targets.map((target) => target.price).join(', ') || '—'}</span></div>
           </article>)}</div>}
@@ -100,7 +109,7 @@ export default function TraderDesk() {
 
         <section className="rounded-xl border border-border bg-surface p-4" aria-labelledby="why-title">
           <div className="mb-4 flex items-center justify-between"><div><h2 id="why-title" className="font-semibold text-text">Why no trade</h2><p className="mt-1 text-xs text-muted">Current reasons to wait or stand aside.</p></div><Clock3 className="h-4 w-4 text-muted" /></div>
-          {waitingPlans.length ? <div className="space-y-2">{waitingPlans.slice(0, 5).map((plan) => <div key={plan.id} className="rounded-lg bg-bg/60 p-3 text-sm text-text"><b>{plan.symbol}</b>: waiting for {plan.trigger.kind.replaceAll('_', ' ')} inside the planned zone.</div>)}</div> : <Empty>{bias.length ? bias.slice(0, 5).map((row) => row.reason).join(' ') : 'No active setup is currently confirmed. Refresh plans for a new closed-candle scan.'}</Empty>}
+          {waitingPlans.length ? <div className="space-y-2">{waitingPlans.slice(0, 5).map((plan) => <div key={plan.id} className="rounded-lg bg-bg/60 p-3 text-sm text-text"><b>{plan.symbol}</b>: {plan.lastReason ?? `waiting for ${plan.trigger.kind.replaceAll('_', ' ')} inside the planned zone.`}</div>)}</div> : <Empty>{bias.length ? bias.slice(0, 5).map((row) => row.reason).join(' ') : 'No active setup is currently confirmed. Refresh plans for a new closed-candle scan.'}</Empty>}
           <div className="mt-3 border-t border-border pt-3 text-xs text-muted">Autonomy: <b className="text-text">{autonomy?.state ?? 'status unavailable'}</b>{autonomy?.lastRunAt ? ` · last run ${new Date(autonomy.lastRunAt).toLocaleString()}` : ''}</div>
         </section>
 
@@ -108,7 +117,7 @@ export default function TraderDesk() {
           <div className="mb-4 flex items-center justify-between"><div><h2 id="journal-title" className="font-semibold text-text">Journal & daily review</h2><p className="mt-1 text-xs text-muted">Sample size and expectancy are shown only when stored evidence is available.</p></div></div>
           {historyError && <p className="mb-3 text-xs text-warning">Journal/review history is unavailable. Apply the Trader Desk journal migration if it is pending.</p>}
           {reviews.length > 0 && <div className="mb-3 rounded-lg bg-bg/60 p-3 text-sm text-text">Latest review: {reviews[0]?.review_date ?? reviews[0]?.reviewDate ?? 'date unavailable'} · n={reviews[0]?.metrics?.sampleSize ?? 0} · expectancy {reviews[0]?.metrics?.expectancyR == null ? '—' : `${reviews[0].metrics.expectancyR.toFixed(2)}R`}{reviews[0]?.metrics?.sampleWarning ? ` · ${reviews[0].metrics.sampleWarning}` : ''}</div>}
-          {journal.length || overview?.recentTrades.length ? <div className="space-y-2">{journal.slice(0, 4).map((entry, index) => <div key={entry.id ?? index} className="flex justify-between gap-3 rounded-lg bg-bg/60 p-3 text-xs text-text"><span>{entry.symbol ?? 'Trade'} · {entry.setup_type ?? 'paper'}</span><b>{entry.r_multiple == null ? 'Outcome pending' : `${sign(entry.r_multiple)}${entry.r_multiple.toFixed(2)}R`}</b></div>)}{!journal.length && overview?.recentTrades.slice(0, 4).map((trade) => <div key={trade.id} className="flex justify-between gap-3 rounded-lg bg-bg/60 p-3 text-xs text-text"><span>{trade.symbol} · {new Date(trade.closedAt).toLocaleDateString()}</span><b>{sign(trade.realizedPnl)}{money(trade.realizedPnl)}</b></div>)}</div> : <Empty>No completed trades or daily reviews yet. Paper results need a larger sample and are not evidence of future performance.</Empty>}
+          {journal.length || overview?.recentTrades.length ? <div className="space-y-2">{journal.slice(0, 4).map((entry, index) => { const rValue = entry.r_multiple ?? entry.outcome_r ?? entry.metrics?.rMultiple; return <div key={entry.id ?? index} className="flex justify-between gap-3 rounded-lg bg-bg/60 p-3 text-xs text-text"><span>{entry.symbol ?? 'Trade'} · {entry.setup_type ?? entry.metrics?.exitReason ?? 'paper'}</span><b>{rValue == null ? 'Outcome pending' : `${sign(rValue)}${rValue.toFixed(2)}R`}</b></div>; })}{!journal.length && overview?.recentTrades.slice(0, 4).map((trade) => <div key={trade.id} className="flex justify-between gap-3 rounded-lg bg-bg/60 p-3 text-xs text-text"><span>{trade.symbol} · {new Date(trade.closedAt).toLocaleDateString()}</span><b>{sign(trade.realizedPnl)}{money(trade.realizedPnl)}</b></div>)}</div> : <Empty>No completed trades or daily reviews yet. Paper results need a larger sample and are not evidence of future performance.</Empty>}
         </section>
 
         <section className="rounded-xl border border-border bg-surface p-4" aria-labelledby="research-title">

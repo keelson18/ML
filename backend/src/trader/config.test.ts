@@ -15,8 +15,14 @@ describe('trader configuration', () => {
       MGMT_TIMEFRAME: '5m',
       ALLOWED_GRADES: ['A', 'B'],
       ALLOWED_SETUP_TYPES: ['trend-pullback'],
+      PROMOTED_SETUP_TYPES: [],
       STALE_DATA_BLOCKS_ENTRIES: true,
     });
+  });
+
+  it('only accepts promoted setup names from the configured setup registry', () => {
+    expect(parseTraderConfig({ PROMOTED_SETUP_TYPES: 'trend-pullback' }).PROMOTED_SETUP_TYPES).toEqual(['trend-pullback']);
+    expect(() => parseTraderConfig({ PROMOTED_SETUP_TYPES: 'unregistered-setup' })).toThrow('PROMOTED_SETUP_TYPES has an invalid trader configuration value.');
   });
 
   it('accepts valid environment overrides and rejects unsafe bounds', () => {
