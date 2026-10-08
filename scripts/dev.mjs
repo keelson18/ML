@@ -33,23 +33,31 @@ function launchService(name, args, overrides = {}) {
       stop();
     }
   });
+  return child;
 }
 
-async function waitUntilReady(name, url) {
+async function waitUntilReady(name, url, child) {
   const deadline = Date.now() + 30_000;
+  let lastFailure = 'no response';
   while (!stopping && Date.now() < deadline) {
+    if (child.exitCode !== null) {
+      throw new Error(`${name} exited with code ${child.exitCode} before becoming healthy at ${url}`);
+    }
     try {
       const response = await fetch(url, { signal: AbortSignal.timeout(1000) });
       if (response.ok) return;
-    } catch {}
+      lastFailure = `HTTP ${response.status}`;
+    } catch (error) {
+      lastFailure = error instanceof Error ? error.message : String(error);
+    }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  throw new Error(`${name} failed to become healthy at ${url}`);
+  throw new Error(`${name} failed to become healthy at ${url}: ${lastFailure}`);
 }
 
 async function start() {
-  launchService('Autonomy API', [resolve(root, 'node_modules/tsx/dist/cli.mjs'), 'watch', 'backend/src/server.ts'], { AUTONOMY_PORT: autonomyPort });
-  await waitUntilReady('Autonomy API', `http://127.0.0.1:${autonomyPort}/health`);
+  const api = launchService('Autonomy API', [resolve(root, 'node_modules/tsx/dist/cli.mjs'), 'watch', 'backend/src/server.ts'], { AUTONOMY_PORT: autonomyPort });
+  await waitUntilReady('Autonomy API', `http://127.0.0.1:${autonomyPort}/health`, api);
   if (!stopping) launchService('Web', [resolve(root, 'node_modules/vite/bin/vite.js')]);
 }
 
