@@ -2,6 +2,7 @@ import { TIMEFRAMES, type Candle, type Market, type MarketDataIdentity, type Tim
 import { getMarket } from '../../../src/lib/markets';
 import { config } from '../config';
 import { fetchWithTimeout } from '../../../src/lib/providers/request';
+import { readJsonSafe } from '../../../shared/http';
 
 // Provider base URLs — configurable via env for testing overrides
 const MASSIVE_REST = process.env.MASSIVE_REST_URL ?? 'https://api.massive.com';
@@ -238,13 +239,14 @@ async function fetchFromProvider(instrument: Market, timeframe: Timeframe, reque
     const url = `${MASSIVE_REST}/v2/aggs/ticker/${encodeURIComponent(sourceSymbol)}/range/${interval.multiplier}/${interval.timespan}/${from}/${to}?${query}`;
     // API key in Authorization header, never in URL query string
     const response = await fetchWithTimeout(url, { headers: { Authorization: `Bearer ${apiKey}` } });
-    if (!response.ok) throw new MarketDataProviderError('Massive', response.status, response.headers.get('retry-after'));
-    const body = await response.json() as {
+    const { payload: body } = await readJsonSafe<{
       status?: string;
       error?: string;
       message?: string;
       results?: Array<{ o: number; h: number; l: number; c: number; v?: number; t: number }>;
-    };
+    }>(response);
+    if (!response.ok) throw new MarketDataProviderError('Massive', response.status, response.headers.get('retry-after'));
+    if (!body) throw new Error('Massive returned an empty or invalid response.');
     if (body.status === 'ERROR') throw new Error(`Massive market data failed: ${body.error ?? body.message ?? 'provider error'}.`);
     return (body.results ?? []).map((bar) => ({
       time: Math.floor(bar.t / 1000), open: Number(bar.o), high: Number(bar.h), low: Number(bar.l), close: Number(bar.c), volume: Number(bar.v ?? 0),
@@ -257,8 +259,9 @@ async function fetchFromProvider(instrument: Market, timeframe: Timeframe, reque
     const limit = Math.min(requestedLimit, 1000);
     const query = new URLSearchParams({ symbol: sourceSymbol, interval: TWELVEDATA_TIMEFRAMES[timeframe], outputsize: String(limit), timezone: 'UTC', apikey: apiKey });
     const response = await fetchWithTimeout(`${TWELVEDATA_REST}/time_series?${query}`);
+    const { payload: body } = await readJsonSafe<{ status?: string; message?: string; values?: Array<{ datetime: string; open: string; high: string; low: string; close: string; volume?: string }> }>(response);
     if (!response.ok) throw new MarketDataProviderError('Twelve Data', response.status, response.headers.get('retry-after'));
-    const body = await response.json() as { status?: string; message?: string; values?: Array<{ datetime: string; open: string; high: string; low: string; close: string; volume?: string }> };
+    if (!body) throw new Error('Twelve Data returned an empty or invalid response.');
     if (body.status === 'error') throw new Error(`Twelve Data market data failed: ${body.message ?? 'provider error'}.`);
     if (!body.values) throw new Error('Twelve Data returned no candle series.');
     return body.values.map((bar) => ({

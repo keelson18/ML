@@ -2,7 +2,7 @@
 
 > An AI-assisted paper-trading intelligence platform. Built with React, TypeScript, and Supabase.
 
-**Status:** Early prototype — core frontend, basic backend, and a single baseline ML model are operational. Not production-ready.
+**Status:** Research and paper-trading prototype. No real-money execution is available; provider access and migrations must be verified in each environment before use.
 
 ---
 
@@ -10,7 +10,7 @@
 
 - **React + Vite + TypeScript frontend** with Tailwind CSS and Lightweight Charts
 - **Supabase backend** — Auth, PostgreSQL with RLS, Edge Functions
-- **Live crypto data** via Binance REST + WebSocket
+- **Market data** through the backend provider layer (Massive and Twelve Data); browser updates poll the API and provider availability remains unverified until probed.
 - **Technical indicators** — SMA, EMA, RSI, MACD, ATR, Bollinger Bands, plus additional indicators (ADX, CCI, Ichimoku, Stochastic, Volume Profile, etc.)
 - **Pattern recognition** — Candlestick and chart-pattern detection
 - **Market structure engine** — HH/HL/LH/LL, BOS, CHoCH
@@ -22,28 +22,21 @@
 - **Kinetic Coach** — Gemini-powered trading assistant
 - **Explainable trade cards** — reasoning breakdown per signal
 - **Multi-timeframe analysis** — 1m through 1M
-- **Role-based access** — User / Admin with CMS content management
+- **Role-based access** — User / Admin with CMS content management, manual event blackouts, and Supabase MFA support
 
 ## Architecture
 
-```javascript
-Frontend (React 18 + Vite)
-  ├── src/components/      — UI components (Dashboard, PriceChart, etc.)
-  ├── src/lib/             — Indicators, patterns, strategies, backtest, ML client
-  ├── src/api/             — Centralized API layer
-  └── src/context/         — Auth, theme, CMS state
+```text
+React UI → authenticated Fastify API → market/provider services + paper-trading state
+                                      ↘ Supabase PostgreSQL (RLS) / Edge Functions
 
-Backend
-  ├── backend/src/         — Fastify/Express API layer (Phase 0)
-  │   ├── controllers/     — Route handlers
-  │   ├── services/        — Business logic
-  │   ├── repositories/    — Supabase data access
-  │   ├── engines/         — Intelligence engines (decision, risk, pattern, etc.)
-  │   └── routes/          — REST route definitions
-  └── supabase/
-      ├── functions/       — Edge Functions (ml-predict, kinetic-coach, decision-analyze)
-      └── migrations/      — Versioned schema + RLS policies
+Trader Desk paper workflow:
+Planner → Executor → Manager → Reviewer
+  creates    gates       manages   records research evidence
+  plan       entries     exits
 ```
+
+Provider keys stay server-side. Trader decisions use market and risk data only; news and sentiment are not signal inputs. See `docs/RESEARCH.md` and `docs/VERIFICATION.md` for evidence and limitations.
 
 ## Tech Stack
 
@@ -54,7 +47,7 @@ Backend
 | Edge Functions | Deno / TypeScript (Supabase) |
 | Database | Supabase PostgreSQL with RLS |
 | Auth | Supabase Auth (JWT) |
-| Real-time | WebSockets (Binance) |
+| Market data | Massive / Twelve Data through Fastify; browser polling |
 | ML Baseline | Custom logistic regression (Deno edge function) |
 | Testing | Vitest |
 
@@ -64,10 +57,11 @@ Backend
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 20.11+
 - A Supabase project (free tier works)
-- A Binance account (no API key needed for public market data)
-- (Optional) Google Gemini API key for the Kinetic Coach
+- Massive API key for the configured crypto markets; verify markets with the admin probe before relying on them
+- Twelve Data API key only for symbols assigned to that provider
+- Optional Google Gemini API key for Kinetic Coach
 
 ### 1. Clone & install
 
@@ -90,32 +84,30 @@ Fill in `.env`:
 | `VITE_SUPABASE_URL` | Supabase Project Settings → API |
 | `VITE_SUPABASE_ANON_KEY` | Supabase Project Settings → API |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase Project Settings → API (server-only) |
+| `MASSIVE_API_KEY` | Market-data provider account (server-only) |
+| `TWELVEDATA_API_KEY` | Optional market-data provider account (server-only) |
 | `ML_SERVICE_API_KEY` | Generate a random secret string |
-| `GEMINI_API_KEY` | Google AI Studio |
+| `GEMINI_API_KEY` | Google AI Studio (server-only) |
 | `CORS_ORIGIN` | `http://localhost:5173` for local dev |
 | `VITE_BACKEND_URL` | `http://localhost:8787` for local backend |
 
 For the local Supabase Edge Function runtime, set `BACKEND_URL` to a URL reachable from its container (for example `http://host.docker.internal:8787` on Docker Desktop) and set `ML_FUNCTION_ENV=development`. Hosted Edge Functions require `BACKEND_URL` to be an HTTPS URL; configure `BACKEND_URL` and `ML_FUNCTION_ENV=production` as server-side function secrets. If `BACKEND_URL` is missing, ML prediction/retraining returns a generic 503 instead of calling localhost.
 
-Trader Desk paper parameters are server-side and environment-overridable through the `TRADER_*`, `RISK_*`, `MAX_*`, and related settings shown in `.env.example`. Phase 1 defines validated defaults and domain contracts; these settings do not alter execution behavior yet.
+Trader Desk and event-risk parameters are server-side and validated from `.env.example`. Provider symbols are unverified until the backend probe succeeds. Manual blackout windows block entries when configured and position management remains independent of entry holds.
 
 The initial Trader Desk planner is available through the authenticated `POST /api/v1/trader/plans/refresh` route; plans are read from `GET /api/v1/trader/plans`. Apply the new Trader Desk migrations before using these endpoints. Planner refreshes analyze the configured crypto universe with closed 1d/4h/trigger timeframe data, preserve the configured watchlist cap, and default to no plan when evidence is incomplete or conflicting. Authenticated users can read their plans, plan events, paper orders, journal entries, and daily reviews from `/api/v1/trader/*`. Paper sizing is based on stop distance and marked account equity, with cash, gross exposure, and per-symbol exposure caps from configuration. Immediate BUY/SELL execution is disabled while the persisted trigger workflow is built out. Crypto session filtering is off (24/7). Non-crypto paper entries require explicit exchange calendars in `MARKET_SESSION_CALENDAR_JSON`; missing calendars, holidays, closed periods, and configured opening/closing auction windows are blocked. See `docs/RESEARCH.md` for sample-size, calibration, baselines, and paper-result limitations.
 
 ### 3. Database setup
 
-Run the migrations in `supabase/migrations/` against your Supabase project (via the SQL Editor or Supabase CLI).
+Apply migrations with the Supabase CLI and compare the resulting migration history to the repository before using the app. If applying through SQL Editor, record the applied migration IDs separately. Do not remove duplicate-looking SQL files until the owner supplies the production-applied migration list; see `docs/MIGRATIONS.md`.
 
-### 4. Start the frontend
-
-```bash
-npm run dev        # Starts Vite dev server on :5173
-```
-
-### 5. Start the backend (optional — backend is in early Phase 0)
+### 4. Start the app
 
 ```bash
-npm run backend:dev   # Starts Fastify API on :8787
+npm run dev
 ```
+
+This starts the Fastify API on `AUTONOMY_PORT` (default 8787), waits for `/health`, then starts Vite on port 5173. For split processes, use `npm run backend:dev` and `npm run dev:web`; do not run the combined command and a second backend on the same port. `npm run dev:web` alone requires a reachable backend configured through `VITE_BACKEND_URL` or `AUTONOMY_PROXY_TARGET`.
 
 ### 6. Deploy edge functions (optional)
 
@@ -133,7 +125,8 @@ supabase functions deploy decision-analyze
 
 | Command | Purpose |
 | --- | --- |
-| `npm run dev` | Start frontend dev server |
+| `npm run dev` | Start Fastify backend and Vite frontend |
+| `npm run dev:web` | Start Vite only |
 | `npm run backend:dev` | Start backend dev server (watch mode) |
 | `npm run backend` | Start backend once |
 | `npm run backend:typecheck` | Type-check backend only |
@@ -141,7 +134,16 @@ supabase functions deploy decision-analyze
 | `npm run lint` | ESLint |
 | `npm run typecheck` | TypeScript check (frontend) |
 | `npm run test` | Run Vitest suite |
+| `npm run check:env` | Fail when an application environment read is missing from `.env.example` |
 | `npm run preview` | Preview production build |
+
+## Troubleshooting
+
+- **“Market data unavailable”** — Confirm `npm run dev` started both Fastify and Vite and that the API `/health` endpoint is reachable on `AUTONOMY_PORT` (default 8787). Check that `VITE_BACKEND_URL` or `AUTONOMY_PROXY_TARGET` matches that port, then inspect the API process for startup configuration errors naming `MASSIVE_API_KEY`, `MARKET_SESSION_CALENDAR_JSON`, or another invalid variable.
+- **Provider returns 429 / market remains unverified** — Provider limits and keys are environment-specific. Wait for the provider reset, verify the key server-side, and use Admin → Market Availability → Probe markets. Do not treat registry presence as verified access.
+- **Auth settings or new routes unavailable** — Confirm the required Supabase migrations were applied and compare their IDs with Supabase migration history. Do not rerun or remove duplicate migrations blindly; see `docs/MIGRATIONS.md`.
+- **Edge Function ML request unavailable** — Set `BACKEND_URL` to an address reachable from the Edge Function runtime and set `ML_FUNCTION_ENV` to `development` or `production` as appropriate. Production requires HTTPS.
+- **Missing Supabase configuration** — Confirm `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are set in the frontend environment; keep provider and service-role keys server-only.
 
 ---
 
@@ -151,11 +153,11 @@ supabase functions deploy decision-analyze
 
 - Frontend foundation (React + Vite + Tailwind)
 - Supabase auth + database + RLS
-- Binance crypto data integration
+- Backend market provider layer (Massive and Twelve Data; availability must be probed)
 - Core technical indicators
 - 8 strategy implementations
 - Basic ML prediction (logistic regression edge function)
-- Live market data via WebSocket
+- Backend-polled market data (provider availability is not guaranteed)
 - AI Coach (Gemini integration)
 - Paper trading positions
 - Backtest scaffolding
@@ -167,10 +169,11 @@ supabase functions deploy decision-analyze
 - [ ] Honest backtest validation (fees, slippage, walk-forward, buy-and-hold baseline)
 - [ ] Test coverage for core engines and backtester
 - [ ] Rate limiting on edge functions
-- [ ] CI/CD pipeline (typecheck → lint → test)
+- [x] GitHub Actions CI (environment check, typechecks, lint, tests, build, non-blocking dependency audit)
 
 ### 📋 Planned (not yet started)
 
+- [ ] Configure and validate production market/news/calendar providers; current live availability is not verified
 - [ ] Multi-market data (Forex via Twelve Data, stocks)
 - [ ] Advanced ML models (XGBoost / LightGBM baseline)
 - [ ] Reinforcement learning experiments
@@ -183,7 +186,7 @@ supabase functions deploy decision-analyze
 ## Honest Notes
 
 - The current ML model is a **baseline logistic regression** trained on 14 engineered features. It is intentionally simple and serves as a starting point, not a production-grade predictor.
-- The backend (`backend/src/`) is in **Phase 0** — structure exists, but many routes are stubs or lightly wired.
+- A successful build or unit test does not establish provider availability, deployed migration state, account-security policy, or live end-to-end operation. Check `docs/VERIFICATION.md` for the current evidence status.
 - **No real money trading.** This is a paper-trading / research platform only.
 
 ---

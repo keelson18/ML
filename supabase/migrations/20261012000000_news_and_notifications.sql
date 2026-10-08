@@ -67,7 +67,7 @@ create index if not exists in_app_notifications_unread_idx
   on public.in_app_notifications (user_id, created_at desc) where read_at is null;
 alter table public.in_app_notifications enable row level security;
 revoke all on public.in_app_notifications from anon, authenticated;
-grant select, update on public.in_app_notifications to authenticated;
+grant select, update (read_at) on public.in_app_notifications to authenticated;
 create policy in_app_notifications_owner_read on public.in_app_notifications
   for select to authenticated using (auth.uid() = user_id);
 create policy in_app_notifications_owner_update on public.in_app_notifications

@@ -20,6 +20,15 @@ export interface ExecutorStep {
   reason: string;
 }
 
+function gateEvent(plan: TradePlan, reason: string, activeEventIds: string[], candle: Candle, timeframe: PlanEvent['timeframe']): PlanEvent {
+  return {
+    id: randomUUID(), planId: plan.id, accountId: plan.accountId,
+    fromStatus: plan.status, toStatus: plan.status, actor: 'executor', reason,
+    candle: { time: candle.time, open: candle.open, high: candle.high, low: candle.low, close: candle.close },
+    timeframe, activeEventIds, occurredAt: new Date(candle.time * 1000).toISOString(),
+  };
+}
+
 function eventFor(plan: TradePlan, toStatus: PlanEvent['toStatus'], actor: PlanEvent['actor'], reason: string, candle: Candle, timeframe: PlanEvent['timeframe']): PlanEvent {
   const fromStatus = plan.status;
   if (!ALLOWED_PLAN_TRANSITIONS[fromStatus].includes(toStatus)) throw new Error(`Illegal plan transition ${fromStatus} -> ${toStatus}.`);
@@ -90,11 +99,11 @@ export function advanceTradePlan(input: {
     const fillGate = input.gate(pendingOrder.price);
     if (!fillGate.approved || !Number.isFinite(fillGate.quantity) || fillGate.quantity <= 0) {
       const reason = fillGate.reason ?? 'Entry gates rejected this pending fill.';
-      return { plan: { ...plan, lastReason: reason, activeEventIds: fillGate.activeEventIds ?? [] }, pendingOrder, events: [], reason };
+      return { plan: { ...plan, lastReason: reason, activeEventIds: fillGate.activeEventIds ?? [] }, pendingOrder, events: [gateEvent(plan, reason, fillGate.activeEventIds ?? [], candle, timeframe)], reason };
     }
     const price = rawPrice * (pendingOrder.side === 'long' ? 1 + slippageRate : 1 - slippageRate);
-    const fee = price * pendingOrder.quantity * feeRate;
     const filledOrder = { ...pendingOrder, quantity: Math.min(pendingOrder.quantity, fillGate.quantity), status: 'filled' as const };
+    const fee = price * filledOrder.quantity * feeRate;
     const event = eventFor(plan, 'OPEN', 'executor', 'Pending order filled on a later candle with configured costs.', candle, timeframe);
     return { plan: { ...plan, status: 'OPEN', updatedAt: event.occurredAt, lastReason: undefined, activeEventIds: fillGate.activeEventIds ?? [] }, pendingOrder: filledOrder, fill: { order: filledOrder, price, fee, slippage: Math.abs(price - rawPrice) }, events: [event], reason: event.reason };
   }
@@ -123,7 +132,7 @@ export function advanceTradePlan(input: {
   const gate = input.gate(armedPlan.zone.high);
   if (!gate.approved || !Number.isFinite(gate.quantity) || gate.quantity <= 0) {
     const reason = gate.reason ?? 'Entry gates rejected this trigger.';
-    return { plan: { ...armedPlan, lastReason: reason, activeEventIds: gate.activeEventIds ?? [] }, events: armEvent ? [armEvent] : [], reason };
+    return { plan: { ...armedPlan, lastReason: reason, activeEventIds: gate.activeEventIds ?? [] }, events: [...(armEvent ? [armEvent] : []), gateEvent(armedPlan, reason, gate.activeEventIds ?? [], candle, timeframe)], reason };
   }
   const event = eventFor(armedPlan, 'PENDING_ORDER', 'executor', 'Closed-candle trigger confirmed and entry gates passed.', candle, timeframe);
   const order: PendingPaperOrder = {

@@ -33,6 +33,17 @@ export interface CalendarProvider {
   fetch(): Promise<CalendarEventInput[]>;
 }
 
+const newsProvider: NewsProvider = {
+  name: 'No provider configured',
+  probe: async () => 'unverified',
+  fetch: async () => [],
+};
+const calendarProvider: CalendarProvider = {
+  name: 'No provider configured',
+  probe: async () => 'unverified',
+  fetch: async () => [],
+};
+
 export function sanitizePlainText(value: string, maxLength = 2_000): string {
   return value.replace(/<[^>]*>/g, ' ').replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, maxLength);
 }
@@ -47,10 +58,11 @@ export function tagMarketSymbols(symbols: string[] = []): string[] {
   return [...new Set(symbols.filter((symbol) => known.has(symbol)))];
 }
 
-export function getNewsProviderStatus() {
+export async function getNewsProviderStatus() {
+  const [newsAvailability, calendarAvailability] = await Promise.all([newsProvider.probe(), calendarProvider.probe()]);
   return {
-    news: [{ provider: 'No provider configured', availability: 'unverified' as const, checkedAt: null }],
-    calendar: [{ provider: 'No provider configured', availability: 'unverified' as const, checkedAt: null }],
+    news: [{ provider: newsProvider.name, availability: newsAvailability, checkedAt: new Date().toISOString() }],
+    calendar: [{ provider: calendarProvider.name, availability: calendarAvailability, checkedAt: new Date().toISOString() }],
   };
 }
 

@@ -47,7 +47,23 @@ export function registerAuthGuards(app: FastifyInstance) {
     try {
       const supabase = getSupabaseClientWithToken(request.accessToken);
       const { data, error } = await supabase.from('profiles').select('role').eq('id', request.authenticatedUserId).maybeSingle();
-      if (error || data?.role !== 'admin') reply.code(403).send({ error: 'Admin access required' });
+      if (error || data?.role !== 'admin') {
+        reply.code(403).send({ error: 'Admin access required' });
+        return;
+      }
+      const [{ data: userData, error: userError }, { data: claimsData, error: claimsError }] = await Promise.all([
+        supabase.auth.getUser(request.accessToken),
+        supabase.auth.getClaims(request.accessToken),
+      ]);
+      if (userError || claimsError || !userData.user || !claimsData) {
+        reply.code(503).send({ error: 'Admin assurance level could not be verified' });
+        return;
+      }
+      const hasVerifiedFactor = userData.user.factors?.some((factor) => factor.status === 'verified') ?? false;
+      const currentLevel = claimsData.claims.aal;
+      if ((process.env.REQUIRE_ADMIN_MFA === 'true' || hasVerifiedFactor) && currentLevel !== 'aal2') {
+        reply.code(403).send({ error: 'Two-factor authentication required' });
+      }
     } catch {
       reply.code(503).send({ error: 'Authorization service unavailable' });
     }

@@ -22,7 +22,7 @@ async function adminRequest<T>(path: string, init: RequestInit = {}): Promise<T>
 
 export interface AuthSession {
   session: Session;
-  user: { id: string; email: string };
+  user: { id: string; email: string; lastSignInAt?: string };
   profile: UserProfile | null;
 }
 
@@ -34,7 +34,7 @@ export const authApi = {
     const profile = await authApi.fetchProfile(userId);
     return {
       session: data.session!,
-      user: { id: userId, email: data.user.email ?? '' },
+      user: { id: userId, email: data.user.email ?? '', lastSignInAt: data.user.last_sign_in_at },
       profile,
     };
   },

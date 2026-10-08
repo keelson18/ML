@@ -121,6 +121,20 @@ export interface MarketDataResponse {
   stale: boolean;
 }
 
+export async function downloadPersonalDataExport(): Promise<Blob> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Authentication required.');
+  const response = await fetch('/api/v1/me/export', { headers: { Authorization: `Bearer ${session.access_token}` } });
+  const { raw, payload } = await readJsonSafe<{ error?: string }>(response);
+  if (!response.ok) {
+    if (payload?.error) throw new Error(payload.error);
+    if (!raw || [502, 503, 504].includes(response.status)) throw new Error('Personal data export is unavailable. Please retry later.');
+    throw new Error(`Export request failed (${response.status}).`);
+  }
+  if (!raw) throw new Error('The export returned an empty response.');
+  return new Blob([raw], { type: 'application/json' });
+}
+
 export interface EventBlackout {
   id: string;
   title: string;

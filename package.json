@@ -3,11 +3,13 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": { "node": ">=20.11" },
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:web": "vite",
     "backend:dev": "tsx watch backend/src/server.ts",
     "backend:typecheck": "tsc --noEmit -p backend/tsconfig.json",
+    "check:env": "node scripts/check-env-docs.mjs",
     "backend": "tsx backend/src/server.ts",
     "build": "vite build",
     "lint": "eslint .",

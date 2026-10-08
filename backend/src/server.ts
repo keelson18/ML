@@ -16,7 +16,9 @@ import { traderRoutes } from './routes/trader';
 import { adminUserRoutes } from './routes/admin-users';
 import { eventRoutes } from './routes/events';
 import { newsRoutes } from './routes/news';
+import { personalDataRoutes } from './routes/personal-data';
 import { probeAllMarkets } from './services/marketAvailability';
+import { readJsonSafe } from '../../shared/http';
 
 // Allowed CORS origins from env, defaults to local dev
 function allowedOrigins(): string[] {
@@ -56,6 +58,7 @@ export function buildServer() {
   void app.register(adminUserRoutes);
   void app.register(eventRoutes);
   void app.register(newsRoutes);
+  void app.register(personalDataRoutes);
   app.get('/health', async () => ({ status: 'ok', service: 'quantum-api', autonomy: pipeline.getSnapshot() }));
   return { app, pipeline };
 }
@@ -71,8 +74,8 @@ export async function startServer() {
     if (code === 'EADDRINUSE') {
       try {
         const response = await fetch(`http://127.0.0.1:${port}/health`);
-        const health = await response.json() as { service?: string };
-        if (response.ok && health.service === 'quantum-api') {
+        const { payload: health } = await readJsonSafe<{ service?: string }>(response);
+        if (response.ok && health?.service === 'quantum-api') {
           console.log(`[server] Quantum API is already running on port ${port}.`);
           return { app, pipeline, scheduler };
         }

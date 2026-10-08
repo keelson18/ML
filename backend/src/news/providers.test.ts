@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { filterNewsAtIngestedAt, getNewsProviderStatus, sanitizePlainText, tagMarketSymbols } from './providers';
 
 describe('news provider boundaries', () => {
-  it('reports providers as unverified when none are configured', () => {
-    expect(getNewsProviderStatus().news[0].availability).toBe('unverified');
-    expect(getNewsProviderStatus().calendar[0].availability).toBe('unverified');
+  it('reports providers as unverified when none are configured', async () => {
+    const status = await getNewsProviderStatus();
+    expect(status.news[0].availability).toBe('unverified');
+    expect(status.calendar[0].availability).toBe('unverified');
   });
 
   it('sanitizes provider text into bounded plain text', () => {

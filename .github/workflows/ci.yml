@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.11
+          cache: npm
+      - run: npm ci
+      - run: npm run check:env
+      - run: npm run typecheck
+      - run: npm run backend:typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - name: Record production dependency audit
+        if: always()
+        run: |
+          npm audit --omit=dev --json > npm-audit-report.json || true
+          node --input-type=commonjs -e "const report=require('./npm-audit-report.json'); console.log(JSON.stringify({metadata:report.metadata?.vulnerabilities ?? null, advisories:Object.keys(report.vulnerabilities ?? {})},null,2))"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: npm-audit-report
+          path: npm-audit-report.json
+          if-no-files-found: ignore

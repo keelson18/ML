@@ -438,8 +438,13 @@ function NotificationBell({ userId, onOpenNews }: { userId?: string; onOpenNews:
   const [error, setError] = useState(false);
   useEffect(() => {
     let active = true;
-    if (userId) void fetchNotifications(userId).then((items) => { if (active) { setNotifications(items); setError(false); } }).catch(() => { if (active) setError(true); });
-    return () => { active = false; };
+    const refresh = () => {
+      if (!userId) return;
+      void fetchNotifications(userId).then((items) => { if (active) { setNotifications(items); setError(false); } }).catch(() => { if (active) setError(true); });
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 30_000);
+    return () => { active = false; window.clearInterval(timer); };
   }, [userId]);
   const openNews = async (notification: InAppNotification) => {
     if (userId && !notification.read_at) {

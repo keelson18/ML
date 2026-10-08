@@ -52,6 +52,7 @@ export interface PlanEvent {
   candle?: Pick<Candle, 'time' | 'open' | 'high' | 'low' | 'close'>;
   timeframe?: Timeframe;
   engineVersion?: string;
+  activeEventIds?: string[];
   occurredAt: string;
 }
 
