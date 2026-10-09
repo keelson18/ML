@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { useCallback } from 'react';
 import { supabase, type Session } from '../lib/supabase';
 import { authApi } from '../api';
 import type { UserProfile, UserRole } from '../lib/types';
@@ -27,7 +28,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [mfaChallengeRequired, setMfaChallengeRequired] = useState(false);
 
-  const fetchProfile = async (userId: string) => {
+  const fetchProfile = useCallback(async (userId: string) => {
     try {
       const { data } = await supabase
         .from('profiles')
@@ -46,9 +47,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Profile may not exist yet (trigger hasn't fired)
     }
-  };
+  }, []);
 
-  const applySession = async (nextSession: Session | null) => {
+  const applySession = useCallback(async (nextSession: Session | null) => {
     let challengeRequired = false;
     if (nextSession) {
       const [{ data: assurance, error: assuranceError }, { data: factors, error: factorsError }] = await Promise.all([
@@ -70,7 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(null);
       setProfile(null);
     }
-  };
+  }, [fetchProfile]);
 
   useEffect(() => {
     void supabase.auth.getSession().then(async ({ data }) => {
@@ -82,7 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       queueMicrotask(() => { void applySession(nextSession).finally(() => setLoading(false)); });
     });
     return () => sub.subscription.unsubscribe();
-  }, []);
+  }, [applySession]);
 
   const signUp = async (
     email: string,

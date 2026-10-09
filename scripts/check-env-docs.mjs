@@ -35,11 +35,17 @@ for (const file of rootFiles) {
 }
 
 const example = await readFile(resolve(root, '.env.example'), 'utf8');
-const documented = new Set(example.split(/\r?\n/).map((line) => line.match(/^\s*([A-Z][A-Z0-9_]*)=/)?.[1]).filter(Boolean));
+const lines = example.split(/\r?\n/);
+const documented = new Set(lines.map((line) => line.match(/^\s*([A-Z][A-Z0-9_]*)=/)?.[1]).filter(Boolean));
 const missing = [...reads].filter(([name]) => !documented.has(name));
-if (missing.length) {
-  console.error(`Environment variables missing from .env.example:\n${missing.map(([name, file]) => `- ${name} (${file})`).join('\n')}`);
+const uncommented = lines.flatMap((line, index) => {
+  const name = line.match(/^\s*([A-Z][A-Z0-9_]*)=/)?.[1];
+  return name && !lines[index - 1]?.trim().startsWith('#') ? [name] : [];
+});
+if (missing.length || uncommented.length) {
+  if (missing.length) console.error(`Environment variables missing from .env.example:\n${missing.map(([name, file]) => `- ${name} (${file})`).join('\n')}`);
+  if (uncommented.length) console.error(`Environment variables missing a comment:\n${uncommented.map((name) => `- ${name}`).join('\n')}`);
   process.exitCode = 1;
 } else {
-  console.log(`All ${reads.size} environment variables read by application code are documented in .env.example.`);
+  console.log(`All ${reads.size} environment variables read by application code are documented and commented in .env.example.`);
 }

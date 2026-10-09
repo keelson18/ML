@@ -56,7 +56,11 @@ describe('backend paper position lifecycle', () => {
       const closed = await manageOpenPositions(accountId, plan.symbol, exit, [first, next, exit], false, '5m');
       expect(closed).toHaveLength(1);
       expect((await getAccount(accountId)).tradePlans?.find((candidate) => candidate.id === plan.id)?.status).toBe('CLOSED');
-      expect((await getAccount(accountId)).tradeJournal).toHaveLength(1);
+      const journal = (await getAccount(accountId)).tradeJournal;
+      expect(journal).toHaveLength(1);
+      expect(journal?.[0]?.metrics).toMatchObject({ maeR: expect.any(Number), mfeR: expect.any(Number) });
+      expect(journal?.[0]?.datasetId).toBe('dataset-test');
+      expect(journal?.[0]?.engineVersions).toEqual({ planner: 'test' });
     } finally { traderConfig.PROMOTED_SETUP_TYPES = oldPromotions; }
   });
 
@@ -98,7 +102,7 @@ describe('backend paper position lifecycle', () => {
     expect((await getAccount(accountId)).positions).toHaveLength(0);
   });
 
-  it('closes a position automatically when its stop is touched', async () => {
+  it('closes a position automatically when its stop is touched and journals excursions', async () => {
     const accountId = `lifecycle-${Date.now()}`;
     await executeDecision({ accountId, symbol: 'BTCUSD', decision: buyDecision() });
 
@@ -108,7 +112,10 @@ describe('backend paper position lifecycle', () => {
 
     expect(trades).toHaveLength(1);
     expect(trades[0].realizedPnl).toBeLessThan(0);
+    expect(trades[0].maeR).toBeLessThan(0);
+    expect(trades[0].mfeR).toBeGreaterThan(0);
     expect((await getAccount(accountId)).positions[0].status).toBe('closed');
+    expect((await getAccount(accountId)).tradeJournal?.[0]?.metrics).toMatchObject({ maeR: trades[0].maeR, mfeR: trades[0].mfeR });
   });
 
   it('does not open a short on a spot crypto SELL decision', async () => {

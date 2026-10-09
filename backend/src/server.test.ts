@@ -83,9 +83,13 @@ describe('Fastify security headers', () => {
     const users = await app.inject('/api/v1/admin/users');
     const role = await app.inject({ method: 'PATCH', url: '/api/v1/admin/users/00000000-0000-4000-8000-000000000001/role', payload: { role: 'user' } });
     const audit = await app.inject('/api/v1/admin/audit-events');
+    const blackouts = await app.inject('/api/v1/admin/event-blackouts');
+    const exportData = await app.inject('/api/v1/me/export');
     expect(users.statusCode).toBe(401);
     expect(role.statusCode).toBe(401);
     expect(audit.statusCode).toBe(401);
+    expect(blackouts.statusCode).toBe(401);
+    expect(exportData.statusCode).toBe(401);
     await app.close();
   });
 });

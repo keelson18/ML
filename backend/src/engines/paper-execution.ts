@@ -1,9 +1,11 @@
 import type { TradeDecision } from './decision-engine';
+import type { Candle } from '../../../src/lib/types';
 import type { PendingPaperOrder, PlanEvent, TradePlan } from '../trader/types';
 
 export interface PaperJournalEntry {
   id: string; planId?: string; accountId: string; symbol: string; datasetId: string;
-  configHash: string; engineVersions: Record<string, string>; metrics: Record<string, number | string | boolean>;
+  configHash: string; engineVersions: Record<string, string>; active_event_ids: string[];
+  metrics: Record<string, number | string | boolean | null>;
   createdAt: string;
 }
 
@@ -26,6 +28,9 @@ export interface PaperPosition {
   targetsTaken?: number[];
   barsHeld?: number;
   maxFavorablePrice?: number;
+  maxAdversePrice?: number;
+  datasetId?: string;
+  engineVersions?: Record<string, string>;
   planId?: string;
   managementEvents?: Array<{ occurredAt: string; action: string }>;
   status: PaperPositionStatus;
@@ -48,6 +53,8 @@ export interface PaperTrade {
   openedAt: string;
   closedAt: string;
   exitReason?: string;
+  maeR: number | null;
+  mfeR: number | null;
 }
 
 export interface PaperAccountState {
@@ -80,6 +87,7 @@ export interface PaperOrderRequest {
   stopLoss?: number;
   takeProfit?: number;
   targets?: { price: number; fractionOfPosition: number }[];
+  datasetId?: string;
   planId?: string;
   executionVersion: string;
   timestamp?: string;
@@ -156,6 +164,9 @@ export function simulatePaperOrder(
     targetsTaken: [],
     barsHeld: 0,
     maxFavorablePrice: fillPrice,
+    maxAdversePrice: fillPrice,
+    datasetId: request.datasetId ?? 'manual-paper',
+    engineVersions: request.decision.engineVersions ?? {},
     planId: request.planId,
     status: 'open',
     openedAt: timestamp,
@@ -184,10 +195,11 @@ export function closePaperPosition(
   executionVersion: string,
   tradeId: string,
   timestamp = new Date().toISOString(),
+  candle?: Pick<Candle, 'high' | 'low'>,
 ): { account: PaperAccountState; trade: PaperTrade } | { account: PaperAccountState; error: string } {
   const position = account.positions.find((candidate) => candidate.status === 'open' && candidate.symbol === symbol);
   if (!position) return { account, error: 'No open paper position exists for this symbol.' };
-  return reducePaperPosition(account, position.id, position.quantity, exitPrice, feeRate, executionVersion, tradeId, timestamp, 'stop-or-target');
+  return reducePaperPosition(account, position.id, position.quantity, exitPrice, feeRate, executionVersion, tradeId, timestamp, 'stop-or-target', candle);
 }
 
 export function reducePaperPosition(
@@ -200,6 +212,7 @@ export function reducePaperPosition(
   tradeId: string,
   timestamp = new Date().toISOString(),
   exitReason = 'manual-reduction',
+  candle?: Pick<Candle, 'high' | 'low'>,
 ): { account: PaperAccountState; trade: PaperTrade } | { account: PaperAccountState; error: string } {
   const position = account.positions.find((candidate) => candidate.status === 'open' && candidate.id === positionId);
   if (!position) return { account, error: 'No open paper position exists for this symbol.' };
@@ -216,8 +229,25 @@ export function reducePaperPosition(
   const releasedCash = position.side === 'buy' ? exitNotional - exitFee : position.entryPrice * quantity + pricePnl - exitFee;
   const remainingQuantity = Math.max(0, position.quantity - quantity);
   const isClosed = remainingQuantity <= Number.EPSILON * Math.max(1, position.quantity);
+  const observedHigh = Math.max(candle?.high ?? exitPrice, exitPrice);
+  const observedLow = Math.min(candle?.low ?? exitPrice, exitPrice);
+  const favorablePrice = position.side === 'buy'
+    ? Math.max(position.maxFavorablePrice ?? position.entryPrice, observedHigh)
+    : Math.min(position.maxFavorablePrice ?? position.entryPrice, observedLow);
+  const adversePrice = position.side === 'buy'
+    ? Math.min(position.maxAdversePrice ?? position.entryPrice, observedLow)
+    : Math.max(position.maxAdversePrice ?? position.entryPrice, observedHigh);
+  const initialRisk = position.initialRisk;
+  const mfeR = initialRisk && initialRisk > 0
+    ? position.side === 'buy' ? (favorablePrice - position.entryPrice) / initialRisk : (position.entryPrice - favorablePrice) / initialRisk
+    : null;
+  const maeR = initialRisk && initialRisk > 0
+    ? position.side === 'buy' ? (adversePrice - position.entryPrice) / initialRisk : (position.entryPrice - adversePrice) / initialRisk
+    : null;
   const closedPosition: PaperPosition = {
     ...position,
+    maxFavorablePrice: favorablePrice,
+    maxAdversePrice: adversePrice,
     quantity: isClosed ? 0 : remainingQuantity,
     entryFee: Math.max(0, position.entryFee - allocatedEntryFee),
     status: isClosed ? 'closed' : 'open',
@@ -238,6 +268,8 @@ export function reducePaperPosition(
     openedAt: position.openedAt,
     closedAt: timestamp,
     exitReason,
+    maeR,
+    mfeR,
   };
 
   return {

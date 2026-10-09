@@ -15,6 +15,7 @@ export default function SettingsPage() {
   const { user, profile, refreshProfile } = useAuth();
   const { theme, syncError, toggle } = useTheme();
   const passwordLockKey = `password-change-lock-until:${user?.id ?? 'unknown'}`;
+  const passwordFailuresKey = `password-change-failures:${user?.id ?? 'unknown'}`;
   const [notifications, setNotifications] = useState(DEFAULT_NOTIFICATIONS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -25,7 +26,7 @@ export default function SettingsPage() {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [passwordFailures, setPasswordFailures] = useState(0);
+  const [passwordFailures, setPasswordFailures] = useState(() => Number(localStorage.getItem(passwordFailuresKey)) || 0);
   const [passwordLocked, setPasswordLocked] = useState(() => {
     const until = Number(localStorage.getItem(passwordLockKey));
     if (until > Date.now()) return true;
@@ -86,9 +87,9 @@ export default function SettingsPage() {
     try {
       const { error: updateError } = await supabase.auth.updateUser({ email: email.trim() });
       if (updateError) throw updateError;
-      const { error: auditError } = await supabase.rpc('record_own_account_event', { p_action: 'email_change_requested' });
-      if (auditError) throw auditError;
       setAccountMessage('Email change pending confirmation. Check the confirmation email; notification to the old address depends on the Supabase Auth email-change setting.');
+      const { error: auditError } = await supabase.rpc('record_own_account_event', { p_action: 'email_change_requested' });
+      if (auditError) setAccountMessage('Email change is pending confirmation, but the audit record could not be saved.');
     } catch { setAccountMessage('Email change could not be completed. Check your account and try again.'); }
     finally { setAccountBusy(false); }
   };
@@ -100,17 +101,18 @@ export default function SettingsPage() {
     try {
       await changePasswordWithReauthentication(user.email, currentPassword, newPassword);
       setCurrentPassword(''); setNewPassword(''); setConfirmPassword(''); setPasswordFailures(0); setPasswordLocked(false);
-      localStorage.removeItem(passwordLockKey);
+      localStorage.removeItem(passwordLockKey); localStorage.removeItem(passwordFailuresKey);
       setAccountMessage('Password updated.');
     } catch {
       const nextFailures = passwordFailures + 1;
       setPasswordFailures(nextFailures);
+      localStorage.setItem(passwordFailuresKey, String(nextFailures));
       if (nextFailures >= 5) {
         localStorage.setItem(passwordLockKey, String(Date.now() + 15 * 60_000));
         setPasswordLocked(true);
         setAccountMessage('Too many failed attempts. Password changes are locked for 15 minutes.');
         window.setTimeout(() => {
-          localStorage.removeItem(passwordLockKey);
+          localStorage.removeItem(passwordLockKey); localStorage.removeItem(passwordFailuresKey);
           setPasswordFailures(0);
           setPasswordLocked(false);
         }, 15 * 60_000);

@@ -57,7 +57,7 @@ Provider keys stay server-side. Trader decisions use market and risk data only; 
 
 ### Prerequisites
 
-- Node.js 20.11+
+- Node.js 20.19+
 - A Supabase project (free tier works)
 - Massive API key for the configured crypto markets; verify markets with the admin probe before relying on them
 - Twelve Data API key only for symbols assigned to that provider

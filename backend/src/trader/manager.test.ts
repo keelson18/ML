@@ -37,6 +37,15 @@ describe('paper position manager', () => {
     expect(second.position.stopLoss).toBeGreaterThanOrEqual(first.position.stopLoss!);
   });
 
+  it('accumulates MAE and MFE before early stop exits', () => {
+    const first = managePaperPosition({ position, candle: bar({ high: 105, low: 98 }), barIndex: 1 });
+    expect(first.position.maxFavorablePrice).toBe(105);
+    expect(first.position.maxAdversePrice).toBe(98);
+    const stopped = managePaperPosition({ position: first.position, candle: bar({ high: 110, low: 94 }), barIndex: 2 });
+    expect(stopped.position.maxFavorablePrice).toBe(110);
+    expect(stopped.position.maxAdversePrice).toBe(94);
+  });
+
   it('exits after the configured time limit without progress', () => {
     const result = managePaperPosition({ position: { ...position, barsHeld: 95 }, candle: bar({ high: 100.2, close: 100 }), barIndex: 96 });
     expect(result.exits[0]?.reason).toBe('time-stop');

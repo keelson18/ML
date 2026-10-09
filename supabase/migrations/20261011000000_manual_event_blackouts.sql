@@ -36,8 +36,8 @@ begin
   if v_actor is null or not public.is_current_user_admin() then
     raise exception 'Admin access required.' using errcode = '42501';
   end if;
-  if length(trim(p_title)) not between 1 and 160 or p_impact not in ('low', 'medium', 'high')
-    or cardinality(p_asset_classes) = 0
+  if length(trim(coalesce(p_title, ''))) not between 1 and 160 or p_impact is null or p_impact not in ('low', 'medium', 'high')
+    or p_asset_classes is null or cardinality(p_asset_classes) = 0
     or not (p_asset_classes <@ array['crypto', 'forex', 'commodity', 'index', 'stock']::text[])
     or p_starts_at is null or p_ends_at is null or p_ends_at <= p_starts_at then
     raise exception 'Invalid event blackout.' using errcode = '22023';

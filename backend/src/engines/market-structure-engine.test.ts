@@ -295,6 +295,7 @@ describe('marketStructureEngine', () => {
       feeRate: 0.01,
       slippageRate: 0.01,
       executionVersion: 'paper-1',
+      stopLoss: 95,
       timestamp: '2026-08-09T00:00:00.000Z',
     });
 
@@ -302,10 +303,12 @@ describe('marketStructureEngine', () => {
     expect(order.fillPrice).toBe(101);
     expect(order.account.cash).toBeCloseTo(795.98, 2);
 
-    const closed = closePaperPosition(order.account, 'BTCUSDT', 110, 0.01, 'paper-1', 'trade-1', '2026-08-09T01:00:00.000Z');
+    const closed = closePaperPosition(order.account, 'BTCUSDT', 110, 0.01, 'paper-1', 'trade-1', '2026-08-09T01:00:00.000Z', { high: 112, low: 97 });
     expect('trade' in closed).toBe(true);
     if ('trade' in closed) {
       expect(closed.trade.realizedPnl).toBeCloseTo(13.78, 2);
+      expect(closed.trade.maeR).toBeLessThan(0);
+      expect(closed.trade.mfeR).toBeGreaterThan(1);
       expect(closed.account.positions[0].status).toBe('closed');
     }
   });
@@ -359,6 +362,8 @@ describe('marketStructureEngine', () => {
         executionVersion: 'paper-1',
         openedAt: '2026-08-09T00:00:00.000Z',
         closedAt: '2026-08-09T01:00:00.000Z',
+        maeR: -0.2,
+        mfeR: 2,
       },
       decision: {
         decision: 'BUY',

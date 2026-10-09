@@ -18,14 +18,14 @@ This file reports evidence observed in the repository and this workspace session
 | Break-even, partials, trailing, time stop, invalidation have tests | PASS | `backend/src/trader/manager.test.ts` covers target partials plus break-even, trailing without loosening, time-stop, thesis invalidation, and stop-first ordering. |
 | Scheduler close grace, incomplete candles, and bounded catch-up | PASS | `backend/src/autonomy/candle-clock.test.ts` — incomplete-candle grace and aligned UTC boundaries; `backend/src/autonomy/scheduler.ts` limits executor catch-up to `MAX_ENTRY_AGE_BARS` and runs the pipeline on closed prefixes. A live scheduler run was not performed. |
 | Catch-up never opens an entry from stale candles | PASS (code path; no scheduler integration test) | `backend/src/autonomy/scheduler.ts` pauses on `series.stale`; `backend/src/autonomy/pipeline.ts` rejects stale executor/planner data and too-old entry candles. Unit-level integration evidence is less complete than the claim; add a scheduler-to-executor test before release. |
-| Every closed trade has a journal row with R, MAE, MFE, engine and dataset versions | FAIL | `backend/src/services/paperTradingService.ts` stores a per-trade journal object in paper-account state with `rMultiple`, `engineVersions`, and `datasetId`; no MAE/MFE metrics are calculated, and durable journal-table writes for every close were not found. The separate `trade_journal` migration/RPC exists, but repository code does not demonstrate a write on each close. |
+| Every closed trade has a journal row with R, MAE, MFE, engine and dataset versions | PASS (paper-account journal) | `backend/src/services/paperTradingService.ts` appends to `tradeJournal` in the versioned, owner-scoped `paper_sim_accounts.state`; the row records R, `maeR`, `mfeR`, dataset ID and engine versions. `backend/src/services/paperTradingService.test.ts` asserts journal metrics on manager-driven closes; `backend/src/engines/market-structure-engine.test.ts` covers close-path excursions. Caveat: normalized `trade_journal` SQL-table writes are not synchronized by current code; verify whether that separate table is a release requirement. |
 | Research honesty rules: paper vs live, sample size, baselines, forward test | PASS | `docs/RESEARCH.md` describes simulated-vs-live limitations, sample-size gating, confidence intervals, buy-and-hold/random/cash baselines, and locked forward testing. |
 
 ## Phase A — empty and malformed HTTP responses
 
 **PASS for safe parsing and error mapping; NOT-VERIFIED for visual browser behavior.** `shared/http.ts:1` reads response text once and safely parses JSON. The frontend and Supabase Edge Function provider clients use this helper; the server provider/health boundaries were also updated. Content searches found no direct `response.json()` calls in `src/` or `supabase/functions/`.
 
-`src/lib/backend-api.test.ts` contains these named cases (6 tests): empty 200 produces a clear error; empty 500 and HTML 502 produce the unreachable-backend message; JSON 400 preserves the backend error; valid JSON parses; JSON 401 preserves the authentication message. The retry control was already present on Dashboard and is retained. Dashboard candle state is cached by symbol/timeframe and kept on fetch failure with a stale badge.
+`src/lib/backend-api.test.ts` contains these named cases (8 tests): empty 200 produces a clear error; empty 500 and HTML 502 produce the unreachable-backend message; JSON 400 preserves the backend error; valid JSON parses; empty and JSON 401 preserve status/backend authentication handling; a bodyless POST omits the JSON content-type header. The retry control was already present on Dashboard and is retained. Dashboard candle state is cached by symbol/timeframe and kept on fetch failure with a stale badge.
 
 The app preview screenshot facility returned “Screenshot capture not available from the app.” The retry and stale-badge flow was therefore not manually exercised in a browser during this session.
 
@@ -33,7 +33,7 @@ The app preview screenshot facility returned “Screenshot capture not available
 
 - **Manual blackouts and executor:** PASS at code/unit-test level. `backend/src/trader/event-risk.test.ts` verifies fail-closed behavior, impact thresholds, and active IDs. `backend/src/trader/executor.test.ts` verifies a touched pending fill is rejected when the current gate blocks. `supabase/migrations/20261011000000_manual_event_blackouts.sql` defines owner/admin controls through `is_current_user_admin()`-checked RPCs and writes admin audit events. The migration has not been applied or exercised against a Supabase project in this session (NOT-VERIFIED deployment).
 - **Management during an entry blackout:** position management remains a separate path in `backend/src/services/paperTradingService.ts` / `backend/src/routes/trader.ts`; a live open-position regression test under an active blackout was not run (NOT-VERIFIED).
-- **Provider status:** PASS for honest reporting only. `backend/src/news/providers.ts` reports `unverified` when no provider is configured. No provider key, adapter, authenticated probe, or ingestion job was used in this session; provider availability is NOT-VERIFIED.
+- **Provider status:** PASS for honest reporting only. `backend/src/news/providers.ts` reports `unverified` when no provider is configured. No provider key or provider-backed adapter/ingestion job was used in this session; provider availability is NOT-VERIFIED.
 - **Ingestion/storage:** PASS for helper-level sanitization, registry symbol tagging, and `ingested_at <= asOf` filtering (`backend/src/news/providers.test.ts`). No provider ingestion was run. Database grants, immutable-ingestion trigger, and duplicate behavior have not been tested against deployed PostgreSQL (NOT-VERIFIED).
 - **UI and notifications:** tabs, CMS research notes, calendar view, sentiment-unavailable copy, and notification bell are implemented. End-to-end browser delivery and the CMS publish trigger have not been exercised (NOT-VERIFIED).
 - No headline or sentiment field is imported into the BUY/SELL decision engine. The decision engine inputs remain market/engine context; no news provider is wired into decision analysis. No live or authenticated provider command was run.
@@ -61,17 +61,28 @@ create policy event_blackouts_admin_read on public.event_blackouts
 revoke all on public.event_blackouts from anon, authenticated;
 grant select on public.event_blackouts to authenticated;
 
--- News/calendar items are authenticated read-only; service role owns ingestion.
+-- News/calendar items are shared authenticated read-only data; anon is denied.
 create policy news_items_authenticated_read on public.news_items
   for select to authenticated using (auth.uid() is not null);
+create policy news_items_admin_read on public.news_items
+  for select to authenticated using (public.is_current_user_admin());
 revoke all on public.news_items from anon, authenticated;
 grant select on public.news_items to authenticated;
 
--- Notifications are caller-owned and users may update only read_at.
+create policy calendar_events_authenticated_read on public.calendar_events
+  for select to authenticated using (auth.uid() is not null);
+create policy calendar_events_admin_read on public.calendar_events
+  for select to authenticated using (public.is_current_user_admin());
+revoke all on public.calendar_events from anon, authenticated;
+grant select on public.calendar_events to authenticated;
+
+-- Notifications are caller-owned and users may update only read_at; admins can audit-read.
 create policy in_app_notifications_owner_read on public.in_app_notifications
   for select to authenticated using (auth.uid() = user_id);
 create policy in_app_notifications_owner_update on public.in_app_notifications
   for update to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy in_app_notifications_admin_read on public.in_app_notifications
+  for select to authenticated using (public.is_current_user_admin());
 revoke all on public.in_app_notifications from anon, authenticated;
 grant select, update (read_at) on public.in_app_notifications to authenticated;
 ```
@@ -94,8 +105,8 @@ A PostgreSQL/Supabase RLS integration test was not run, so owner/admin/anon beha
 
 ## Phase E and CI
 
-- `npm run check:env` passes in this workspace: 32 environment variable names read by source were found in `.env.example`.
+- `npm run check:env` passes in this workspace: all 35 detected environment variable reads are listed and commented in `.env.example`.
 - CI workflow is present at `.github/workflows/ci.yml` and declares install, environment check, typechecks, lint, tests, build, and a non-blocking production dependency audit artifact. GitHub Actions has not run for this worktree (NOT-VERIFIED green CI).
-- Current local checks observed before the latest account/news changes: the full suite passed 127 tests; focused security/event tests passed 23 additional cases across separate invocations; frontend/backend typechecks passed; lint had three existing Fast Refresh warnings and no errors; production build passed with a chunk-size warning. Final post-change results are recorded in the session summary, not inferred from these earlier runs.
-- `npm audit --omit=dev` findings: NOT-VERIFIED in this record until the dependency audit report is collected. CI uploads `npm-audit-report.json` as an artifact without failing the job for advisory findings.
+- Final local verification: `npm test` passed 149 tests in 30 files; frontend and backend typechecks passed; `npm run check:env` passed; lint exited successfully with three existing Fast Refresh warnings; production build passed with a chunk-size warning.
+- `npm audit --omit=dev --json` reported 0 info/low/moderate/high/critical vulnerabilities across 88 production dependencies. CI uploads the machine-readable report without failing the job for advisory findings.
 - `package.json` has no `api:dev` script and the current server is Fastify (`backend/src/server.ts`). Duplicate decision routes, parallel API clients, and legacy Supabase tables remain; cleanup is not complete. No migration was removed.

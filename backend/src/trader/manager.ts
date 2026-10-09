@@ -30,7 +30,13 @@ export function managePaperPosition(input: {
 }): ManagementResult {
   const { position, candle } = input;
   if (position.status !== 'open') return { position, exits: [], actions: [] };
-  let updated: PaperPosition = { ...position, barsHeld: (position.barsHeld ?? 0) + 1 };
+  const maxFavorablePrice = position.side === 'buy'
+    ? Math.max(position.maxFavorablePrice ?? position.entryPrice, candle.high)
+    : Math.min(position.maxFavorablePrice ?? position.entryPrice, candle.low);
+  const maxAdversePrice = position.side === 'buy'
+    ? Math.min(position.maxAdversePrice ?? position.entryPrice, candle.low)
+    : Math.max(position.maxAdversePrice ?? position.entryPrice, candle.high);
+  let updated: PaperPosition = { ...position, barsHeld: (position.barsHeld ?? 0) + 1, maxFavorablePrice, maxAdversePrice };
   const exits: PositionExit[] = [];
   const actions: string[] = [];
   const currentStop = position.stopLoss;
@@ -63,7 +69,7 @@ export function managePaperPosition(input: {
     alreadyTaken.add(index);
     actions.push(`Target ${index + 1} partially or fully exited ${requested} units.`);
   }
-  updated = { ...updated, quantity: remaining, targetsTaken: [...alreadyTaken], maxFavorablePrice: Math.max(position.maxFavorablePrice ?? position.entryPrice, candle.high) };
+  updated = { ...updated, quantity: remaining, targetsTaken: [...alreadyTaken] };
   if (remaining <= Number.EPSILON * Math.max(1, position.quantity)) {
     return { position: { ...updated, quantity: 0, status: 'closed' }, exits, actions };
   }

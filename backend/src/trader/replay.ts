@@ -19,6 +19,8 @@ export interface ReplayTrade {
   slippage: number;
   pnlAfterCosts: number;
   rMultipleAfterCosts: number;
+  maeR: number | null;
+  mfeR: number | null;
   exitReason: string;
 }
 
@@ -104,13 +106,18 @@ export function replayClosedCandles(input: {
         const gross = (exit.price - position.entryPrice) * quantity;
         const pnl = gross - exitFee - allocatedEntryFee;
         const risk = (position.initialRisk ?? 0) * quantity;
+        const initialRisk = position.initialRisk;
+        const mfeR = initialRisk && initialRisk > 0
+          ? position.side === 'buy' ? ((managed.position.maxFavorablePrice ?? position.entryPrice) - position.entryPrice) / initialRisk : (position.entryPrice - (managed.position.maxFavorablePrice ?? position.entryPrice)) / initialRisk
+          : null;
+        const maeR = initialRisk && initialRisk > 0
+          ? position.side === 'buy' ? ((managed.position.maxAdversePrice ?? position.entryPrice) - position.entryPrice) / initialRisk : (position.entryPrice - (managed.position.maxAdversePrice ?? position.entryPrice)) / initialRisk
+          : null;
         trades.push({
           planId: position.planId ?? '', symbol: position.symbol, entryTime: Date.parse(position.openedAt) / 1000,
           exitTime: candle.time, entryPrice: position.entryPrice, exitPrice: exit.price, quantity,
           fees: exitFee + allocatedEntryFee, slippage: Math.abs(position.entryPrice) * quantity * costs.slippageRate + exit.price * quantity * costs.slippageRate,
-          // Entry and exit prices already include adverse slippage; do not subtract it twice.
-          pnlAfterCosts: pnl,
-          rMultipleAfterCosts: risk > 0 ? pnl / risk : 0,
+          pnlAfterCosts: pnl, rMultipleAfterCosts: risk > 0 ? pnl / risk : 0, maeR, mfeR,
           exitReason: exit.reason,
         });
       }

@@ -8,7 +8,7 @@ export interface EventBlackout {
   asset_classes: string[];
   starts_at: string;
   ends_at: string;
-  active: boolean;
+  active?: boolean;
 }
 
 export interface EventRiskStatus {
@@ -34,14 +34,19 @@ export async function getEventRiskStatus(symbol: string, now = Date.now()): Prom
   const market = getMarket(symbol);
   if (!market) return { healthy: false, activeEvents: [], reason: 'Event risk data is unavailable; new entries are blocked.' };
   try {
-    const { data, error } = await getSupabaseClient().from('event_blackouts')
-      .select('id,title,impact,asset_classes,starts_at,ends_at,active')
-      .eq('active', true)
-      .lte('starts_at', new Date(now).toISOString())
-      .gt('ends_at', new Date(now).toISOString());
-    if (error || !data) return { healthy: false, activeEvents: [], reason: 'Event risk data is unavailable; new entries are blocked.' };
-    const activeEvents = (data as EventBlackout[]).filter((event) => event.asset_classes.includes(market.marketType));
-    return { healthy: true, activeEvents };
+    const nowIso = new Date(now).toISOString();
+    const supabase = getSupabaseClient();
+    const [{ data: manualEvents, error: manualError }, { data: providerEvents, error: providerError }] = await Promise.all([
+      supabase.from('event_blackouts').select('id,title,impact,asset_classes,starts_at,ends_at,active')
+        .eq('active', true).lte('starts_at', nowIso).gt('ends_at', nowIso),
+      supabase.from('calendar_events').select('id,title,impact,asset_classes,starts_at,ends_at,ingested_at')
+        .lte('ingested_at', nowIso).lte('starts_at', nowIso).gt('ends_at', nowIso),
+    ]);
+    if (manualError || providerError || !manualEvents || !providerEvents) {
+      return { healthy: false, activeEvents: [], reason: 'Event risk data is unavailable; new entries are blocked.' };
+    }
+    const activeEvents = [...manualEvents, ...providerEvents] as EventBlackout[];
+    return { healthy: true, activeEvents: activeEvents.filter((event) => event.asset_classes.includes(market.marketType)) };
   } catch {
     return { healthy: false, activeEvents: [], reason: 'Event risk data is unavailable; new entries are blocked.' };
   }

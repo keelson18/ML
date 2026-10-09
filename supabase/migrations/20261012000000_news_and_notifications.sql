@@ -16,6 +16,8 @@ revoke all on public.news_items from anon, authenticated;
 grant select on public.news_items to authenticated;
 create policy news_items_authenticated_read on public.news_items
   for select to authenticated using (auth.uid() is not null);
+create policy news_items_admin_read on public.news_items
+  for select to authenticated using (public.is_current_user_admin());
 
 create table if not exists public.calendar_events (
   id uuid primary key default gen_random_uuid(),
@@ -36,6 +38,8 @@ revoke all on public.calendar_events from anon, authenticated;
 grant select on public.calendar_events to authenticated;
 create policy calendar_events_authenticated_read on public.calendar_events
   for select to authenticated using (auth.uid() is not null);
+create policy calendar_events_admin_read on public.calendar_events
+  for select to authenticated using (public.is_current_user_admin());
 
 create or replace function public.prevent_ingested_at_change()
 returns trigger language plpgsql set search_path = public
@@ -65,11 +69,15 @@ create table if not exists public.in_app_notifications (
 );
 create index if not exists in_app_notifications_unread_idx
   on public.in_app_notifications (user_id, created_at desc) where read_at is null;
+create unique index if not exists in_app_notifications_source_idx
+  on public.in_app_notifications (user_id, notification_type, source_id) where source_id is not null;
 alter table public.in_app_notifications enable row level security;
 revoke all on public.in_app_notifications from anon, authenticated;
 grant select, update (read_at) on public.in_app_notifications to authenticated;
 create policy in_app_notifications_owner_read on public.in_app_notifications
   for select to authenticated using (auth.uid() = user_id);
+create policy in_app_notifications_admin_read on public.in_app_notifications
+  for select to authenticated using (public.is_current_user_admin());
 create policy in_app_notifications_owner_update on public.in_app_notifications
   for update to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
@@ -77,12 +85,13 @@ create or replace function public.notify_on_published_cms_content()
 returns trigger language plpgsql security definer set search_path = public
 as $$
 begin
-  if new.published is true and new.content_type in ('article', 'announcement')
-    and (tg_op = 'INSERT' or old.published is distinct from true) then
+  if tg_op = 'UPDATE' and old.published is true then return new; end if;
+  if new.published is true and new.content_type in ('article', 'announcement') then
     insert into public.in_app_notifications(user_id, notification_type, title, body, href, source_id)
       select p.user_id, 'news', new.title, coalesce(new.excerpt, ''), '/news', new.id
       from public.user_preferences p
-      where p.notifications -> 'news' = 'true'::jsonb;
+      where p.notifications -> 'news' = 'true'::jsonb
+    on conflict do nothing;
   end if;
   return new;
 end;
@@ -90,5 +99,21 @@ $$;
 create trigger cms_published_news_notification
   after insert or update on public.cms_content
   for each row execute function public.notify_on_published_cms_content();
+
+create or replace function public.notify_on_ingested_news_item()
+returns trigger language plpgsql security definer set search_path = public
+as $$
+begin
+  insert into public.in_app_notifications(user_id, notification_type, title, body, href, source_id)
+    select p.user_id, 'news', new.title, coalesce(new.summary, ''), '/news', new.id
+    from public.user_preferences p
+    where p.notifications -> 'news' = 'true'::jsonb
+  on conflict do nothing;
+  return new;
+end;
+$$;
+create trigger ingested_news_notification
+  after insert on public.news_items
+  for each row execute function public.notify_on_ingested_news_item();
 
 alter table public.trade_journal add column if not exists active_event_ids text[] not null default '{}';

@@ -79,6 +79,7 @@ describe('plan executor', () => {
     expect(result.plan.status).toBe('PENDING_ORDER');
     expect(result.plan.lastReason).toBe('Entry blocked by event blackout.');
     expect(result.plan.activeEventIds).toEqual(['event-1']);
+    expect(result.events[0]?.activeEventIds).toEqual(['event-1']);
   });
 
   it('rejects an entry when gates fail and keeps the plan armed', () => {

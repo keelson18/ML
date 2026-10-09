@@ -12,6 +12,7 @@ import { runAllStrategies } from '../lib/strategies/index';
 import { combineSignals } from '../lib/backtest';
 import { fetchMLPrediction, fetchCachedMLPrediction } from '../lib/mlClient';
 import AdminPanel from './AdminPanel';
+import AdminRoute from './AdminRoute';
 import CMSManager from './CMS/CMSManager';
 import CMSViewer from './CMS/CMSViewer';
 import Sidebar from './Sidebar';
@@ -244,7 +245,7 @@ export default function Dashboard() {
     if (sidebarTab === 'cms') {
       return (
         <div className="p-4 lg:p-6">
-          {isAdmin ? <CMSManager /> : <PublishedArticles />}
+          {isAdmin ? <AdminRoute><CMSManager /></AdminRoute> : <PublishedArticles />}
         </div>
       );
     }

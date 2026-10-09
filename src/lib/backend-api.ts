@@ -102,6 +102,8 @@ export interface PaperTrade {
   entryPrice: number;
   exitPrice: number;
   realizedPnl: number;
+  maeR: number | null;
+  mfeR: number | null;
   openedAt: string;
   closedAt: string;
 }

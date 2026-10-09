@@ -15,11 +15,18 @@ export async function eventRoutes(app: FastifyInstance) {
   app.get('/api/v1/events/active', { preHandler: app.requireAuth, config: { rateLimit: { max: config.marketRateLimitMax, timeWindow: config.rateLimitWindowMs } } }, async (_request, reply) => {
     try {
       const now = new Date().toISOString();
-      const { data, error } = await getSupabaseClient().from('event_blackouts')
-        .select('id,title,impact,asset_classes,starts_at,ends_at')
-        .eq('active', true).lte('starts_at', now).gt('ends_at', now).order('starts_at');
-      if (error) throw error;
-      return { events: data ?? [], checkedAt: now };
+      const supabase = getSupabaseClient();
+      const [{ data: manualEvents, error: manualError }, { data: providerEvents, error: providerError }] = await Promise.all([
+        supabase.from('event_blackouts').select('id,title,impact,asset_classes,starts_at,ends_at')
+          .eq('active', true).lte('starts_at', now).gt('ends_at', now),
+        supabase.from('calendar_events').select('id,title,impact,asset_classes,starts_at,ends_at,ingested_at')
+          .lte('ingested_at', now).lte('starts_at', now).gt('ends_at', now),
+      ]);
+      if (manualError || providerError) throw manualError ?? providerError;
+      return {
+        events: [...(manualEvents ?? []).map((event) => ({ ...event, source: 'manual' as const })), ...(providerEvents ?? []).map((event) => ({ ...event, source: 'provider' as const }))],
+        checkedAt: now,
+      };
     } catch {
       return reply.code(503).send({ error: 'Event calendar is unavailable; entries are blocked.' });
     }

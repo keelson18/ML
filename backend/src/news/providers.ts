@@ -45,7 +45,12 @@ const calendarProvider: CalendarProvider = {
 };
 
 export function sanitizePlainText(value: string, maxLength = 2_000): string {
-  return value.replace(/<[^>]*>/g, ' ').replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, maxLength);
+  const plainText = value.replace(/<[^>]*>/g, ' ');
+  const withoutControls = Array.from(plainText, (character) => {
+    const code = character.charCodeAt(0);
+    return code < 32 || code === 127 ? ' ' : character;
+  }).join('');
+  return withoutControls.replace(/\s+/g, ' ').trim().slice(0, maxLength);
 }
 
 export function filterNewsAtIngestedAt<T extends { ingested_at: string }>(items: T[], asOf: string): T[] {

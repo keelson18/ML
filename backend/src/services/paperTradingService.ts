@@ -193,7 +193,7 @@ export async function advanceStoredTradePlans(input: {
             assetId: plan.symbol, symbol: plan.symbol, decision, riskApproved: true, portfolioApproved: true,
             quantity: fill.order.quantity, requestedPrice: fill.price, feeRate: traderConfig.FEE_RATE, slippageRate: 0,
             stopLoss: plan.invalidation, takeProfit: plan.targets[0]?.price, targets: plan.targets,
-            planId: plan.id, executionVersion: 'paper-simulator-1.0.0', timestamp: decision.timestamp,
+            planId: plan.id, datasetId: plan.datasetId, executionVersion: 'paper-simulator-1.0.0', timestamp: decision.timestamp,
           });
           if (!result.accepted) {
             nextPlan = { ...plan, status: 'CANCELLED', updatedAt: decision.timestamp };
@@ -255,11 +255,12 @@ function recordPaperTrade(account: PaperAccountState, trade: PaperTrade, timefra
   }
   const journal = {
     id: trade.id, planId: position?.planId, accountId: account.accountId, symbol: trade.symbol,
-    datasetId: plan?.datasetId ?? 'manual-paper', configHash: createHash('sha256').update(JSON.stringify(traderConfig)).digest('hex'),
-    engineVersions: plan?.engineVersions ?? {},
-    activeEventIds: plan?.activeEventIds ?? [],
+    datasetId: plan?.datasetId ?? position?.datasetId ?? 'manual-paper', configHash: createHash('sha256').update(JSON.stringify(traderConfig)).digest('hex'),
+    engineVersions: plan?.engineVersions ?? position?.engineVersions ?? {},
+    active_event_ids: plan?.activeEventIds ?? [],
     metrics: { rMultiple: risk > 0 ? trade.realizedPnl / risk : 0, pnl: trade.realizedPnl, fees: trade.fees, quantity: trade.quantity,
-      barsHeld: position?.barsHeld ?? 0, entryPrice: trade.entryPrice, exitPrice: trade.exitPrice, exitReason: trade.exitReason ?? 'paper-exit' },
+      barsHeld: position?.barsHeld ?? 0, entryPrice: trade.entryPrice, exitPrice: trade.exitPrice,
+      maeR: trade.maeR, mfeR: trade.mfeR, exitReason: trade.exitReason ?? 'paper-exit' },
     createdAt: timestamp,
   };
   return { ...updated, tradeJournal: [...(updated.tradeJournal ?? []), journal] };
@@ -271,7 +272,7 @@ export async function closeOpenPaperPosition(accountId: string, symbol: string, 
   const exitPrice = candle?.close;
   if (!exitPrice || !Number.isFinite(exitPrice)) throw new Error('A current market price is unavailable.');
   return updateAccount(accountId, (account) => {
-    const result = closePaperPosition(account, symbol, exitPrice, traderConfig.FEE_RATE, 'paper-simulator-1.0.0', `trade-${Date.now()}`);
+    const result = closePaperPosition(account, symbol, exitPrice, traderConfig.FEE_RATE, 'paper-simulator-1.0.0', `trade-${Date.now()}`, undefined, candle);
     if ('error' in result) throw new Error(result.error);
     return { account: recordPaperTrade(result.account, result.trade, '1m', candle), result: result.trade };
   }, accessToken);
@@ -301,6 +302,7 @@ export async function manageOpenPositions(accountId: string, symbol: string, can
             targetsTaken: managed.position.targetsTaken,
             barsHeld: managed.position.barsHeld,
             maxFavorablePrice: managed.position.maxFavorablePrice,
+            maxAdversePrice: managed.position.maxAdversePrice,
             managementEvents: [...(position.managementEvents ?? []), ...managed.actions.map((action) => ({
               occurredAt: new Date(candle.time * 1000).toISOString(),
               action,
@@ -309,7 +311,7 @@ export async function manageOpenPositions(accountId: string, symbol: string, can
         : candidate) };
       for (const exit of managed.exits) {
         const result = reducePaperPosition(account, position.id, exit.quantity, exit.price, traderConfig.FEE_RATE,
-          'paper-simulator-1.0.0', `trade-${Date.now()}-${closedTrades.length}`, new Date(candle.time * 1000).toISOString(), exit.reason);
+          'paper-simulator-1.0.0', `trade-${Date.now()}-${closedTrades.length}`, new Date(candle.time * 1000).toISOString(), exit.reason, candle);
         if ('trade' in result) {
           account = recordPaperTrade(result.account, result.trade, timeframe, candle);
           closedTrades.push(result.trade);
