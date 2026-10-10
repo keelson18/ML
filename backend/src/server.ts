@@ -17,6 +17,7 @@ import { adminUserRoutes } from './routes/admin-users';
 import { eventRoutes } from './routes/events';
 import { newsRoutes } from './routes/news';
 import { personalDataRoutes } from './routes/personal-data';
+import { coachContextRoutes } from './routes/coach-context';
 import { probeAllMarkets } from './services/marketAvailability';
 import { readJsonSafe } from '../../shared/http';
 
@@ -55,6 +56,7 @@ export function buildServer() {
   void app.register(positionRoutes);
   void app.register(marketAvailabilityRoutes);
   void app.register(traderRoutes);
+  void app.register(coachContextRoutes);
   void app.register(adminUserRoutes);
   void app.register(eventRoutes);
   void app.register(newsRoutes);

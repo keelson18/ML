@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   createChart,
   ColorType,
@@ -11,6 +11,17 @@ import {
 } from 'lightweight-charts';
 import type { Candle, Overlay } from '../lib/types';
 import { normalizeCandles, normalizeOverlays } from '../lib/chart-data';
+import {
+  applyCandleUpdate,
+  createOverlayState,
+  planOverlays,
+  syncOverlays,
+  type ChartLike,
+  type LineOptions,
+  type LinePoint,
+  type MarkerSpec,
+} from '../lib/chart-feed';
+import { recordTiming } from '../lib/perf';
 
 interface Props {
   candles: Candle[];
@@ -18,11 +29,39 @@ interface Props {
   theme: 'light' | 'dark';
 }
 
+const ANNOUNCE_INTERVAL_MS = 1000;
+
+function toCandleBar(candle: Candle) {
+  return {
+    time: candle.time as Time,
+    open: candle.open,
+    high: candle.high,
+    low: candle.low,
+    close: candle.close,
+  };
+}
+
+function toMarker(marker: MarkerSpec): SeriesMarker<Time> {
+  return { time: marker.time as Time, position: marker.position, color: marker.color, shape: marker.shape, text: marker.text };
+}
+
 export default function PriceChart({ candles, overlays, theme }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
-  const overlaySeriesRef = useRef<ISeriesApi<'Line'>[]>([]);
+  const appliedCandlesRef = useRef<Candle[]>([]);
+  const overlayStateRef = useRef(createOverlayState<ISeriesApi<'Line'>>());
+
+  const safeCandles = useMemo(() => normalizeCandles(candles), [candles]);
+  const overlayPlan = useMemo(
+    () => planOverlays(normalizeOverlays(overlays, safeCandles), safeCandles),
+    [overlays, safeCandles],
+  );
+
+  const [announced, setAnnounced] = useState<Candle[]>(safeCandles);
+  const latestCandlesRef = useRef(safeCandles);
+  const announceTimerRef = useRef<number | null>(null);
+  const lastAnnouncedAtRef = useRef(0);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -53,6 +92,8 @@ export default function PriceChart({ candles, overlays, theme }: Props) {
     });
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
+    appliedCandlesRef.current = [];
+    overlayStateRef.current = createOverlayState();
 
     const updateSize = () => {
       if (!containerRef.current) return;
@@ -70,88 +111,52 @@ export default function PriceChart({ candles, overlays, theme }: Props) {
       chart.remove();
       chartRef.current = null;
       candleSeriesRef.current = null;
-      overlaySeriesRef.current = [];
     };
   }, [theme]);
 
   useEffect(() => {
     const candleSeries = candleSeriesRef.current;
     if (!candleSeries) return;
-    const safeCandles = normalizeCandles(candles);
-    candleSeries.setData(safeCandles.map((candle) => ({
-      time: candle.time as Time,
-      open: candle.open,
-      high: candle.high,
-      low: candle.low,
-      close: candle.close,
-    })));
-  }, [candles, theme]);
+    const start = performance.now();
+    applyCandleUpdate(candleSeries, toCandleBar, appliedCandlesRef.current, safeCandles);
+    appliedCandlesRef.current = safeCandles;
+    recordTiming('chart.candles', performance.now() - start);
+  }, [safeCandles, theme]);
 
   useEffect(() => {
     const chart = chartRef.current;
     const candleSeries = candleSeriesRef.current;
     if (!chart || !candleSeries) return;
-    const safeCandles = normalizeCandles(candles);
-    const safeOverlays = normalizeOverlays(overlays, safeCandles);
-
-    for (const series of overlaySeriesRef.current) {
-      try { chart.removeSeries(series); } catch { /* chart may already be unmounted */ }
-    }
-    overlaySeriesRef.current = [];
-    const allMarkers: SeriesMarker<Time>[] = [];
-
-    for (const overlay of safeOverlays) {
-      if (overlay.type === 'line' && overlay.points) {
-        const line = chart.addLineSeries({
-          color: overlay.color ?? '#6b7280',
-          lineWidth: 1,
-          priceLineVisible: false,
-          lastValueVisible: false,
-        });
-        const data: LineData[] = overlay.points.map((point) => ({ time: point.time as Time, value: point.value }));
-        line.setData(data);
-        overlaySeriesRef.current.push(line);
-      } else if (overlay.type === 'hline' && overlay.price !== undefined && safeCandles.length) {
-        const line = chart.addLineSeries({
-          color: overlay.color ?? '#9ca3af',
-          lineWidth: 1,
-          lineStyle: 2,
-          priceLineVisible: false,
-          lastValueVisible: true,
-          title: overlay.label,
-        });
-        line.setData([
-          { time: safeCandles[0].time as Time, value: overlay.price },
-          { time: safeCandles[safeCandles.length - 1].time as Time, value: overlay.price },
-        ]);
-        overlaySeriesRef.current.push(line);
-      } else if (overlay.type === 'markers' && overlay.markers) {
-        allMarkers.push(...overlay.markers.map((marker) => ({
-          time: marker.time as Time,
-          position: marker.position,
-          color: marker.color,
-          shape: marker.shape,
-          text: marker.text,
-        })));
-      }
-    }
-
-    allMarkers.sort((a, b) => Number(a.time) - Number(b.time));
-    candleSeries.setMarkers(allMarkers);
-
-    return () => {
-      for (const series of overlaySeriesRef.current) {
-        try { chart.removeSeries(series); } catch { /* chart may already be unmounted */ }
-      }
-      overlaySeriesRef.current = [];
+    const adapter: ChartLike<ISeriesApi<'Line'>> = {
+      addLine: (options: LineOptions) => chart.addLineSeries(options),
+      setLineData: (series, points: LinePoint[]) => series.setData(points.map((point) => ({ time: point.time as Time, value: point.value })) as LineData<Time>[]),
+      removeSeries: (series) => chart.removeSeries(series),
     };
-  }, [overlays, candles, theme]);
+    const start = performance.now();
+    syncOverlays(adapter, overlayStateRef.current, overlayPlan, (markers) => candleSeries.setMarkers(markers.map(toMarker)));
+    recordTiming('chart.overlays', performance.now() - start);
+  }, [overlayPlan, theme]);
 
-  const recentCandles = candles.slice(-10);
+  useEffect(() => {
+    latestCandlesRef.current = safeCandles;
+    if (announceTimerRef.current !== null) return;
+    const wait = Math.max(0, lastAnnouncedAtRef.current + ANNOUNCE_INTERVAL_MS - Date.now());
+    announceTimerRef.current = window.setTimeout(() => {
+      announceTimerRef.current = null;
+      lastAnnouncedAtRef.current = Date.now();
+      setAnnounced(latestCandlesRef.current);
+    }, wait);
+  }, [safeCandles]);
+
+  useEffect(() => () => {
+    if (announceTimerRef.current !== null) window.clearTimeout(announceTimerRef.current);
+  }, []);
+
+  const recentCandles = announced.slice(-10);
   const latestClose = recentCandles[recentCandles.length - 1]?.close;
   const chartDescription = latestClose === undefined
     ? 'Price chart with no data available.'
-    : `Price chart with ${candles.length} bars. Latest close: ${latestClose}.`;
+    : `Price chart with ${announced.length} bars. Latest close: ${latestClose}.`;
 
   return (
     <div className="relative w-full h-full">

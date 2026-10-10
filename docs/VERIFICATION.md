@@ -11,7 +11,7 @@ This file reports evidence observed in the repository and this workspace session
 | Stale market data cannot open entries | PASS | `backend/src/services/paperTradingService.test.ts` — `rejects new positions when market data is stale`; planner/scheduler entry paths also test stale flags in `backend/src/autonomy/pipeline.ts` and `backend/src/routes/trader.ts`. |
 | Helmet and rate limiting are registered once; health and 429 behavior | PASS | `backend/src/server.ts` registers each plugin once. `backend/src/server.test.ts` — `builds and serves health with standard security headers` (200), `rate limits authenticated market requests using configured quota` (429). Route-level 429 behavior is also covered in `backend/src/routes/market.test.ts`. |
 | No production Binance provider calls or USDT market decisions | FAIL | No Binance implementation/provider call was found in current source, but `src/lib/markets.ts` still has a production legacy `USDT → USD` alias map. `src/lib/market-hardcode-guard.test.ts` passes, but explicitly excludes `markets.ts`; that test alone does not prove the requested no-USDT claim. |
-| Market availability is shown per symbol; unavailable symbols are hidden/rejected | PASS (implementation only) | `src/lib/markets.ts` filters `unavailable` symbols from selectors; `backend/src/trader/paperTradingService.ts` rejects unverified/unavailable markets. `AdminPanel` shows `available` / `unavailable` / `unverified`. |
+| Market availability is shown per symbol; unavailable symbols are hidden/rejected | PASS (implementation only) | `src/lib/markets.ts` filters `unavailable` symbols from selectors; `backend/src/services/paperTradingService.ts` rejects unverified/unavailable markets. `AdminPanel` shows `available` / `unavailable` / `unverified`. |
 | Which Massive markets were actually verified in this session | NOT-VERIFIED | No authenticated provider probe was run and no live provider key/result was available. **Verified by this session: none.** Prior rate-limit evidence exists for multiple candle endpoints; it is not proof of ticker availability. |
 | A plan cannot fill on its creation candle | PASS | `backend/src/trader/executor.test.ts` — `creates a pending order after a trigger and cannot fill it on that candle`; the new `rejects a pending fill when the current entry gate blocks it` test covers the later-fill gate. |
 | Position size is stop-risk based; equivalent uncapped risk across stop distances; equity is marked to market | PASS | `backend/src/trader/risk.test.ts` — `risks the same cash amount across narrow and wide stops when uncapped`, `includes unrealized losses in mark-to-market drawdown`. |
@@ -99,14 +99,24 @@ A PostgreSQL/Supabase RLS integration test was not run, so owner/admin/anon beha
 4. Open Trader Desk and confirm account, plans, and risk status load.
 5. Refresh plans; record the scan count and any per-symbol provider errors.
 6. Advance plans; confirm stale data or active event windows block entries and record the reason.
-7. Open Journal & daily review; inspect one closed-trade row and verify R, MAE, MFE, engine and dataset version fields (MAE/MFE currently fail the evidence check above).
+7. Open Journal & daily review; inspect one closed-trade row and verify R, MAE, MFE, engine and dataset version fields. MAE/MFE and version fields are covered by unit tests; the live row has not been inspected.
 8. Open Admin → Event Risk; create a short test blackout, confirm audit history, observe the active countdown/entry block, then cancel it.
 9. Sign out and verify the authentication screen returns.
+
+## Chart performance (Phases 1–2)
+
+- **Incremental candle updates:** PASS (unit). `src/lib/chart-feed.test.ts` verifies that live ticks use `update`, that `setData` runs only on replacement, and that identical data does nothing.
+- **Overlay diffing:** PASS (unit). Overlays are keyed and updated in place; only stale keys are removed; markers are re-set only when their content changes.
+- **Tick batching and throttled accessibility table:** PASS (code review only). Not measured in a browser.
+- **Server-Timing and timing helpers:** PASS (unit) for formatting. The candles route's header is not exercised by a route test because the provider mock shape is not set up for a success response.
+- **Frame and long-task measurement, React Profiler shell re-render check, zoom/scroll preservation:** NOT-VERIFIED (no browser access in this session).
+- **Numbers and budgets:** NOT-VERIFIED. See `docs/PERF_BASELINE.md`.
+- **Streaming, compression, pagination, IndexedDB, batched quotes, decision cache, Web Worker:** NOT STARTED (Phases 3–6).
 
 ## Phase E and CI
 
 - `npm run check:env` passes in this workspace: all 35 detected environment variable reads are listed and commented in `.env.example`.
 - CI workflow is present at `.github/workflows/ci.yml` and declares install, environment check, typechecks, lint, tests, build, and a non-blocking production dependency audit artifact. GitHub Actions has not run for this worktree (NOT-VERIFIED green CI).
-- Final local verification: `npm test` passed 149 tests in 30 files; frontend and backend typechecks passed; `npm run check:env` passed; lint exited successfully with three existing Fast Refresh warnings; production build passed with a chunk-size warning.
+- Final local verification (before chart work): `npm test` passed 150 tests in 31 files; after chart Phases 1–2, `npm test` passed 165 tests with 0 failures; frontend and backend typechecks passed; `npm run check:env` passed; lint exited successfully with three existing Fast Refresh warnings; production build passed with a chunk-size warning.
 - `npm audit --omit=dev --json` reported 0 info/low/moderate/high/critical vulnerabilities across 88 production dependencies. CI uploads the machine-readable report without failing the job for advisory findings.
 - `package.json` has no `api:dev` script and the current server is Fastify (`backend/src/server.ts`). Duplicate decision routes, parallel API clients, and legacy Supabase tables remain; cleanup is not complete. No migration was removed.

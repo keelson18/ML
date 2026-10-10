@@ -9,15 +9,17 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.57.4";
 import { readJsonSafe } from "../../../shared/http.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": Deno.env.get("CORS_ORIGIN") ?? "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
-  "Access-Control-Max-Age": "600",
-  "Vary": "Origin",
-  "X-Content-Type-Options": "nosniff",
-  "Referrer-Policy": "no-referrer",
-};
+function corsHeaders(origin: string | undefined): Record<string, string> {
+  return {
+    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
+    "Access-Control-Max-Age": "600",
+    "Vary": "Origin",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    ...(origin ? { "Access-Control-Allow-Origin": origin } : {}),
+  };
+}
 
 // ---- Config ----
 // SECURITY: ML_SERVICE_API_KEY must be explicitly configured in the environment
@@ -257,7 +259,13 @@ async function authenticatedUser(req: Request): Promise<string | null> {
 
 // ---- Main handler ----
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: corsHeaders });
+  const origin = Deno.env.get('CORS_ORIGIN') || undefined;
+  const headers = corsHeaders(origin);
+
+  if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers });
+  if (!origin) {
+    return jsonResponse({ error: 'Service misconfigured' }, 500, headers);
+  }
 
   try {
     const url = new URL(req.url);
@@ -280,7 +288,7 @@ Deno.serve(async (req: Request) => {
         timeframe: modelState?.timeframe ?? null,
         availableModels: [...modelStates.values()].map(({ pair: modelPair, timeframe: modelTimeframe, version }) => ({ pair: modelPair, timeframe: modelTimeframe, version })),
         horizon: PRED_HORIZON,
-      });
+      }, 200, headers);
     }
 
     const supabase = createClient(
@@ -292,23 +300,23 @@ Deno.serve(async (req: Request) => {
       const userId = await authenticatedUser(req);
       if (!userId) {
         console.warn(`[ml] unauthenticated prediction attempt from ${req.headers.get('x-forwarded-for') ?? 'unknown'}`);
-        return jsonResponse({ error: 'Authentication required' }, 401);
+        return jsonResponse({ error: 'Authentication required' }, 401, headers);
       }
       const { pair, timeframe } = await req.json() as { pair?: string; timeframe?: string };
       if (typeof pair !== 'string' || !/^[A-Z0-9]{2,20}$/.test(pair)
         || typeof timeframe !== 'string' || !['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d', '1w', '1M'].includes(timeframe)) {
-        return jsonResponse({ error: 'A valid pair and timeframe are required' }, 400);
+        return jsonResponse({ error: 'A valid pair and timeframe are required' }, 400, headers);
       }
       // Rate limit: 30 predicts/min.
       if (!(await checkRate(supabase, `predict-${userId}`, 30))) {
-        return jsonResponse({ error: 'Rate limit exceeded' }, 429);
+        return jsonResponse({ error: 'Rate limit exceeded' }, 429, headers);
       }
       const authHeader = req.headers.get('Authorization') ?? '';
       const token = authHeader.slice('Bearer '.length);
       const modelState = await ensureModel(supabase, pair, timeframe, token);
       const { candles, provider, quoteCurrency } = await fetchCandles(pair, timeframe, 1000, token);
       const { features, valid } = computeFeatures(candles);
-      if (!valid || features.length === 0) return jsonResponse({ error: 'Insufficient data' }, 422);
+      if (!valid || features.length === 0) return jsonResponse({ error: 'Insufficient data' }, 422, headers);
       const last = features[features.length - 1];
       const probUp = predictProba(modelState, last);
       const prediction = probUp > 0.55 ? 'up' : probUp < 0.45 ? 'down' : 'flat';
@@ -332,45 +340,45 @@ Deno.serve(async (req: Request) => {
         expected_move_pct: expectedMovePct, model_version: modelState.version, confidence,
         payload: out,
       }, { onConflict: 'symbol,timeframe' });
-      return jsonResponse(out);
+      return jsonResponse(out, 200, headers);
     }
 
     if (path === 'retrain' && req.method === 'POST') {
       if (!authorized(req)) {
-        return jsonResponse({ error: 'Unauthorized' }, 401);
+        return jsonResponse({ error: 'Unauthorized' }, 401, headers);
       }
-      if (!(await checkRate(supabase, 'retrain', 2))) return jsonResponse({ error: 'Rate limit exceeded' }, 429);
+      if (!(await checkRate(supabase, 'retrain', 2))) return jsonResponse({ error: 'Rate limit exceeded' }, 429, headers);
       const requestBody = await req.json().catch(() => ({})) as { pair?: unknown; timeframe?: unknown };
       const pair = requestBody.pair ?? Deno.env.get('DEFAULT_SYMBOL')?.trim();
       const timeframe = requestBody.timeframe ?? '1h';
       if (typeof pair !== 'string' || pair.length === 0) {
-        return jsonResponse({ error: 'Default market is not configured.' }, 503);
+        return jsonResponse({ error: 'Default market is not configured.' }, 503, headers);
       }
       if (typeof pair !== 'string' || !/^[A-Z0-9]{2,20}$/.test(pair)
         || typeof timeframe !== 'string' || !['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d', '1w', '1M'].includes(timeframe)) {
-        return jsonResponse({ error: 'A valid pair and timeframe are required' }, 400);
+        return jsonResponse({ error: 'A valid pair and timeframe are required' }, 400, headers);
       }
       const authHeader = req.headers.get('Authorization') ?? '';
       const token = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : undefined;
       const result = await retrainInternal(supabase, pair, timeframe, token);
-      return jsonResponse(result);
+      return jsonResponse(result, 200, headers);
     }
 
-    return jsonResponse({ error: 'Not found' }, 404);
+    return jsonResponse({ error: 'Not found' }, 404, headers);
   } catch (err) {
     if (err instanceof Error && err.message === 'Market data service is not configured.') {
       console.error('[ml] market data backend URL is not configured');
-      return jsonResponse({ error: 'Market data service not configured.' }, 503);
+      return jsonResponse({ error: 'Market data service not configured.' }, 503, headers);
     }
     console.error('[ml]', err);
-    return jsonResponse({ error: 'Internal error' }, 500);
+    return jsonResponse({ error: 'Internal error' }, 500, headers);
   }
 });
 
-function jsonResponse(body: unknown, status = 200) {
+function jsonResponse(body: unknown, status = 200, headersOverride?: Record<string, string>) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    headers: { ...(headersOverride ?? corsHeaders(Deno.env.get('CORS_ORIGIN') || undefined)), 'Content-Type': 'application/json' },
   });
 }
 

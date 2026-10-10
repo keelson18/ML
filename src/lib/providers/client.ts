@@ -8,6 +8,11 @@ const POLL_INTERVALS: Record<MarketDataProvider, number> = {
   twelvedata: 30_000,
 };
 
+export function shouldEmitLatestCandle(lastSeenTime: number | undefined, latestTime: number | undefined): boolean {
+  if (latestTime === undefined) return false;
+  return lastSeenTime === undefined || latestTime > lastSeenTime;
+}
+
 export function createDataProvider(provider: MarketDataProvider | null): DataProvider {
   return {
     name: provider ?? 'unconfigured',
@@ -38,7 +43,7 @@ export function createDataProvider(provider: MarketDataProvider | null): DataPro
           if (!latest) throw new Error(`No market data returned for ${symbol}.`);
           // Close the last observed candle and any missed candles before emitting the forming latest candle.
           for (const candle of getNewlyClosedCandles(candles, lastSeenTime)) onCandle(candle, true);
-          onCandle(latest, false);
+          if (shouldEmitLatestCandle(lastSeenTime, latest.time)) onCandle(latest, false);
           lastSeenTime = latest.time;
           onStatus?.('open', `${provider ?? 'market'} data via backend polling`);
         } catch (error) {

@@ -12,6 +12,8 @@ import { runAllStrategies } from '../lib/strategies/index';
 import { combineSignals } from '../lib/backtest';
 import { fetchMLPrediction, fetchCachedMLPrediction } from '../lib/mlClient';
 import AdminPanel from './AdminPanel';
+import { isPerfOverlayEnabled, measureAsync } from '../lib/perf';
+import PerfOverlay from './PerfOverlay';
 import AdminRoute from './AdminRoute';
 import CMSManager from './CMS/CMSManager';
 import CMSViewer from './CMS/CMSViewer';
@@ -65,6 +67,7 @@ export default function Dashboard() {
   const candleCacheRef = useRef(new Map<string, Candle[]>());
 
   const isAdmin = profile?.role === 'admin';
+  const perfOverlayEnabled = isPerfOverlayEnabled(window.location.search, isAdmin, import.meta.env.DEV);
   const navigateToTab = (tab: SidebarTab, replace = false) => {
     const nextTab = tab === 'admin' && !isAdmin ? 'dashboard' : tab;
     const path = pathForSidebarTab(nextTab);
@@ -125,7 +128,7 @@ export default function Dashboard() {
 
     (async () => {
       try {
-        const data = await dataProvider.fetchKlines(symbol, timeframe, 1000);
+        const data = await measureAsync('candles.fetch', () => dataProvider.fetchKlines(symbol, timeframe, 1000));
         if (disposed) return;
         const merged = [...new Map([...data, ...candlesRef.current].map((candle) => [candle.time, candle])).values()].sort((a, b) => a.time - b.time);
         candlesRef.current = merged;
@@ -142,6 +145,24 @@ export default function Dashboard() {
       }
     })();
 
+    let frame: number | null = null;
+    let closedTime: number | null = null;
+    let latestPrice: number | null = null;
+    const flush = () => {
+      frame = null;
+      const arr = candlesRef.current;
+      setCandles(arr);
+      setDataError(null);
+      if (closedTime !== null) {
+        const time = closedTime;
+        closedTime = null;
+        setDecisionCandles((previous) => {
+          if (previous.at(-1) && previous[previous.length - 1].time > time) return previous;
+          return arr.filter((item) => item.time <= time);
+        });
+      }
+      if (latestPrice !== null) setLivePrice(latestPrice);
+    };
     const unsub = dataProvider.subscribeKlines(symbol, timeframe, (candle, closed) => {
       const arr = [...candlesRef.current];
       const last = arr[arr.length - 1];
@@ -150,18 +171,16 @@ export default function Dashboard() {
       if (arr.length > 1500) arr.shift();
       candlesRef.current = arr;
       candleCacheRef.current.set(`${symbol}:${timeframe}`, arr);
-      setCandles(arr);
-      setDataError(null);
-      if (closed) {
-        setDecisionCandles((previous) => {
-          if (previous.at(-1) && previous[previous.length - 1].time > candle.time) return previous;
-          return arr.filter((item) => item.time <= candle.time);
-        });
-      }
-      setLivePrice(candle.close);
+      latestPrice = candle.close;
+      if (closed) closedTime = candle.time;
+      if (frame === null) frame = window.requestAnimationFrame(flush);
     }, (status) => setWsStatus(status));
 
-    return () => { disposed = true; unsub(); };
+    return () => {
+      disposed = true;
+      unsub();
+      if (frame !== null) window.cancelAnimationFrame(frame);
+    };
   }, [dataProvider, symbol, timeframe, reloadKey]);
 
   useEffect(() => {
@@ -408,6 +427,7 @@ export default function Dashboard() {
 
         <main className="flex-1 overflow-y-auto">
           {renderContent()}
+          {perfOverlayEnabled && <PerfOverlay candleCount={candles.length} />}
         </main>
       </div>
     </div>

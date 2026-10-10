@@ -1,126 +1,69 @@
-// Quantum Intelligence — Kinetic Coach edge function.
-// Proxies Google Gemini for a trading-coaching chat. Keeps the API key server-side only.
-// Requests require an authenticated Supabase user.
-// Rate limiting: per-IP in-memory sliding window (60 req/min/IP). Resets on function cold start.
+// Kinetic Coach edge function. Proxies Gemini for an authenticated user's coaching chat.
+// The Gemini key is sent in a request header and never logged or returned.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "npm:@supabase/supabase-js@2.57.4";
-import { readJsonSafe } from "../../../shared/http.ts";
+import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.57.4";
+import { createCoachHandler } from "./coach.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": Deno.env.get("CORS_ORIGIN") ?? "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
-  "Access-Control-Max-Age": "600",
-  "Vary": "Origin",
-  "X-Content-Type-Options": "nosniff",
-  "Referrer-Policy": "no-referrer",
-};
+const COACH_REQUESTS_PER_MINUTE = 10;
+const DEFAULT_DAILY_TOKEN_CAP = 20000;
 
-const GEMINI_KEY = Deno.env.get("GEMINI_API_KEY") ?? "";
-const GEMINI_MODEL = "gemini-1.5-flash";
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_KEY}`;
+const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const dailyTokenCap = Number(Deno.env.get("COACH_DAILY_TOKEN_CAP")) || DEFAULT_DAILY_TOKEN_CAP;
+const backendUrl = Deno.env.get("BACKEND_URL") || undefined;
+const RECORDS_TIMEOUT_MS = 5000;
 
-// In-memory per-IP rate limiter: sliding window of 60 requests per minute per client IP.
-// Resets on cold start — not a substitute for a persistent rate_limit table in production.
-const RATE_LIMIT_WINDOW_MS = 60_000;
-const RATE_LIMIT_MAX = 60;
-const ipBuckets = new Map<string, number[]>();
-
-function checkRateLimit(ip: string): boolean {
-  const now = Date.now();
-  const cutoff = now - RATE_LIMIT_WINDOW_MS;
-  let timestamps = ipBuckets.get(ip);
-  if (!timestamps) {
-    timestamps = [];
-    ipBuckets.set(ip, timestamps);
-  }
-  // Prune expired entries
-  const active = timestamps.filter((t) => t > cutoff);
-  if (active.length >= RATE_LIMIT_MAX) {
-    ipBuckets.set(ip, active);
-    return false; // rate-limited
-  }
-  active.push(now);
-  ipBuckets.set(ip, active);
-  return true;
+let service: SupabaseClient | null = null;
+function serviceClient(): SupabaseClient {
+  service ??= createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+  return service;
 }
 
-async function authenticatedUser(req: Request): Promise<boolean> {
-  const authorization = req.headers.get('Authorization');
-  if (!authorization?.startsWith('Bearer ')) return false;
-
-  const supabase = createClient(
-    Deno.env.get('SUPABASE_URL') ?? '',
-    Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-    { global: { headers: { Authorization: authorization } } },
-  );
-  const { data: { user }, error } = await supabase.auth.getUser();
-  return !error && user !== null;
-}
-
-const SYSTEM_PROMPT = `You are Kinetic Coach, an AI trading coach integrated into the Quantum Intelligence platform.
-You help users understand crypto trading concepts, interpret technical analysis signals (RSI, MACD, Bollinger Bands, Fibonacci, chart patterns), manage risk, and build disciplined trading psychology.
-Be concise, practical, and educational. Never give guaranteed-profit advice. Always remind users that trading carries risk.
-When users ask about specific signals they're seeing, explain what the indicator measures and how to interpret it.`;
-
-Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: corsHeaders });
-
-  try {
-    if (!(await authenticatedUser(req))) {
-      return jsonResponse({ error: "Authentication required" }, 401);
-    }
-
-    // Rate limit by client IP
-    const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
-      ?? req.headers.get("x-real-ip")
-      ?? "unknown";
-    if (!checkRateLimit(clientIp)) {
-      return jsonResponse({ error: "Too many requests. Please wait before sending another message." }, 429);
-    }
-
-    const { messages } = await req.json();
-    if (!Array.isArray(messages) || messages.length === 0) {
-      return jsonResponse({ error: "messages array required" }, 400);
-    }
-    if (!GEMINI_KEY) {
-      return jsonResponse({ error: "Gemini API key not configured" }, 503);
-    }
-
-    // Convert chat history to Gemini contents format, prepending the system prompt as the first user turn.
-    const contents = [
-      { role: "user", parts: [{ text: SYSTEM_PROMPT }] },
-      { role: "model", parts: [{ text: "Understood. I'm Kinetic Coach — ready to help you trade smarter." }] },
-      ...messages.map((m: { role: string; content: string }) => ({
-        role: m.role === "user" ? "user" : "model",
-        parts: [{ text: m.content }],
-      })),
-    ];
-
-    const res = await fetch(GEMINI_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contents, generationConfig: { temperature: 0.7, maxOutputTokens: 1024 } }),
+Deno.serve(createCoachHandler({
+  corsOrigin: Deno.env.get("CORS_ORIGIN") || undefined,
+  geminiKey: Deno.env.get("GEMINI_API_KEY") || undefined,
+  geminiModel: Deno.env.get("GEMINI_MODEL") || undefined,
+  authenticate: async (req) => {
+    const authorization = req.headers.get("Authorization");
+    if (!authorization?.startsWith("Bearer ")) return null;
+    const supabase = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authorization } },
     });
-
-    const { payload } = await readJsonSafe<{ candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> }>(res);
-    if (!res.ok) {
-      console.error("[kinetic-coach] Gemini request failed:", res.status);
-      return jsonResponse({ error: "Gemini request failed" }, 502);
+    const { data: { user }, error } = await supabase.auth.getUser();
+    if (error || !user) return null;
+    return { userId: user.id, accessToken: authorization.slice("Bearer ".length) };
+  },
+  consumeRequestSlot: async (userId) => {
+    const { data, error } = await serviceClient().rpc("consume_ml_rate_limit", {
+      p_key: `coach:${userId}`,
+      p_max_requests: COACH_REQUESTS_PER_MINUTE,
+    });
+    if (error) throw new Error(`rate limit check failed: ${error.code}`);
+    return data === true;
+  },
+  consumeTokens: async (userId, tokens) => {
+    const { data, error } = await serviceClient().rpc("consume_coach_budget", {
+      p_user_id: userId,
+      p_tokens: tokens,
+      p_daily_cap: dailyTokenCap,
+    });
+    if (error) throw new Error(`budget check failed: ${error.code}`);
+    return data === true;
+  },
+  fetchRecords: async (accessToken) => {
+    if (!backendUrl) return null;
+    try {
+      const res = await fetch(`${backendUrl}/api/v1/coach/context`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        signal: AbortSignal.timeout(RECORDS_TIMEOUT_MS),
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
     }
-    if (payload === null) throw new Error('Gemini returned an empty or invalid response.');
-    const text = payload.candidates?.[0]?.content?.parts?.[0]?.text ?? "No response generated.";
-    return jsonResponse({ reply: text });
-  } catch (err) {
-    console.error("[kinetic-coach]", err);
-    return jsonResponse({ error: "Internal error" }, 500);
-  }
-});
-
-function jsonResponse(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
-}
+  },
+  fetchImpl: fetch,
+}));

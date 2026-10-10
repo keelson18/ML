@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Candle } from '../types';
+import { shouldEmitLatestCandle } from './client';
 import { getNewlyClosedCandles } from './polling';
 
 // Keeps fixtures small while making candle timestamps explicit.
@@ -24,5 +25,13 @@ describe('getNewlyClosedCandles', () => {
 
   it('does not close anything when the latest candle has not advanced', () => {
     expect(getNewlyClosedCandles([candle(100), candle(200)], 200)).toEqual([]);
+  });
+});
+
+describe('shouldEmitLatestCandle', () => {
+  it('emits the latest candle only when a new bar arrived', () => {
+    expect(shouldEmitLatestCandle(undefined, 100)).toBe(true);
+    expect(shouldEmitLatestCandle(100, 200)).toBe(true);
+    expect(shouldEmitLatestCandle(200, 200)).toBe(false);
   });
 });

@@ -1,15 +1,21 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey, X-Correlation-Id",
-};
+function corsHeaders(origin: string | undefined): Record<string, string> {
+  return {
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey, X-Correlation-Id",
+    "Access-Control-Max-Age": "600",
+    "Vary": "Origin",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    ...(origin ? { "Access-Control-Allow-Origin": origin } : {}),
+  };
+}
 
-function response(body: unknown, status = 200): Response {
+function response(body: unknown, status = 200, headers?: Record<string, string>): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { ...(headers ?? {}), "Content-Type": "application/json" },
   });
 }
 
@@ -107,20 +113,26 @@ function analyzeDecision(req: DecisionRequest) {
 }
 
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
-  if (req.method !== "POST") return response({ error: "Method not allowed" }, 405);
+  const origin = Deno.env.get("CORS_ORIGIN") || undefined;
+  const headers = corsHeaders(origin);
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers });
+  if (req.method !== "POST") return response({ error: "Method not allowed" }, 405, headers);
+
+  if (!origin) {
+    return response({ error: "Service misconfigured" }, 500, headers);
+  }
 
   try {
     const payload: unknown = await req.json();
-    if (!payload || typeof payload !== "object") return response({ error: "Invalid request" }, 400);
+    if (!payload || typeof payload !== "object") return response({ error: "Invalid request" }, 400, headers);
     const reqData = payload as DecisionRequest;
     if (!reqData.symbol || !reqData.timeframe || !Array.isArray(reqData.candles) || reqData.candles.length < 30) {
-      return response({ error: "Need symbol, timeframe, and at least 30 candles" }, 400);
+      return response({ error: "Need symbol, timeframe, and at least 30 candles" }, 400, headers);
     }
 
     const decision = analyzeDecision(reqData);
-    return response({ decision });
+    return response({ decision }, 200, headers);
   } catch {
-    return response({ error: "Analysis failed" }, 500);
+    return response({ error: "Analysis failed" }, 500, headers);
   }
 });

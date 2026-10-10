@@ -3,12 +3,14 @@ import { getMarket } from '../../../src/lib/markets';
 import { config } from '../config';
 import { fetchMarketData, isTimeframe, MarketDataProviderError } from '../services/marketDataService';
 import { getMarketAvailability } from '../services/marketAvailability';
+import { formatServerTiming } from '../utils/server-timing';
 
 export async function marketRoutes(app: FastifyInstance) {
   app.get<{ Params: { symbol: string }; Querystring: { timeframe?: string; limit?: string } }>('/api/v1/market/candles/:symbol', {
     preHandler: app.requireAuth,
     config: { rateLimit: { max: config.marketRateLimitMax, timeWindow: config.rateLimitWindowMs } },
   }, async (request, reply) => {
+    const started = performance.now();
     const { symbol } = request.params;
     const timeframe = request.query.timeframe ?? '15m';
     const limit = request.query.limit === undefined ? 500 : Number(request.query.limit);
@@ -23,8 +25,14 @@ export async function marketRoutes(app: FastifyInstance) {
     }
 
     try {
+      const providerStarted = performance.now();
       const series = await fetchMarketData(symbol, timeframe, limit);
-      return { symbol, timeframe, candles: series.candles, identity: series.identity, dataset: series.dataset, fetchedAt: series.fetchedAt, stale: series.stale };
+      const providerMs = performance.now() - providerStarted;
+      const body = JSON.stringify({ symbol, timeframe, candles: series.candles, identity: series.identity, dataset: series.dataset, fetchedAt: series.fetchedAt, stale: series.stale });
+      const totalMs = performance.now() - started;
+      reply.header('Server-Timing', formatServerTiming([{ name: 'provider', durationMs: providerMs }, { name: 'total', durationMs: totalMs }]));
+      request.log.info({ route: 'candles', symbol, timeframe, limit, candles: series.candles.length, providerMs: Math.round(providerMs), totalMs: Math.round(totalMs), bytes: Buffer.byteLength(body) }, 'market candles served');
+      return reply.type('application/json').send(body);
     } catch (error) {
       if (error instanceof MarketDataProviderError && error.status === 429) {
         if (error.retryAfter) reply.header('Retry-After', error.retryAfter);
