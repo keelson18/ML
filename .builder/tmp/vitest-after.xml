@@ -1,0 +1,553 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="217" failures="0" errors="0" time="6.4133858">
+    <testsuite name="backend/src/autonomy/candle-clock.test.ts" timestamp="2026-10-10T20:43:53.215Z" hostname="KEELSON" tests="3" failures="0" errors="0" skipped="0" time="0.0059234">
+        <testcase classname="backend/src/autonomy/candle-clock.test.ts" name="UTC candle clock &gt; computes the next aligned boundary and catches the current close grace window" time="0.0024067">
+        </testcase>
+        <testcase classname="backend/src/autonomy/candle-clock.test.ts" name="UTC candle clock &gt; rejects an incomplete candle until its close grace has elapsed" time="0.0013138">
+        </testcase>
+        <testcase classname="backend/src/autonomy/candle-clock.test.ts" name="UTC candle clock &gt; aligns weekly boundaries to UTC Monday and handles variable month lengths" time="0.0003265">
+        </testcase>
+    </testsuite>
+    <testsuite name="backend/src/coach/context.test.ts" timestamp="2026-10-10T20:43:53.218Z" hostname="KEELSON" tests="5" failures="0" errors="0" skipped="0" time="0.0102077">
+        <testcase classname="backend/src/coach/context.test.ts" name="buildCoachRecords &gt; caps plans and trades and returns the newest first" time="0.0049185">
+        </testcase>
+        <testcase classname="backend/src/coach/context.test.ts" name="buildCoachRecords &gt; omits internal fields such as context snapshots and engine versions" time="0.0005922">
+        </testcase>
+        <testcase classname="backend/src/coach/context.test.ts" name="buildCoachRecords &gt; reads the R-multiple from the journal entry for each trade" time="0.0014803">
+        </testcase>
+        <testcase classname="backend/src/coach/context.test.ts" name="buildCoachRecords &gt; uses null for R-multiple and plan when the journal is missing" time="0.0003414">
+        </testcase>
+        <testcase classname="backend/src/coach/context.test.ts" name="buildCoachRecords &gt; lists only open positions and counts wins and losses across all closed trades" time="0.0007195">
+        </testcase>
+    </testsuite>
+    <testsuite name="backend/src/config.live-feed.test.ts" timestamp="2026-10-10T20:43:53.220Z" hostname="KEELSON" tests="5" failures="0" errors="0" skipped="0" time="0.0128883">
+        <testcase classname="backend/src/config.live-feed.test.ts" name="live feed configuration &gt; defaults to disabled streaming with the owner-proposed Twelve Data symbols" time="0.003266">
+        </testcase>
+        <testcase classname="backend/src/config.live-feed.test.ts" name="live feed configuration &gt; accepts overrides and de-duplicates symbols" time="0.0013127">
+        </testcase>
+        <testcase classname="backend/src/config.live-feed.test.ts" name="live feed configuration &gt; rejects a Twelve Data symbol list above the configured cap" time="0.0019453">
+        </testcase>
+        <testcase classname="backend/src/config.live-feed.test.ts" name="live feed configuration &gt; rejects symbols that Twelve Data cannot stream" time="0.0009088">
+        </testcase>
+        <testcase classname="backend/src/config.live-feed.test.ts" name="live feed configuration &gt; rejects malformed flags and numeric limits" time="0.0022517">
+        </testcase>
+    </testsuite>
+    <testsuite name="backend/src/domain/LiveSymbolMap.test.ts" timestamp="2026-10-10T20:43:53.221Z" hostname="KEELSON" tests="5" failures="0" errors="0" skipped="0" time="0.0061055">
+        <testcase classname="backend/src/domain/LiveSymbolMap.test.ts" name="live symbol mapping &gt; maps USD crypto to Coinbase product ids and back" time="0.0024514">
+        </testcase>
+        <testcase classname="backend/src/domain/LiveSymbolMap.test.ts" name="live symbol mapping &gt; maps forex and commodities to Twelve Data slash formats" time="0.0004221">
+        </testcase>
+        <testcase classname="backend/src/domain/LiveSymbolMap.test.ts" name="live symbol mapping &gt; maps stocks to their plain ticker on Twelve Data" time="0.0004443">
+        </testcase>
+        <testcase classname="backend/src/domain/LiveSymbolMap.test.ts" name="live symbol mapping &gt; never maps a symbol to the wrong provider" time="0.0003068">
+        </testcase>
+        <testcase classname="backend/src/domain/LiveSymbolMap.test.ts" name="live symbol mapping &gt; leaves unmapped, index, legacy and unknown symbols unmapped" time="0.0002845">
+        </testcase>
+    </testsuite>
+    <testsuite name="backend/src/engines/market-structure-engine.test.ts" timestamp="2026-10-10T20:43:53.223Z" hostname="KEELSON" tests="27" failures="0" errors="0" skipped="0" time="0.0503184">
+        <testcase classname="backend/src/engines/market-structure-engine.test.ts" name="marketStructureEngine &gt; degrades safely when the context is too short" time="0.0042989">
+        </testcase>
+        <testcase classname="backend/src/engines/market-structure-engine.test.ts" name="marketStructureEngine &gt; returns versioned, traceable analysis metadata" time="0.0016409">
+        </testcase>
+        <testcase classname="backend/src/engines/market-structure-engine.test.ts" name="marketStructureEngine &gt; wraps strategy selection and signals in the shared result contract" time="0.0066172">
+        </testcase>
+        <testcase classname="backend/src/engines/market-structure-engine.test.ts" name="marketStructureEngine &gt; aggregates independent market intelligence engines without making a decision" time="0.0047522">
+        </testcase>
+        <testcase classname="backend/src/engines/market-structure-engine.test.ts" name="marketStructureEngine &gt; rejects a proposal that breaches a hard risk limit" time="0.0011873">
+        </testcase>
+        <testcase classname="backend/src/engines/market-structure-engine.test.ts" name="marketStructureEngine &gt; enforces the configured leverage limit" time="0.0003607">
+        </testcase>
+        <testcase classname="backend/src/engines/market-structure-engine.test.ts" name="marketStructureEngine &gt; rejects a proposal that would exceed portfolio exposure" time="0.0008463">
+        </testcase>
+        <testcase classname="backend/src/engines/market-structure-engine.test.ts" name="marketStructureEngine &gt; produces NO_TRADE when the independent risk gate rejects the proposal" time="0.0039384">
+        </testcase>
+        <testcase classname="backend/src/engines/market-structure-engine.test.ts" name="marketStructureEngine &gt; explains the decision from persisted evidence without inventing invalidation data" time="0.0062628">
+        </testcase>
+        <testcase classname="backend/src/engines/market-structure-engine.test.ts" name="marketStructureEngine &gt; simulates an approved paper order and closes it with fees and P&amp;L" time="0.0017836">
+        </testcase>
+        <testcase classname="backend/src/engines/market-structure-engine.test.ts" name="marketStructureEngine &gt; rejects paper execution when a hard gate is not approved" time="0.0003066">
+        </testcase>
+        <testcase classname="backend/src/engines/market-structure-engine.test.ts" name="marketStructureEngine &gt; reviews a completed paper trade from recorded outcome and execution evidence" time="0.0006246">
+        </testcase>
+        <testcase classname="backend/src/engines/market-structure-engine.test.ts" name="marketStructureEngine &gt; fails data quality when candle structure is invalid" time="0.0005331">
+        </testcase>
+        <testcase classname="backend/src/engines/market-structure-engine.test.ts" name="marketStructureEngine &gt; degrades stale data and derives a versioned market context" time="0.0008329">
+        </testcase>
+        <testcase classname="backend/src/engines/market-structure-engine.test.ts" name="marketStructureEngine &gt; blocks decisions when the market data quality engine detects invalid candles" time="0.0031387">
+        </testcase>
+        <testcase classname="backend/src/engines/market-structure-engine.test.ts" name="marketStructureEngine &gt; separates calculated liquidity zones from inferred sweep candidates" time="0.0005127">
+        </testcase>
+        <testcase classname="backend/src/engines/market-structure-engine.test.ts" name="marketStructureEngine &gt; classifies a regime from the versioned market context" time="0.0004872">
+        </testcase>
+        <testcase classname="backend/src/engines/market-structure-engine.test.ts" name="marketStructureEngine &gt; scores detected patterns as contextual evidence" time="0.0006629">
+        </testcase>
+        <testcase classname="backend/src/engines/market-structure-engine.test.ts" name="marketStructureEngine &gt; returns finite latest indicator measurements when enough candles exist" time="0.0005565">
+        </testcase>
+        <testcase classname="backend/src/engines/market-structure-engine.test.ts" name="marketStructureEngine &gt; returns only sufficiently similar historical cases with sample quality" time="0.0008769">
+        </testcase>
+        <testcase classname="backend/src/engines/market-structure-engine.test.ts" name="marketStructureEngine &gt; retrieves only validated or approved knowledge by matching tags" time="0.0007056">
+        </testcase>
+        <testcase classname="backend/src/engines/market-structure-engine.test.ts" name="marketStructureEngine &gt; downgrades ML evidence when model lineage is incomplete" time="0.0006055">
+        </testcase>
+        <testcase classname="backend/src/engines/market-structure-engine.test.ts" name="marketStructureEngine &gt; marks an ML model calibrated only when a matching measurement exists" time="0.0003554">
+        </testcase>
+        <testcase classname="backend/src/engines/market-structure-engine.test.ts" name="marketStructureEngine &gt; keeps structured AI reasoning explicitly non-authoritative" time="0.0021883">
+        </testcase>
+        <testcase classname="backend/src/engines/market-structure-engine.test.ts" name="marketStructureEngine &gt; records optional ML, history, and knowledge evidence without bypassing risk" time="0.0026456">
+        </testcase>
+        <testcase classname="backend/src/engines/market-structure-engine.test.ts" name="marketStructureEngine &gt; keeps learning controlled until validation and approval are complete" time="0.0003621">
+        </testcase>
+        <testcase classname="backend/src/engines/market-structure-engine.test.ts" name="marketStructureEngine &gt; accepts a chronological research design with explicit costs and OOS boundaries" time="0.000559">
+        </testcase>
+    </testsuite>
+    <testsuite name="backend/src/engines/news-isolation.test.ts" timestamp="2026-10-10T20:43:53.231Z" hostname="KEELSON" tests="1" failures="0" errors="0" skipped="0" time="0.004541">
+        <testcase classname="backend/src/engines/news-isolation.test.ts" name="decision news isolation &gt; does not include news or sentiment inputs in BUY/SELL decision analysis" time="0.0026206">
+        </testcase>
+    </testsuite>
+    <testsuite name="backend/src/live/feed-router.test.ts" timestamp="2026-10-10T20:43:53.232Z" hostname="KEELSON" tests="4" failures="0" errors="0" skipped="0" time="0.0069865">
+        <testcase classname="backend/src/live/feed-router.test.ts" name="feed router &gt; routes each symbol to the first connected feed that supports it" time="0.0030967">
+        </testcase>
+        <testcase classname="backend/src/live/feed-router.test.ts" name="feed router &gt; falls back to polling for symbols no feed supports" time="0.0003317">
+        </testcase>
+        <testcase classname="backend/src/live/feed-router.test.ts" name="feed router &gt; reports polling with feed status when the supporting feed is unhealthy" time="0.0003153">
+        </testcase>
+        <testcase classname="backend/src/live/feed-router.test.ts" name="feed router &gt; fails over to a healthy later feed and recovers when the first feed returns" time="0.0009283">
+        </testcase>
+    </testsuite>
+    <testsuite name="backend/src/live/import-boundary.test.ts" timestamp="2026-10-10T20:43:53.233Z" hostname="KEELSON" tests="1" failures="0" errors="0" skipped="0" time="2.2592371">
+        <testcase classname="backend/src/live/import-boundary.test.ts" name="decision code import boundary &gt; keeps trader and engines free of live/** modules in their transitive import graph" time="2.2347741">
+        </testcase>
+    </testsuite>
+    <testsuite name="backend/src/middleware/fastify-auth.test.ts" timestamp="2026-10-10T20:43:53.234Z" hostname="KEELSON" tests="4" failures="0" errors="0" skipped="0" time="0.4970971">
+        <testcase classname="backend/src/middleware/fastify-auth.test.ts" name="admin authentication assurance &gt; authenticates before checking administrator role" time="0.4642344">
+        </testcase>
+        <testcase classname="backend/src/middleware/fastify-auth.test.ts" name="admin authentication assurance &gt; requires aal2 for an admin with a verified TOTP factor" time="0.0099406">
+        </testcase>
+        <testcase classname="backend/src/middleware/fastify-auth.test.ts" name="admin authentication assurance &gt; enforces aal2 when REQUIRE_ADMIN_MFA is enabled" time="0.0060821">
+        </testcase>
+        <testcase classname="backend/src/middleware/fastify-auth.test.ts" name="admin authentication assurance &gt; allows an admin with aal2 and denies non-admins" time="0.0143876">
+        </testcase>
+    </testsuite>
+    <testsuite name="backend/src/news/providers.test.ts" timestamp="2026-10-10T20:43:53.235Z" hostname="KEELSON" tests="4" failures="0" errors="0" skipped="0" time="0.0140589">
+        <testcase classname="backend/src/news/providers.test.ts" name="news provider boundaries &gt; reports providers as unverified when none are configured" time="0.0083417">
+        </testcase>
+        <testcase classname="backend/src/news/providers.test.ts" name="news provider boundaries &gt; sanitizes provider text into bounded plain text" time="0.0006001">
+        </testcase>
+        <testcase classname="backend/src/news/providers.test.ts" name="news provider boundaries &gt; tags only active symbols from the market registry" time="0.0011696">
+        </testcase>
+        <testcase classname="backend/src/news/providers.test.ts" name="news provider boundaries &gt; excludes news ingested after the replay candle close" time="0.0005644">
+        </testcase>
+    </testsuite>
+    <testsuite name="backend/src/routes/decisions.test.ts" timestamp="2026-10-10T20:43:53.236Z" hostname="KEELSON" tests="5" failures="0" errors="0" skipped="0" time="0.5337879">
+        <testcase classname="backend/src/routes/decisions.test.ts" name="server-side decision analysis &gt; rejects candles sent from the browser" time="0.4798186">
+        </testcase>
+        <testcase classname="backend/src/routes/decisions.test.ts" name="server-side decision analysis &gt; rejects unknown symbols before fetching" time="0.0124155">
+        </testcase>
+        <testcase classname="backend/src/routes/decisions.test.ts" name="server-side decision analysis &gt; serves repeats for the same closed bar from cache without re-analysing" time="0.010413">
+        </testcase>
+        <testcase classname="backend/src/routes/decisions.test.ts" name="server-side decision analysis &gt; charges the quota only for uncached analyses" time="0.0192496">
+        </testcase>
+        <testcase classname="backend/src/routes/decisions.test.ts" name="server-side decision analysis &gt; keeps cache entries separate per user" time="0.0092279">
+        </testcase>
+    </testsuite>
+    <testsuite name="backend/src/routes/market.test.ts" timestamp="2026-10-10T20:43:53.238Z" hostname="KEELSON" tests="4" failures="0" errors="0" skipped="0" time="0.5752046">
+        <testcase classname="backend/src/routes/market.test.ts" name="market candle route &gt; requires authentication" time="0.4728729">
+        </testcase>
+        <testcase classname="backend/src/routes/market.test.ts" name="market candle route &gt; rejects unknown symbols and invalid limits before fetching" time="0.0154701">
+        </testcase>
+        <testcase classname="backend/src/routes/market.test.ts" name="market candle route &gt; rate limits requests by authenticated user with a generic response" time="0.0373497">
+        </testcase>
+        <testcase classname="backend/src/routes/market.test.ts" name="market candle route &gt; returns a generic error when the upstream provider fails" time="0.0466578">
+        </testcase>
+    </testsuite>
+    <testsuite name="backend/src/routes/paper.test.ts" timestamp="2026-10-10T20:43:53.239Z" hostname="KEELSON" tests="2" failures="0" errors="0" skipped="0" time="0.5559666">
+        <testcase classname="backend/src/routes/paper.test.ts" name="paper trade route &gt; rejects immediate execution and requires the plan trigger workflow" time="0.5450515">
+        </testcase>
+        <testcase classname="backend/src/routes/paper.test.ts" name="paper trade route &gt; validates market and timeframe before refusing the legacy order path" time="0.0082314">
+        </testcase>
+    </testsuite>
+    <testsuite name="backend/src/server.test.ts" timestamp="2026-10-10T20:43:53.240Z" hostname="KEELSON" tests="5" failures="0" errors="0" skipped="0" time="0.8056121">
+        <testcase classname="backend/src/server.test.ts" name="Fastify security headers &gt; builds and serves health with standard security headers" time="0.5983471">
+        </testcase>
+        <testcase classname="backend/src/server.test.ts" name="Fastify security headers &gt; enables HSTS in production" time="0.0218061">
+        </testcase>
+        <testcase classname="backend/src/server.test.ts" name="Fastify security headers &gt; rate limits authenticated market requests using configured quota" time="0.0657366">
+        </testcase>
+        <testcase classname="backend/src/server.test.ts" name="Fastify security headers &gt; requires authentication for the Trader Desk overview and plan resources" time="0.0686943">
+        </testcase>
+        <testcase classname="backend/src/server.test.ts" name="Fastify security headers &gt; protects the admin user directory, role changes, and audit trail" time="0.048607">
+        </testcase>
+    </testsuite>
+    <testsuite name="backend/src/services/marketAvailability.test.ts" timestamp="2026-10-10T20:43:53.241Z" hostname="KEELSON" tests="1" failures="0" errors="0" skipped="0" time="0.2806717">
+        <testcase classname="backend/src/services/marketAvailability.test.ts" name="market availability probe &gt; starts unknown, marks valid data available, and marks only confirmed missing tickers unavailable" time="0.2756791">
+        </testcase>
+    </testsuite>
+    <testsuite name="backend/src/services/marketDataService.test.ts" timestamp="2026-10-10T20:43:53.242Z" hostname="KEELSON" tests="11" failures="0" errors="0" skipped="0" time="0.0691757">
+        <testcase classname="backend/src/services/marketDataService.test.ts" name="market data instrument mapping &gt; requests true USD crypto data using the Massive source ticker" time="0.038875">
+        </testcase>
+        <testcase classname="backend/src/services/marketDataService.test.ts" name="market data instrument mapping &gt; sends the Massive key in an Authorization header, never in the URL" time="0.0010672">
+        </testcase>
+        <testcase classname="backend/src/services/marketDataService.test.ts" name="market data instrument mapping &gt; uses Twelve Data source symbols for EURUSD and XAUUSD" time="0.0015325">
+        </testcase>
+        <testcase classname="backend/src/services/marketDataService.test.ts" name="market data instrument mapping &gt; uses the Massive stock source symbol for AAPL" time="0.0011168">
+        </testcase>
+        <testcase classname="backend/src/services/marketDataService.test.ts" name="market data instrument mapping &gt; resolves legacy USDT symbols to canonical USD symbols via Massive" time="0.0047611">
+            <system-err>
+[markets] Resolved legacy symbol &quot;BTCUSDT&quot; → &quot;BTCUSD&quot;. Update references to use the canonical USD symbol.
+
+            </system-err>
+        </testcase>
+        <testcase classname="backend/src/services/marketDataService.test.ts" name="market data instrument mapping &gt; rejects a target instrument with no verified provider mapping" time="0.0038708">
+        </testcase>
+        <testcase classname="backend/src/services/marketDataService.test.ts" name="market data cache freshness and bounds &gt; returns an unexpired cached result without another provider request" time="0.0011328">
+        </testcase>
+        <testcase classname="backend/src/services/marketDataService.test.ts" name="market data cache freshness and bounds &gt; refetches after the timeframe TTL expires" time="0.0047155">
+        </testcase>
+        <testcase classname="backend/src/services/marketDataService.test.ts" name="market data cache freshness and bounds &gt; serves an expired result as stale only while within the configured age bound" time="0.0065521">
+            <system-err>
+{ symbol: &apos;BTCUSD&apos;, timeframe: &apos;1h&apos;, ageMs: 60001 } serving stale market data after provider failure
+
+            </system-err>
+        </testcase>
+        <testcase classname="backend/src/services/marketDataService.test.ts" name="market data cache freshness and bounds &gt; throws when provider failure occurs after the stale age bound" time="0.0022418">
+        </testcase>
+        <testcase classname="backend/src/services/marketDataService.test.ts" name="market data cache freshness and bounds &gt; evicts least-recently-used entries when the configured bound is reached" time="0.0010354">
+        </testcase>
+    </testsuite>
+    <testsuite name="backend/src/services/paperTradingService.test.ts" timestamp="2026-10-10T20:43:53.247Z" hostname="KEELSON" tests="7" failures="0" errors="0" skipped="0" time="0.0350231">
+        <testcase classname="backend/src/services/paperTradingService.test.ts" name="backend paper position lifecycle &gt; connects stored plans to gated, next-candle paper fills and records the order" time="0.0215743">
+        </testcase>
+        <testcase classname="backend/src/services/paperTradingService.test.ts" name="backend paper position lifecycle &gt; keeps a would-have-filled order in shadow mode without creating a position" time="0.0016475">
+        </testcase>
+        <testcase classname="backend/src/services/paperTradingService.test.ts" name="backend paper position lifecycle &gt; rejects non-USD-quoted markets for USD paper accounts" time="0.0008607">
+        </testcase>
+        <testcase classname="backend/src/services/paperTradingService.test.ts" name="backend paper position lifecycle &gt; rejects new positions when market data is stale" time="0.0005563">
+        </testcase>
+        <testcase classname="backend/src/services/paperTradingService.test.ts" name="backend paper position lifecycle &gt; closes a position automatically when its stop is touched and journals excursions" time="0.0015177">
+        </testcase>
+        <testcase classname="backend/src/services/paperTradingService.test.ts" name="backend paper position lifecycle &gt; does not open a short on a spot crypto SELL decision" time="0.0009659">
+        </testcase>
+        <testcase classname="backend/src/services/paperTradingService.test.ts" name="backend paper position lifecycle &gt; keeps planner, executor, and manager candle checkpoints independent" time="0.0012968">
+        </testcase>
+    </testsuite>
+    <testsuite name="backend/src/services/personalDataExport.test.ts" timestamp="2026-10-10T20:43:53.249Z" hostname="KEELSON" tests="1" failures="0" errors="0" skipped="0" time="0.0065976">
+        <testcase classname="backend/src/services/personalDataExport.test.ts" name="personal data export isolation &gt; filters every direct owner dataset and related rows to the authenticated owner" time="0.0046975">
+        </testcase>
+    </testsuite>
+    <testsuite name="backend/src/trader/config.test.ts" timestamp="2026-10-10T20:43:53.249Z" hostname="KEELSON" tests="3" failures="0" errors="0" skipped="0" time="0.0211159">
+        <testcase classname="backend/src/trader/config.test.ts" name="trader configuration &gt; parses the recommended trader defaults" time="0.0082339">
+        </testcase>
+        <testcase classname="backend/src/trader/config.test.ts" name="trader configuration &gt; only accepts promoted setup names from the configured setup registry" time="0.0040378">
+        </testcase>
+        <testcase classname="backend/src/trader/config.test.ts" name="trader configuration &gt; accepts valid environment overrides and rejects unsafe bounds" time="0.0049122">
+        </testcase>
+    </testsuite>
+    <testsuite name="backend/src/trader/event-risk.test.ts" timestamp="2026-10-10T20:43:53.251Z" hostname="KEELSON" tests="3" failures="0" errors="0" skipped="0" time="0.011591">
+        <testcase classname="backend/src/trader/event-risk.test.ts" name="event entry risk gate &gt; fails safe when event data is unhealthy" time="0.0036361">
+        </testcase>
+        <testcase classname="backend/src/trader/event-risk.test.ts" name="event entry risk gate &gt; blocks only events at or above the configured impact threshold and returns their IDs" time="0.0043362">
+        </testcase>
+        <testcase classname="backend/src/trader/event-risk.test.ts" name="event entry risk gate &gt; allows entries when no active event meets the configured impact threshold" time="0.0012072">
+        </testcase>
+    </testsuite>
+    <testsuite name="backend/src/trader/executor.test.ts" timestamp="2026-10-10T20:43:53.252Z" hostname="KEELSON" tests="5" failures="0" errors="0" skipped="0" time="0.0133712">
+        <testcase classname="backend/src/trader/executor.test.ts" name="plan executor &gt; creates a pending order after a trigger and cannot fill it on that candle" time="0.0052508">
+        </testcase>
+        <testcase classname="backend/src/trader/executor.test.ts" name="plan executor &gt; fills only on a later candle and applies slippage and fees" time="0.0030048">
+        </testcase>
+        <testcase classname="backend/src/trader/executor.test.ts" name="plan executor &gt; fills a gapped limit order at the open before applying slippage" time="0.0004669">
+        </testcase>
+        <testcase classname="backend/src/trader/executor.test.ts" name="plan executor &gt; rejects a pending fill when the current entry gate blocks it" time="0.0009138">
+        </testcase>
+        <testcase classname="backend/src/trader/executor.test.ts" name="plan executor &gt; rejects an entry when gates fail and keeps the plan armed" time="0.0004021">
+        </testcase>
+    </testsuite>
+    <testsuite name="backend/src/trader/manager.test.ts" timestamp="2026-10-10T20:43:53.253Z" hostname="KEELSON" tests="6" failures="0" errors="0" skipped="0" time="0.0086273">
+        <testcase classname="backend/src/trader/manager.test.ts" name="paper position manager &gt; keeps stop-first behavior when stop and target are touched in one candle" time="0.0045457">
+        </testcase>
+        <testcase classname="backend/src/trader/manager.test.ts" name="paper position manager &gt; scales out target fractions and moves the stop to fee-adjusted break-even after +1R" time="0.0006346">
+        </testcase>
+        <testcase classname="backend/src/trader/manager.test.ts" name="paper position manager &gt; advances the trailing stop without ever loosening it" time="0.0003621">
+        </testcase>
+        <testcase classname="backend/src/trader/manager.test.ts" name="paper position manager &gt; accumulates MAE and MFE before early stop exits" time="0.0003539">
+        </testcase>
+        <testcase classname="backend/src/trader/manager.test.ts" name="paper position manager &gt; exits after the configured time limit without progress" time="0.0002865">
+        </testcase>
+        <testcase classname="backend/src/trader/manager.test.ts" name="paper position manager &gt; exits thesis invalidation at the next bar open" time="0.0002939">
+        </testcase>
+    </testsuite>
+    <testsuite name="backend/src/trader/planner.test.ts" timestamp="2026-10-10T20:43:53.254Z" hostname="KEELSON" tests="2" failures="0" errors="0" skipped="0" time="0.0117072">
+        <testcase classname="backend/src/trader/planner.test.ts" name="Trader Desk planner &gt; returns no plan when higher-timeframe history is insufficient" time="0.0095681">
+        </testcase>
+        <testcase classname="backend/src/trader/planner.test.ts" name="Trader Desk planner &gt; ranks watchlist candidates by quality before applying the configured cap" time="0.0003363">
+        </testcase>
+    </testsuite>
+    <testsuite name="backend/src/trader/replay.test.ts" timestamp="2026-10-10T20:43:53.255Z" hostname="KEELSON" tests="3" failures="0" errors="0" skipped="0" time="0.0134976">
+        <testcase classname="backend/src/trader/replay.test.ts" name="shared replay core &gt; limits planner visibility to closed candles and enforces next-bar fills" time="0.0069225">
+        </testcase>
+        <testcase classname="backend/src/trader/replay.test.ts" name="shared replay core &gt; keeps cost sensitivity reproducible and records higher costs" time="0.0025937">
+        </testcase>
+        <testcase classname="backend/src/trader/replay.test.ts" name="shared replay core &gt; rejects nonchronological candles and builds strictly ordered walk-forward folds" time="0.0017676">
+        </testcase>
+    </testsuite>
+    <testsuite name="backend/src/trader/research.test.ts" timestamp="2026-10-10T20:43:53.256Z" hostname="KEELSON" tests="6" failures="0" errors="0" skipped="0" time="0.0137366">
+        <testcase classname="backend/src/trader/research.test.ts" name="Trader Desk research metrics &gt; suppresses win rate and confidence intervals below the minimum sample" time="0.0035507">
+        </testcase>
+        <testcase classname="backend/src/trader/research.test.ts" name="Trader Desk research metrics &gt; returns reproducible bootstrap intervals and grouped metrics at sufficient sample size" time="0.0022527">
+        </testcase>
+        <testcase classname="backend/src/trader/research.test.ts" name="Trader Desk research metrics &gt; builds a computed daily no-trade summary" time="0.0012671">
+        </testcase>
+        <testcase classname="backend/src/trader/research.test.ts" name="Trader Desk research metrics &gt; promotes only a pre-registered setup with enough forward evidence after costs and against both baselines" time="0.000722">
+        </testcase>
+        <testcase classname="backend/src/trader/research.test.ts" name="Trader Desk research metrics &gt; does not promote an in-sample hypothesis or a weak random baseline" time="0.0011702">
+        </testcase>
+        <testcase classname="backend/src/trader/research.test.ts" name="Trader Desk research metrics &gt; generates seeded random-entry baselines reproducibly without duplicate entries" time="0.001411">
+        </testcase>
+    </testsuite>
+    <testsuite name="backend/src/trader/risk.test.ts" timestamp="2026-10-10T20:43:53.258Z" hostname="KEELSON" tests="5" failures="0" errors="0" skipped="0" time="0.0101496">
+        <testcase classname="backend/src/trader/risk.test.ts" name="Trader Desk risk calculations &gt; risks the same cash amount across narrow and wide stops when uncapped" time="0.0033488">
+        </testcase>
+        <testcase classname="backend/src/trader/risk.test.ts" name="Trader Desk risk calculations &gt; caps position size by available cash and exposure headroom" time="0.0010153">
+        </testcase>
+        <testcase classname="backend/src/trader/risk.test.ts" name="Trader Desk risk calculations &gt; rejects a zero stop distance" time="0.0004551">
+        </testcase>
+        <testcase classname="backend/src/trader/risk.test.ts" name="Trader Desk risk calculations &gt; includes unrealized losses in mark-to-market drawdown" time="0.0011672">
+        </testcase>
+        <testcase classname="backend/src/trader/risk.test.ts" name="Trader Desk risk calculations &gt; blocks a new proposal when the configured weekly loss stop is reached" time="0.0015369">
+        </testcase>
+    </testsuite>
+    <testsuite name="backend/src/trader/sessions.test.ts" timestamp="2026-10-10T20:43:53.259Z" hostname="KEELSON" tests="3" failures="0" errors="0" skipped="0" time="0.0097264">
+        <testcase classname="backend/src/trader/sessions.test.ts" name="market session policy &gt; keeps crypto open around the clock without a kill zone penalty" time="0.0033919">
+        </testcase>
+        <testcase classname="backend/src/trader/sessions.test.ts" name="market session policy &gt; blocks a non-crypto market when no exchange calendar is configured" time="0.0009567">
+        </testcase>
+        <testcase classname="backend/src/trader/sessions.test.ts" name="market session policy &gt; honors configured weekday hours, auction blackouts, and holidays" time="0.0011897">
+        </testcase>
+    </testsuite>
+    <testsuite name="backend/src/utils/http-cache.test.ts" timestamp="2026-10-10T20:43:53.260Z" hostname="KEELSON" tests="2" failures="0" errors="0" skipped="0" time="0.0072647">
+        <testcase classname="backend/src/utils/http-cache.test.ts" name="http cache helpers &gt; derives a stable strong ETag from the body" time="0.0046088">
+        </testcase>
+        <testcase classname="backend/src/utils/http-cache.test.ts" name="http cache helpers &gt; matches single, listed, and wildcard If-None-Match values only" time="0.0005619">
+        </testcase>
+    </testsuite>
+    <testsuite name="backend/src/utils/limits.test.ts" timestamp="2026-10-10T20:43:53.261Z" hostname="KEELSON" tests="2" failures="0" errors="0" skipped="0" time="0.0061259">
+        <testcase classname="backend/src/utils/limits.test.ts" name="WindowLimiter &gt; allows the quota per key and recovers after the window" time="0.0036328">
+        </testcase>
+        <testcase classname="backend/src/utils/limits.test.ts" name="BoundedMap &gt; evicts the oldest entry when full and keeps updates without eviction" time="0.0006896">
+        </testcase>
+    </testsuite>
+    <testsuite name="backend/src/utils/server-timing.test.ts" timestamp="2026-10-10T20:43:53.262Z" hostname="KEELSON" tests="1" failures="0" errors="0" skipped="0" time="0.0052208">
+        <testcase classname="backend/src/utils/server-timing.test.ts" name="formatServerTiming &gt; formats named durations and clamps negative values" time="0.0031762">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/lib/account-security.test.ts" timestamp="2026-10-10T20:43:53.263Z" hostname="KEELSON" tests="6" failures="0" errors="0" skipped="0" time="0.0148085">
+        <testcase classname="src/lib/account-security.test.ts" name="account security helpers &gt; verifies the current password before changing it" time="0.0036988">
+        </testcase>
+        <testcase classname="src/lib/account-security.test.ts" name="account security helpers &gt; rejects a wrong current password without calling updateUser" time="0.0034781">
+        </testcase>
+        <testcase classname="src/lib/account-security.test.ts" name="account security helpers &gt; uses Supabase enrollment, challenge verification, and AAL2 before removal" time="0.0015037">
+        </testcase>
+        <testcase classname="src/lib/account-security.test.ts" name="account security helpers &gt; refuses factor removal unless the current assurance level is aal2" time="0.0006825">
+        </testcase>
+        <testcase classname="src/lib/account-security.test.ts" name="account security helpers &gt; requires a verified challenge before dashboard access when an enrolled factor is present" time="0.0005864">
+        </testcase>
+        <testcase classname="src/lib/account-security.test.ts" name="account security helpers &gt; validates avatar magic bytes and the 2 MB limit" time="0.0026781">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/lib/application/decision-service.test.ts" timestamp="2026-10-10T20:43:53.267Z" hostname="KEELSON" tests="1" failures="0" errors="0" skipped="0" time="0.0191928">
+        <testcase classname="src/lib/application/decision-service.test.ts" name="decision application service &gt; coordinates decision and explanation without persistence when no repository input is supplied" time="0.0173941">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/lib/application/paper-trading-service.test.ts" timestamp="2026-10-10T20:43:53.267Z" hostname="KEELSON" tests="1" failures="0" errors="0" skipped="0" time="0.0059539">
+        <testcase classname="src/lib/application/paper-trading-service.test.ts" name="paper-trading application service &gt; executes and closes a paper trade without persistence when disabled" time="0.0033904">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/lib/backend-api.test.ts" timestamp="2026-10-10T20:43:53.268Z" hostname="KEELSON" tests="8" failures="0" errors="0" skipped="0" time="0.1323971">
+        <testcase classname="src/lib/backend-api.test.ts" name="authenticated backend responses &gt; reports an empty successful response clearly" time="0.0466195">
+        </testcase>
+        <testcase classname="src/lib/backend-api.test.ts" name="authenticated backend responses &gt; reports an empty server error as an unreachable backend" time="0.0008252">
+        </testcase>
+        <testcase classname="src/lib/backend-api.test.ts" name="authenticated backend responses &gt; does not expose an HTML proxy error body" time="0.0012109">
+        </testcase>
+        <testcase classname="src/lib/backend-api.test.ts" name="authenticated backend responses &gt; prefers the backend error message" time="0.0007479">
+        </testcase>
+        <testcase classname="src/lib/backend-api.test.ts" name="authenticated backend responses &gt; returns valid JSON payloads" time="0.0685552">
+        </testcase>
+        <testcase classname="src/lib/backend-api.test.ts" name="authenticated backend responses &gt; preserves authentication status handling for empty 401 responses" time="0.0070356">
+        </testcase>
+        <testcase classname="src/lib/backend-api.test.ts" name="authenticated backend responses &gt; preserves backend authentication error messages" time="0.0019327">
+        </testcase>
+        <testcase classname="src/lib/backend-api.test.ts" name="authenticated backend responses &gt; does not set JSON content-type for a bodyless POST" time="0.0019516">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/lib/chart-feed.test.ts" timestamp="2026-10-10T20:43:53.270Z" hostname="KEELSON" tests="11" failures="0" errors="0" skipped="0" time="0.0134481">
+        <testcase classname="src/lib/chart-feed.test.ts" name="planCandleUpdate &gt; returns none for identical content" time="0.002828">
+        </testcase>
+        <testcase classname="src/lib/chart-feed.test.ts" name="planCandleUpdate &gt; updates only the last bar when it changes in place" time="0.0004007">
+        </testcase>
+        <testcase classname="src/lib/chart-feed.test.ts" name="planCandleUpdate &gt; appends a new closed or forming bar without replacing history" time="0.0005089">
+        </testcase>
+        <testcase classname="src/lib/chart-feed.test.ts" name="planCandleUpdate &gt; replaces everything when history changes in the middle" time="0.0002987">
+        </testcase>
+        <testcase classname="src/lib/chart-feed.test.ts" name="planCandleUpdate &gt; replaces everything when older history is prepended or the symbol changes" time="0.0003255">
+        </testcase>
+        <testcase classname="src/lib/chart-feed.test.ts" name="planCandleUpdate &gt; replaces when the data shrinks and treats two empty series as unchanged" time="0.0003506">
+        </testcase>
+        <testcase classname="src/lib/chart-feed.test.ts" name="applyCandleUpdate &gt; calls update for live ticks and setData only on replacement" time="0.0015511">
+        </testcase>
+        <testcase classname="src/lib/chart-feed.test.ts" name="applyCandleUpdate &gt; does nothing for identical content" time="0.0007884">
+        </testcase>
+        <testcase classname="src/lib/chart-feed.test.ts" name="overlay planning and sync &gt; plans lines with stable keys and markers sorted by time" time="0.0021108">
+        </testcase>
+        <testcase classname="src/lib/chart-feed.test.ts" name="overlay planning and sync &gt; creates series once, updates data in place and removes only stale keys" time="0.0013694">
+        </testcase>
+        <testcase classname="src/lib/chart-feed.test.ts" name="overlay planning and sync &gt; updates data in place when only points change" time="0.0006106">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/lib/core-reliability.test.ts" timestamp="2026-10-10T20:43:53.273Z" hostname="KEELSON" tests="9" failures="0" errors="0" skipped="0" time="0.0812217">
+        <testcase classname="src/lib/core-reliability.test.ts" name="core reliability contracts &gt; normalizes invalid, duplicate, and out-of-order candles" time="0.0030023">
+        </testcase>
+        <testcase classname="src/lib/core-reliability.test.ts" name="core reliability contracts &gt; keeps route serialization and parsing stable" time="0.0004333">
+        </testcase>
+        <testcase classname="src/lib/core-reliability.test.ts" name="core reliability contracts &gt; exposes all documented strategies by their requested categories" time="0.0021798">
+        </testcase>
+        <testcase classname="src/lib/core-reliability.test.ts" name="core reliability contracts &gt; emits a moving-average signal only on a confirmed crossover" time="0.0014554">
+        </testcase>
+        <testcase classname="src/lib/core-reliability.test.ts" name="core reliability contracts &gt; runs each eligible catalog definition against real candle inputs and versions emitted signals" time="0.0417579">
+        </testcase>
+        <testcase classname="src/lib/core-reliability.test.ts" name="core reliability contracts &gt; marks volume strategies unavailable when the active candles have no volume" time="0.0018144">
+        </testcase>
+        <testcase classname="src/lib/core-reliability.test.ts" name="core reliability contracts &gt; returns portfolio equity and trade records from the backtest engine" time="0.001877">
+        </testcase>
+        <testcase classname="src/lib/core-reliability.test.ts" name="core reliability contracts &gt; aborts slow requests with an explicit timeout reason" time="0.0252831">
+        </testcase>
+        <testcase classname="src/lib/core-reliability.test.ts" name="core reliability contracts &gt; rejects invalid backtest capital" time="0.0011933">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/lib/market-hardcode-guard.test.ts" timestamp="2026-10-10T20:43:53.276Z" hostname="KEELSON" tests="1" failures="0" errors="0" skipped="0" time="0.1337806">
+        <testcase classname="src/lib/market-hardcode-guard.test.ts" name="market symbol hardcode guard &gt; keeps legacy and default symbols inside the market registry/configuration" time="0.1271962">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/lib/markets.test.ts" timestamp="2026-10-10T20:43:53.276Z" hostname="KEELSON" tests="10" failures="0" errors="0" skipped="0" time="0.0409411">
+        <testcase classname="src/lib/markets.test.ts" name="market price formatting &gt; formats USD prices with a dollar sign" time="0.0318627">
+        </testcase>
+        <testcase classname="src/lib/markets.test.ts" name="market price formatting &gt; labels non-USD fiat quotes explicitly" time="0.0004421">
+        </testcase>
+        <testcase classname="src/lib/markets.test.ts" name="market price formatting &gt; formats absent prices as unavailable" time="0.0002426">
+        </testcase>
+        <testcase classname="src/lib/markets.test.ts" name="crypto market universe &gt; has no USDT-quoted crypto market" time="0.000303">
+        </testcase>
+        <testcase classname="src/lib/markets.test.ts" name="crypto market universe &gt; every crypto market has provider massive and sourceSymbol starting with X:" time="0.0004597">
+        </testcase>
+        <testcase classname="src/lib/markets.test.ts" name="crypto market universe &gt; hides confirmed unavailable markets from market pickers but retains unknown markets" time="0.0005357">
+        </testcase>
+        <testcase classname="src/lib/markets.test.ts" name="legacy symbol resolution &gt; resolves BTCUSDT to BTCUSD" time="0.0012635">
+            <system-err>
+[markets] Resolved legacy symbol &quot;BTCUSDT&quot; → &quot;BTCUSD&quot;. Update references to use the canonical USD symbol.
+
+            </system-err>
+        </testcase>
+        <testcase classname="src/lib/markets.test.ts" name="legacy symbol resolution &gt; resolves MATICUSDT to POLUSD" time="0.0024047">
+            <system-err>
+[markets] Resolved legacy symbol &quot;MATICUSDT&quot; → &quot;POLUSD&quot;. Update references to use the canonical USD symbol.
+
+            </system-err>
+        </testcase>
+        <testcase classname="src/lib/markets.test.ts" name="legacy symbol resolution &gt; passes through non-legacy symbols unchanged" time="0.000392">
+        </testcase>
+        <testcase classname="src/lib/markets.test.ts" name="legacy symbol resolution &gt; getMarket resolves legacy symbols" time="0.0005604">
+            <system-err>
+[markets] Resolved legacy symbol &quot;ETHUSDT&quot; → &quot;ETHUSD&quot;. Update references to use the canonical USD symbol.
+
+            </system-err>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/lib/observability.test.ts" timestamp="2026-10-10T20:43:53.280Z" hostname="KEELSON" tests="3" failures="0" errors="0" skipped="0" time="0.0070545">
+        <testcase classname="src/lib/observability.test.ts" name="observability &gt; creates correlation IDs and redacts sensitive metadata" time="0.0030215">
+        </testcase>
+        <testcase classname="src/lib/observability.test.ts" name="observability &gt; writes structured JSON logs at the requested level" time="0.0016681">
+        </testcase>
+        <testcase classname="src/lib/observability.test.ts" name="DomainError &gt; preserves an explicit error category and correlation ID" time="0.0003869">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/lib/perf.test.ts" timestamp="2026-10-10T20:43:53.282Z" hostname="KEELSON" tests="3" failures="0" errors="0" skipped="0" time="0.0095274">
+        <testcase classname="src/lib/perf.test.ts" name="perf helpers &gt; computes nearest-rank percentiles and handles empty input" time="0.0023815">
+        </testcase>
+        <testcase classname="src/lib/perf.test.ts" name="perf helpers &gt; keeps the latest sample and records async duration even on failure" time="0.0046193">
+        </testcase>
+        <testcase classname="src/lib/perf.test.ts" name="perf helpers &gt; shows the overlay only with the query flag and admin or development context" time="0.0004301">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/lib/providers/polling.test.ts" timestamp="2026-10-10T20:43:53.283Z" hostname="KEELSON" tests="5" failures="0" errors="0" skipped="0" time="0.0059609">
+        <testcase classname="src/lib/providers/polling.test.ts" name="getNewlyClosedCandles &gt; does not close candles on the first poll" time="0.0025951">
+        </testcase>
+        <testcase classname="src/lib/providers/polling.test.ts" name="getNewlyClosedCandles &gt; closes the previously observed candle on a one-candle advance" time="0.0004426">
+        </testcase>
+        <testcase classname="src/lib/providers/polling.test.ts" name="getNewlyClosedCandles &gt; closes all observed candles after missed polls" time="0.000344">
+        </testcase>
+        <testcase classname="src/lib/providers/polling.test.ts" name="getNewlyClosedCandles &gt; does not close anything when the latest candle has not advanced" time="0.0002307">
+        </testcase>
+        <testcase classname="src/lib/providers/polling.test.ts" name="shouldEmitLatestCandle &gt; emits the latest candle only when a new bar arrived" time="0.0004249">
+        </testcase>
+    </testsuite>
+    <testsuite name="supabase/functions/kinetic-coach/coach.test.ts" timestamp="2026-10-10T20:43:53.284Z" hostname="KEELSON" tests="23" failures="0" errors="0" skipped="0" time="0.0875618">
+        <testcase classname="supabase/functions/kinetic-coach/coach.test.ts" name="validateMessages &gt; accepts a valid conversation ending with a user turn" time="0.0023609">
+        </testcase>
+        <testcase classname="supabase/functions/kinetic-coach/coach.test.ts" name="validateMessages &gt; rejects empty and oversized turn lists" time="0.0004884">
+        </testcase>
+        <testcase classname="supabase/functions/kinetic-coach/coach.test.ts" name="validateMessages &gt; rejects roles other than user or assistant" time="0.0041463">
+        </testcase>
+        <testcase classname="supabase/functions/kinetic-coach/coach.test.ts" name="validateMessages &gt; rejects non-string content" time="0.0002566">
+        </testcase>
+        <testcase classname="supabase/functions/kinetic-coach/coach.test.ts" name="validateMessages &gt; rejects messages over the character limit" time="0.0002913">
+        </testcase>
+        <testcase classname="supabase/functions/kinetic-coach/coach.test.ts" name="validateMessages &gt; strips control characters but keeps newlines" time="0.0009559">
+        </testcase>
+        <testcase classname="supabase/functions/kinetic-coach/coach.test.ts" name="validateMessages &gt; rejects content that is empty after stripping" time="0.0002522">
+        </testcase>
+        <testcase classname="supabase/functions/kinetic-coach/coach.test.ts" name="validateMessages &gt; rejects a conversation that does not end with a user turn" time="0.0002235">
+        </testcase>
+        <testcase classname="supabase/functions/kinetic-coach/coach.test.ts" name="kinetic-coach handler &gt; returns 401 and never calls Gemini when the caller is not authenticated" time="0.0472728">
+        </testcase>
+        <testcase classname="supabase/functions/kinetic-coach/coach.test.ts" name="kinetic-coach handler &gt; returns 429 when the per-user request limit is exhausted" time="0.0047209">
+        </testcase>
+        <testcase classname="supabase/functions/kinetic-coach/coach.test.ts" name="kinetic-coach handler &gt; returns 400 for invalid JSON, too many turns, bad roles and non-strings without calling Gemini" time="0.0055359">
+            <system-err>
+[kinetic-coach] rejected request: messages must contain 1 to 20 turns
+
+[kinetic-coach] rejected request: role must be user or assistant
+
+[kinetic-coach] rejected request: content must be a string
+
+            </system-err>
+        </testcase>
+        <testcase classname="supabase/functions/kinetic-coach/coach.test.ts" name="kinetic-coach handler &gt; returns 429 without calling Gemini when the daily token budget is exhausted" time="0.0009612">
+        </testcase>
+        <testcase classname="supabase/functions/kinetic-coach/coach.test.ts" name="kinetic-coach handler &gt; sends the key in a header, never in the URL, and uses systemInstruction" time="0.0016629">
+        </testcase>
+        <testcase classname="supabase/functions/kinetic-coach/coach.test.ts" name="kinetic-coach handler &gt; fetches records with the user&apos;s own token and places them in a labelled data turn" time="0.0011838">
+        </testcase>
+        <testcase classname="supabase/functions/kinetic-coach/coach.test.ts" name="kinetic-coach handler &gt; marks records unavailable and still answers when the records fetch fails" time="0.0009347">
+        </testcase>
+        <testcase classname="supabase/functions/kinetic-coach/coach.test.ts" name="kinetic-coach handler &gt; escapes angle brackets in records so stored text cannot close the data block" time="0.0016629">
+        </testcase>
+        <testcase classname="supabase/functions/kinetic-coach/coach.test.ts" name="kinetic-coach handler &gt; keeps prompt-injection text inside user content, never as a system turn" time="0.0033203">
+        </testcase>
+        <testcase classname="supabase/functions/kinetic-coach/coach.test.ts" name="kinetic-coach handler &gt; system instruction carries the safety rules for the golden refusal cases" time="0.0002959">
+        </testcase>
+        <testcase classname="supabase/functions/kinetic-coach/coach.test.ts" name="kinetic-coach handler &gt; returns the model reply as plain text in the reply field" time="0.0009226">
+        </testcase>
+        <testcase classname="supabase/functions/kinetic-coach/coach.test.ts" name="kinetic-coach handler &gt; returns a generic error when Gemini fails and does not leak the upstream body or key" time="0.0010716">
+            <system-err>
+[kinetic-coach] upstream status 429
+
+            </system-err>
+        </testcase>
+        <testcase classname="supabase/functions/kinetic-coach/coach.test.ts" name="kinetic-coach handler &gt; returns 503 when the Gemini key or model is not configured" time="0.0009462">
+        </testcase>
+        <testcase classname="supabase/functions/kinetic-coach/coach.test.ts" name="kinetic-coach handler &gt; fails closed when CORS_ORIGIN is unset instead of answering with a wildcard" time="0.0005798">
+        </testcase>
+        <testcase classname="supabase/functions/kinetic-coach/coach.test.ts" name="kinetic-coach handler &gt; answers CORS preflight only with the configured origin" time="0.0024226">
+        </testcase>
+    </testsuite>
+</testsuites>

@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { z } from 'zod';
 import { MARKET_UNIVERSE } from '../../src/lib/markets';
+import { twelveDataSymbol } from './domain/LiveSymbolMap';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
@@ -53,6 +54,55 @@ if (!rateLimitSettings.success) {
   throw new Error(`${String(variable)} must be a positive number.`);
 }
 
+const liveFeedFlag = z.enum(['true', 'false']).transform((value) => value === 'true');
+const liveFeedSettings = z.object({
+  LIVE_FEED_ENABLED: liveFeedFlag,
+  LIVE_FEED_COINBASE_ENABLED: liveFeedFlag,
+  LIVE_FEED_TWELVEDATA_ENABLED: liveFeedFlag,
+  LIVE_FEED_TWELVEDATA_MAX_SYMBOLS: z.coerce.number().int().positive(),
+  LIVE_FEED_MAX_SYMBOLS: z.coerce.number().int().positive(),
+  LIVE_FEED_MAX_CLIENTS: z.coerce.number().int().positive(),
+  LIVE_FEED_STALE_MS: z.coerce.number().int().positive(),
+});
+
+function parseSymbolList(value: string): string[] {
+  return [...new Set(value.split(',').map((symbol) => symbol.trim()).filter(Boolean))];
+}
+
+export function parseLiveFeedConfig(env: NodeJS.ProcessEnv) {
+  const settings = liveFeedSettings.safeParse({
+    LIVE_FEED_ENABLED: env.LIVE_FEED_ENABLED ?? 'false',
+    LIVE_FEED_COINBASE_ENABLED: env.LIVE_FEED_COINBASE_ENABLED ?? 'true',
+    LIVE_FEED_TWELVEDATA_ENABLED: env.LIVE_FEED_TWELVEDATA_ENABLED ?? 'true',
+    LIVE_FEED_TWELVEDATA_MAX_SYMBOLS: env.LIVE_FEED_TWELVEDATA_MAX_SYMBOLS ?? 8,
+    LIVE_FEED_MAX_SYMBOLS: env.LIVE_FEED_MAX_SYMBOLS ?? 20,
+    LIVE_FEED_MAX_CLIENTS: env.LIVE_FEED_MAX_CLIENTS ?? 100,
+    LIVE_FEED_STALE_MS: env.LIVE_FEED_STALE_MS ?? 10_000,
+  });
+  if (!settings.success) {
+    const variable = settings.error.issues[0]?.path[0] ?? 'live feed configuration';
+    throw new Error(`${String(variable)} has an invalid live feed configuration value.`);
+  }
+
+  const twelveDataSymbols = parseSymbolList(env.LIVE_FEED_TWELVEDATA_SYMBOLS ?? 'EURUSD,GBPUSD,USDJPY,XAUUSD');
+  const twelveDataCap = settings.data.LIVE_FEED_TWELVEDATA_MAX_SYMBOLS;
+  if (twelveDataSymbols.length > twelveDataCap) {
+    throw new Error(`LIVE_FEED_TWELVEDATA_SYMBOLS lists ${twelveDataSymbols.length} symbols; the Twelve Data limit is ${twelveDataCap}.`);
+  }
+  const unstreamable = twelveDataSymbols.filter((symbol) => twelveDataSymbol(symbol) === undefined);
+  if (unstreamable.length > 0) {
+    throw new Error(`LIVE_FEED_TWELVEDATA_SYMBOLS contains symbols Twelve Data cannot stream: ${unstreamable.join(', ')}.`);
+  }
+
+  return {
+    enabled: settings.data.LIVE_FEED_ENABLED,
+    coinbase: { enabled: settings.data.LIVE_FEED_COINBASE_ENABLED, maxSymbols: settings.data.LIVE_FEED_MAX_SYMBOLS },
+    twelveData: { enabled: settings.data.LIVE_FEED_TWELVEDATA_ENABLED, symbols: twelveDataSymbols, maxSymbols: twelveDataCap },
+    maxClients: settings.data.LIVE_FEED_MAX_CLIENTS,
+    staleMs: settings.data.LIVE_FEED_STALE_MS,
+  };
+}
+
 export const config = {
   port: Number(process.env.BACKEND_PORT ?? 3001),
   corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
@@ -71,6 +121,7 @@ export const config = {
   marketProbeIntervalMs: rateLimitSettings.data.MARKET_PROBE_INTERVAL_MS,
   marketProbeRateLimitMax: rateLimitSettings.data.MARKET_PROBE_RATE_LIMIT_MAX,
   marketSessionCalendar: parsedSessionCalendar,
+  liveFeed: parseLiveFeedConfig(process.env),
 };
 
 // Validate default and probe override symbols against the same active market registry used by the API.
