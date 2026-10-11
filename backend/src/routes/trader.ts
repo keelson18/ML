@@ -9,67 +9,82 @@ import { fetchMarketData } from '../services/marketDataService';
 import { getMarketAvailability } from '../services/marketAvailability';
 import { traderConfig } from '../trader/config';
 import { createTradePlan, rankPlannerResults } from '../trader/planner';
-import { advanceStoredTradePlans, generateDailyAccountReview, getAccount, listStoredTradePlans, manageOpenPositions, storeTradePlan, wasCandleProcessed, markCandleProcessed } from '../services/paperTradingService';
+import { getAccount, listStoredTradePlans, storeTradePlan } from '../services/paperTradingService';
 import { markToMarket } from '../trader/risk';
 import type { TradePlan } from '../trader/types';
+import { selectClosedCandles } from '../trader/candle-math';
+import { reconcilePaperAccount } from '../trader/decision-ledger';
+import { getSupabaseClient } from '../db';
+import { paperAutopilotScheduler, isAutopilotSymbol, type PaperAutopilotConfig } from '../autonomy/paper-autopilot';
 
 const listQuery = z.object({ status: z.enum(['WATCHING', 'ARMED', 'PENDING_ORDER', 'OPEN', 'MANAGING', 'CLOSED']).optional() }).strict();
 const historyQuery = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) }).strict();
-const timeframeSeconds: Record<Timeframe, number> = {
-  '1m': 60, '3m': 180, '5m': 300, '15m': 900, '30m': 1_800,
-  '1h': 3_600, '4h': 14_400, '1d': 86_400, '1w': 604_800, '1M': 2_592_000,
-};
+const autopilotSymbols = z.array(z.string().regex(/^[A-Z0-9]{3,12}$/)).min(1).max(traderConfig.AUTOPILOT_MAX_SYMBOLS_PER_USER);
+const autopilotUpdate = z.object({ enabled: z.boolean(), symbols: autopilotSymbols }).strict();
+const defaultAutopilotSymbols = ['BTCUSD', 'ETHUSD', 'SOLUSD'].filter((symbol) => MARKET_UNIVERSE.some((market) => market.symbol === symbol && market.isActive));
+const ledgerVerificationCache = new Map<string, { checkedAt: number; status: 'verified' | 'broken' | 'unavailable' }>();
 
-function closedCandles(candles: Awaited<ReturnType<typeof fetchMarketData>>['candles'], timeframe: Timeframe, nowSeconds = Date.now() / 1000) {
-  return candles.filter((candle) => candle.time + timeframeSeconds[timeframe] <= nowSeconds);
+async function accountLedgerStatus(accountId: string): Promise<'verified' | 'broken' | 'unavailable'> {
+  const cached = ledgerVerificationCache.get(accountId);
+  if (cached && Date.now() - cached.checkedAt < 30_000) return cached.status;
+  let status: 'verified' | 'broken' | 'unavailable' = 'unavailable';
+  try {
+    const { data, error } = await getSupabaseClient().rpc('verify_decision_ledger', { p_account_id: accountId });
+    const verification = Array.isArray(data) ? data[0] : data;
+    if (!error && verification) status = verification.ok ? 'verified' : 'broken';
+  } catch { status = 'unavailable'; }
+  ledgerVerificationCache.set(accountId, { checkedAt: Date.now(), status });
+  return status;
+}
+
+function closedCandles(candles: Awaited<ReturnType<typeof fetchMarketData>>['candles'], timeframe: Timeframe) {
+  return selectClosedCandles(candles, timeframe, Date.now(), traderConfig.CLOSE_GRACE_MS);
 }
 
 export async function traderRoutes(app: FastifyInstance) {
-  app.post('/api/v1/trader/advance', {
+  app.get('/api/v1/trader/autopilot', {
+    preHandler: app.requireAuth,
+    config: { rateLimit: { max: config.marketRateLimitMax, timeWindow: config.rateLimitWindowMs } },
+  }, async (request, reply) => {
+    if (!request.accessToken || !request.authenticatedUserId) return reply.code(401).send({ error: 'Authentication required.' });
+    const { data, error } = await getSupabaseClientWithToken(request.accessToken).from('paper_autopilot')
+      .select('account_id,enabled,symbols,paused_reason,last_run_at').eq('account_id', request.authenticatedUserId).maybeSingle();
+    if (error) return reply.code(503).send({ error: 'Autopilot settings are unavailable; apply the paper core migration.' });
+    return { enabled: Boolean(data?.enabled), symbols: data?.symbols ?? defaultAutopilotSymbols,
+      pausedReason: data?.paused_reason ?? null, lastRunAt: data?.last_run_at ?? null };
+  });
+
+  app.put('/api/v1/trader/autopilot', {
+    preHandler: app.requireAuth,
+    config: { rateLimit: { max: 5, timeWindow: config.rateLimitWindowMs } },
+  }, async (request, reply) => {
+    const parsed = autopilotUpdate.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: `Choose between 1 and ${traderConfig.AUTOPILOT_MAX_SYMBOLS_PER_USER} supported symbols.` });
+    if (!request.accessToken || !request.authenticatedUserId) return reply.code(401).send({ error: 'Authentication required.' });
+    if (new Set(parsed.data.symbols).size !== parsed.data.symbols.length) return reply.code(400).send({ error: 'Symbols must be unique.' });
+    const unavailable = parsed.data.symbols.filter((symbol) => !isAutopilotSymbol(symbol)
+      || getMarketAvailability().find((candidate) => candidate.symbol === symbol)?.status !== 'available');
+    if (parsed.data.enabled && unavailable.length) return reply.code(409).send({ error: `Autopilot requires active, verified Massive USD markets: ${unavailable.join(', ')}.` });
+    const { data, error } = await getSupabaseClientWithToken(request.accessToken).rpc('set_paper_autopilot', {
+      p_enabled: parsed.data.enabled, p_symbols: parsed.data.symbols,
+    });
+    if (error) return reply.code(error.message.includes('Global autopilot symbol limit') ? 409 : 503)
+      .send({ error: error.message.includes('Global autopilot symbol limit') ? error.message : 'Autopilot settings could not be saved; verify that migrations are applied.' });
+    const row = (Array.isArray(data) ? data[0] : data) as PaperAutopilotConfig | null;
+    if (!row) return reply.code(503).send({ error: 'Autopilot settings could not be saved; verify that migrations are applied.' });
+    return { enabled: row.enabled, symbols: row.symbols, pausedReason: row.paused_reason, lastRunAt: row.last_run_at };
+  });
+
+  app.post('/api/v1/trader/autopilot/run', {
     preHandler: app.requireAuth,
     config: { rateLimit: { max: 2, timeWindow: config.rateLimitWindowMs } },
   }, async (request, reply) => {
-    if (!request.accessToken || !request.authenticatedUserId) return reply.code(401).send({ error: 'Authentication required.' });
-    try {
-      const accountId = request.authenticatedUserId;
-      const triggerTimeframe = traderConfig.TRIGGER_TIMEFRAMES[0] as Timeframe;
-      const plans = (await listStoredTradePlans(accountId, request.accessToken)).filter((plan) => ['WATCHING', 'ARMED', 'PENDING_ORDER'].includes(plan.status));
-      const results = [];
-      const staleSymbols: string[] = [];
-      for (const symbol of [...new Set(plans.map((plan) => plan.symbol))]) {
-        const series = await fetchMarketData(symbol, triggerTimeframe, 100, { priority: true });
-        if (series.stale) { staleSymbols.push(symbol); continue; }
-        const candles = closedCandles(series.candles, triggerTimeframe);
-        const candle = candles.at(-1);
-        if (!candle) continue;
-        results.push(await advanceStoredTradePlans({ accountId, symbol, timeframe: triggerTimeframe, candle, candles, accessToken: request.accessToken }));
-      }
-
-      const account = await getAccount(accountId, request.accessToken);
-      const openSymbols = [...new Set(account.positions.filter((position) => position.status === 'open').map((position) => position.symbol))];
-      const managementTimeframe = traderConfig.MGMT_TIMEFRAME as Timeframe;
-      const closedTrades = [];
-      for (const symbol of openSymbols) {
-        const series = await fetchMarketData(symbol, managementTimeframe, 100, { priority: true });
-        if (series.stale) { staleSymbols.push(symbol); continue; }
-        const candles = closedCandles(series.candles, managementTimeframe);
-        const candle = candles.at(-1);
-        if (!candle || await wasCandleProcessed(accountId, symbol, managementTimeframe, candle.time, 'manager')) continue;
-        closedTrades.push(...await manageOpenPositions(accountId, symbol, candle, candles, false, managementTimeframe));
-        await markCandleProcessed(accountId, symbol, managementTimeframe, candle.time, 'manager');
-      }
-      const daily = await fetchMarketData(plans[0]?.symbol ?? MARKET_UNIVERSE.find((market) => market.marketType === 'crypto')!.symbol, '1d', 2, { priority: true }).catch(() => undefined);
-      const lastDaily = daily && closedCandles(daily.candles, '1d').at(-1);
-      if (lastDaily) await generateDailyAccountReview(accountId, new Date(lastDaily.time * 1000).toISOString().slice(0, 10));
-      return {
-        advancedPlans: results.reduce((sum, result) => sum + result.plans.filter((plan) => plan.status === 'PENDING_ORDER' || plan.status === 'OPEN').length, 0),
-        filledOrders: results.reduce((sum, result) => sum + result.filled, 0),
-        shadowSignals: results.flatMap((result) => result.shadowSignals), closedTrades, staleSymbols: [...new Set(staleSymbols)],
-        shadowMode: traderConfig.SHADOW_MODE_ENABLED,
-      };
-    } catch (error) {
-      request.log.error({ reason: error instanceof Error ? error.message : 'unknown' }, 'Trader plan advancement failed');
-      return reply.code(503).send({ error: 'Trader plan advancement is temporarily unavailable.' });
+    if (!z.object({}).strict().safeParse(request.body ?? {}).success) return reply.code(400).send({ error: 'Run now does not accept request parameters.' });
+    if (!request.authenticatedUserId) return reply.code(401).send({ error: 'Authentication required.' });
+    try { return await paperAutopilotScheduler.runAccountNow(request.authenticatedUserId); }
+    catch (error) {
+      const message = error instanceof Error ? error.message : 'Autopilot run failed.';
+      return reply.code(message.startsWith('Enable paper autopilot') ? 409 : 503).send({ error: message });
     }
   });
 
@@ -79,7 +94,9 @@ export async function traderRoutes(app: FastifyInstance) {
   }, async (request, reply) => {
     if (!request.accessToken || !request.authenticatedUserId) return reply.code(401).send({ error: 'Authentication required.' });
     try {
-      const account = await getAccount(request.authenticatedUserId, request.accessToken);
+      const account = await getAccount(request.authenticatedUserId);
+      const reconciliation = reconcilePaperAccount(account);
+      const ledgerStatus = await accountLedgerStatus(request.authenticatedUserId);
       const open = account.positions.filter((position) => position.status === 'open');
       const prices: Record<string, number> = {};
       const staleSymbols: string[] = [];
@@ -107,6 +124,7 @@ export async function traderRoutes(app: FastifyInstance) {
         openRiskCash, heatPct: marked.equity > 0 ? openRiskCash / marked.equity * 100 : 0,
         dailyPnl, weeklyPnl, dailyLossLimitPct: traderConfig.DAILY_LOSS_STOP_PCT,
         weeklyLossLimitPct: traderConfig.WEEKLY_LOSS_STOP_PCT, staleSymbols,
+        ledgerStatus, reconciliation,
         positions: marked.positions.map(({ position, currentPrice, pnl }) => ({ ...position, currentPrice, unrealizedPnl: pnl,
           rMultiple: position.initialRisk && position.initialRisk > 0 ? (currentPrice - position.entryPrice) / position.initialRisk : 0 })),
         recentTrades: [...account.trades].sort((left, right) => Date.parse(right.closedAt) - Date.parse(left.closedAt)).slice(0, 20),
@@ -129,7 +147,7 @@ export async function traderRoutes(app: FastifyInstance) {
     if (query.data.status) plansQuery = plansQuery.eq('status', query.data.status);
     const { data, error } = await plansQuery;
     if (error) request.log.warn({ code: error.code }, 'SQL plan history unavailable; using paper account plan state');
-    const accountPlans = await listStoredTradePlans(request.authenticatedUserId, request.accessToken);
+    const accountPlans = await listStoredTradePlans(request.authenticatedUserId);
     const plansById = new Map<string, TradePlan>();
     for (const row of data ?? []) plansById.set((row.plan as TradePlan).id, row.plan as TradePlan);
     for (const plan of accountPlans) plansById.set(plan.id, plan);
@@ -144,7 +162,10 @@ export async function traderRoutes(app: FastifyInstance) {
   }, async (request, reply) => {
     if (!request.accessToken || !request.authenticatedUserId) return reply.code(401).send({ error: 'Authentication required.' });
     const availability = getMarketAvailability();
-    const candidates = MARKET_UNIVERSE.filter((market) => market.isActive && market.marketType === 'crypto' && market.provider === 'massive'
+    const { data: enrollment } = await getSupabaseClientWithToken(request.accessToken).from('paper_autopilot')
+      .select('symbols').eq('account_id', request.authenticatedUserId).maybeSingle();
+    const selectedSymbols = enrollment?.symbols ?? defaultAutopilotSymbols;
+    const candidates = MARKET_UNIVERSE.filter((market) => selectedSymbols.includes(market.symbol) && market.isActive && market.marketType === 'crypto' && market.provider === 'massive'
       && availability.find((item) => item.symbol === market.symbol)?.status !== 'unavailable');
     const results = [];
     for (const market of candidates) {
@@ -171,7 +192,7 @@ export async function traderRoutes(app: FastifyInstance) {
     }
     const ranked = rankPlannerResults(results);
     const plans = ranked.flatMap((result) => result.plan ? [result.plan] : []);
-    for (const plan of plans) await storeTradePlan(request.authenticatedUserId, plan, request.accessToken);
+    for (const plan of plans) await storeTradePlan(request.authenticatedUserId, plan);
     if (plans.length > 0) {
       const supabase = getSupabaseClientWithToken(request.accessToken);
       const { error } = await supabase.rpc('save_trade_plans', { p_plans: plans });
@@ -195,7 +216,7 @@ export async function traderRoutes(app: FastifyInstance) {
         .eq('account_id', request.authenticatedUserId)
         .order(orderColumn, { ascending: false })
         .limit(query.data.limit);
-      const account = await getAccount(request.authenticatedUserId, request.accessToken);
+      const account = await getAccount(request.authenticatedUserId);
       const fallback = table === 'plan_events' ? account.planEvents
         : table === 'paper_orders' ? account.pendingPaperOrders
           : table === 'trade_journal' ? account.tradeJournal

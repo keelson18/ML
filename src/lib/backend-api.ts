@@ -49,10 +49,6 @@ export async function fetchAutonomyStatus(): Promise<AutonomyStatus> {
   return authenticatedBackendRequest<AutonomyStatus>('/api/v1/autonomy/status');
 }
 
-export async function setAutonomyState(action: 'start' | 'pause'): Promise<AutonomyStatus> {
-  return authenticatedBackendRequest<AutonomyStatus>(`/api/v1/autonomy/${action}`, { method: 'POST' });
-}
-
 export async function requestBackendDecision(
   symbol: string,
   timeframe: Timeframe,
@@ -243,6 +239,8 @@ export interface TraderOverview {
   cash: number; startingEquity: number; equity: number; unrealizedPnl: number; drawdownPct: number;
   openRiskCash: number; heatPct: number; dailyPnl: number; weeklyPnl: number;
   dailyLossLimitPct: number; weeklyLossLimitPct: number; staleSymbols: string[];
+  ledgerStatus: 'verified' | 'broken' | 'unavailable';
+  reconciliation: { ok: boolean; actualEquity: number; expectedEquity: number; difference: number };
   positions: Array<PaperPosition & { currentPrice: number; unrealizedPnl: number; rMultiple: number }>;
   recentTrades: PaperTrade[];
 }
@@ -260,17 +258,28 @@ export async function refreshTraderPlans(): Promise<{ plans: TraderPlan[]; watch
   return authenticatedBackendRequest('/api/v1/trader/plans/refresh', { method: 'POST' });
 }
 
-export interface TraderAdvanceResult {
-  advancedPlans: number;
-  filledOrders: number;
-  shadowSignals: Array<{ planId: string; candleTime: number; reason: string }>;
-  closedTrades: PaperTrade[];
-  staleSymbols: string[];
-  shadowMode: boolean;
+export interface TraderAutopilotSettings {
+  enabled: boolean;
+  symbols: string[];
+  pausedReason: string | null;
+  lastRunAt: string | null;
 }
 
-export async function advanceTraderPlans(): Promise<TraderAdvanceResult> {
-  return authenticatedBackendRequest<TraderAdvanceResult>('/api/v1/trader/advance', { method: 'POST' });
+export interface TraderAutopilotRunResult {
+  processed: number;
+  pausedReason?: string;
+}
+
+export async function fetchTraderAutopilot(): Promise<TraderAutopilotSettings> {
+  return authenticatedBackendRequest('/api/v1/trader/autopilot');
+}
+
+export async function updateTraderAutopilot(settings: Pick<TraderAutopilotSettings, 'enabled' | 'symbols'>): Promise<TraderAutopilotSettings> {
+  return authenticatedBackendRequest('/api/v1/trader/autopilot', { method: 'PUT', body: JSON.stringify(settings) });
+}
+
+export async function runTraderAutopilotNow(): Promise<TraderAutopilotRunResult> {
+  return authenticatedBackendRequest('/api/v1/trader/autopilot/run', { method: 'POST' });
 }
 
 export async function fetchTraderHistory<T>(kind: 'journal' | 'reviews' | 'events' | 'orders'): Promise<T[]> {

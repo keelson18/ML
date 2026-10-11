@@ -3,14 +3,14 @@ import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import helmet from '@fastify/helmet';
 import { config } from './config.js';
+import { getSupabaseClient } from './db';
 import { AutonomousPipeline } from './autonomy/pipeline';
-import { AutonomousScheduler } from './autonomy/scheduler';
+import { paperAutopilotScheduler } from './autonomy/paper-autopilot';
 import { decisionRoutes } from './routes/decisions';
 import { marketRoutes } from './routes/market';
 import { paperRoutes } from './routes/paper';
 import { positionRoutes } from './routes/positions';
 import { registerAuthGuards } from './middleware/fastify-auth';
-import { getDefaultSymbols } from './constants/markets';
 import { marketAvailabilityRoutes } from './routes/market-availability';
 import { traderRoutes } from './routes/trader';
 import { adminUserRoutes } from './routes/admin-users';
@@ -29,7 +29,26 @@ function allowedOrigins(): string[] {
   return (configured ?? 'http://localhost:5173').split(',').map((origin) => origin.trim()).filter(Boolean);
 }
 
-const autonomyEnabled = () => process.env.AUTONOMOUS_TRADING === 'true';
+let paperLedgerHealthCache: { checkedAt: number; value: { status: 'verified' | 'broken' | 'unavailable'; checkedAccounts: number; brokenAccounts: number; reconciliationFailures: number } } | undefined;
+let paperLedgerHealthCheck: Promise<{ status: 'verified' | 'broken' | 'unavailable'; checkedAccounts: number; brokenAccounts: number; reconciliationFailures: number }> | undefined;
+
+async function readPaperLedgerHealth() {
+  if (paperLedgerHealthCache && Date.now() - paperLedgerHealthCache.checkedAt < 300_000) return paperLedgerHealthCache.value;
+  if (paperLedgerHealthCheck) return paperLedgerHealthCheck;
+  paperLedgerHealthCheck = (async () => {
+    let value: { status: 'verified' | 'broken' | 'unavailable'; checkedAccounts: number; brokenAccounts: number; reconciliationFailures: number } = {
+      status: 'unavailable', checkedAccounts: 0, brokenAccounts: 0, reconciliationFailures: 0,
+    };
+    try {
+      const { data, error } = await getSupabaseClient().rpc('paper_ledger_health');
+      if (!error && data && typeof data === 'object') value = data as typeof value;
+    } catch { value = { status: 'unavailable', checkedAccounts: 0, brokenAccounts: 0, reconciliationFailures: 0 }; }
+    paperLedgerHealthCache = { checkedAt: Date.now(), value };
+    return value;
+  })();
+  try { return await paperLedgerHealthCheck; }
+  finally { paperLedgerHealthCheck = undefined; }
+}
 
 export function buildServer() {
   const app = Fastify({ logger: true });
@@ -48,7 +67,7 @@ export function buildServer() {
     errorResponseBuilder: () => ({ statusCode: 429, error: 'Too Many Requests', message: 'Too many requests. Please try again later.' }),
   });
   registerAuthGuards(app);
-  const pipeline = new AutonomousPipeline({ enableExecution: autonomyEnabled() });
+  const pipeline = new AutonomousPipeline({ enableExecution: false });
 
   void app.register(cors, { origin: allowedOrigins() });
   void app.register(decisionRoutes, pipeline);
@@ -63,13 +82,15 @@ export function buildServer() {
   void app.register(newsRoutes);
   void app.register(personalDataRoutes);
   if (config.liveFeed.enabled) registerLiveStream(app, allowedOrigins());
-  app.get('/health', async () => ({ status: 'ok', service: 'quantum-api', autonomy: pipeline.getSnapshot() }));
+  app.get('/health', async () => ({
+    status: 'ok', service: 'quantum-api', autonomy: pipeline.getSnapshot(), paperLedger: await readPaperLedgerHealth(),
+  }));
   return { app, pipeline };
 }
 
 export async function startServer() {
   const { app, pipeline } = buildServer();
-  const scheduler = new AutonomousScheduler(pipeline, getDefaultSymbols());
+  const scheduler = paperAutopilotScheduler;
   const port = Number(process.env.AUTONOMY_PORT ?? process.env.PORT ?? 8787);
   try {
     await app.listen({ port, host: '0.0.0.0' });
@@ -89,7 +110,7 @@ export async function startServer() {
     }
     throw error;
   }
-  if (autonomyEnabled()) scheduler.start();
+  scheduler.start();
   if (config.massiveApiKey) void probeAllMarkets().catch(() => app.log.warn('market availability probe failed'));
   const shutdown = async () => { scheduler.stop(); await app.close(); };
   process.once('SIGINT', shutdown);

@@ -118,6 +118,20 @@ describe('backend paper position lifecycle', () => {
     expect((await getAccount(accountId)).tradeJournal?.[0]?.metrics).toMatchObject({ maeR: trades[0].maeR, mfeR: trades[0].mfeR });
   });
 
+  it('enforces configurable daily account trade caps and records the rejected gate', async () => {
+    const accountId = `daily-cap-${Date.now()}`;
+    const oldDailyCap = traderConfig.MAX_TRADES_PER_DAY;
+    traderConfig.MAX_TRADES_PER_DAY = 1;
+    try {
+      const first = await executeDecision({ accountId, symbol: 'BTCUSD', decision: buyDecision() });
+      const second = await executeDecision({ accountId, symbol: 'ETHUSD', decision: buyDecision() });
+      expect(first.accepted).toBe(true);
+      expect(second.accepted).toBe(false);
+      expect(second.reason).toBe('Daily trade cap reached (1).');
+      expect((await getAccount(accountId)).executionGateResults).toHaveLength(1);
+    } finally { traderConfig.MAX_TRADES_PER_DAY = oldDailyCap; }
+  });
+
   it('does not open a short on a spot crypto SELL decision', async () => {
     const accountId = `short-${Date.now()}`;
     const result = await executeDecision({

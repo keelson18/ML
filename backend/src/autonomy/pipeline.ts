@@ -109,7 +109,6 @@ export class AutonomousPipeline {
     }
 
     if (role === 'manager') {
-      await markCandleProcessed(this.config.accountId, symbol, timeframe, closedCandle.time, role);
       this.processedCandles.set(candleKey, closedCandle.time);
       return { role, symbol, timeframe, candle: closedCandle, closedTrades, state: this.state };
     }
@@ -145,7 +144,6 @@ export class AutonomousPipeline {
         accountId: this.config.accountId, symbol, timeframe, candle: closedCandle, candles: series,
         shadowMode: !this.config.enableExecution || traderConfig.SHADOW_MODE_ENABLED,
       });
-      await markCandleProcessed(this.config.accountId, symbol, timeframe, closedCandle.time, role);
       this.processedCandles.set(candleKey, closedCandle.time);
       if (result.filled > 0) this.snapshot = { ...this.snapshot, executedOrders: this.snapshot.executedOrders + result.filled };
       return {

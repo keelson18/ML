@@ -31,7 +31,7 @@ describe('Fastify security headers', () => {
     const response = await app.inject('/health');
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({ status: 'ok', service: 'quantum-api' });
+    expect(response.json()).toMatchObject({ status: 'ok', service: 'quantum-api', paperLedger: { status: 'unavailable' } });
     expect(response.headers['x-content-type-options']).toBe('nosniff');
     expect(response.headers['x-frame-options']).toBe('SAMEORIGIN');
     await app.close();
@@ -74,6 +74,18 @@ describe('Fastify security headers', () => {
     const plans = await app.inject('/api/v1/trader/plans');
     expect(overview.statusCode).toBe(401);
     expect(plans.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it('requires authentication for autopilot and does not expose browser-driven advancement', async () => {
+    process.env.NODE_ENV = 'test';
+    const { app } = buildServer();
+    const settings = await app.inject('/api/v1/trader/autopilot');
+    const run = await app.inject({ method: 'POST', url: '/api/v1/trader/autopilot/run' });
+    const oldAdvance = await app.inject({ method: 'POST', url: '/api/v1/trader/advance' });
+    expect(settings.statusCode).toBe(401);
+    expect(run.statusCode).toBe(401);
+    expect(oldAdvance.statusCode).toBe(404);
     await app.close();
   });
 

@@ -1,7 +1,7 @@
 // Deterministic candle replay using the same trigger executor and position manager as paper mode.
 import { createHash } from 'node:crypto';
 import type { Candle } from '../../../src/lib/types';
-import type { PaperPosition } from '../engines/paper-execution';
+import { reducePaperPosition, simulatePaperOrder, type PaperAccountState, type PaperPosition } from '../engines/paper-execution';
 import { traderConfig } from './config';
 import { advanceTradePlan, type EntryGateResult } from './executor';
 import { managePaperPosition } from './manager';
@@ -56,6 +56,7 @@ export function replayClosedCandles(input: {
   let plans: TradePlan[] = [];
   const pending: Map<string, NonNullable<ReturnType<typeof advanceTradePlan>['pendingOrder']>> = new Map();
   let positions: PaperPosition[] = [];
+  let replayAccount: PaperAccountState = { accountId: 'replay', cash: traderConfig.TRADER_STARTING_EQUITY, positions: [], trades: [] };
   const trades: ReplayTrade[] = [];
   const shadowSignals: ReplayResult['shadowSignals'] = [];
   for (let index = 0; index < candles.length; index += 1) {
@@ -73,21 +74,29 @@ export function replayClosedCandles(input: {
       if (!['WATCHING', 'ARMED', 'PENDING_ORDER'].includes(plan.status)) continue;
       const step = advanceTradePlan({
         plan, candle, previousCandle: candles[index - 1], recentCandles: candles.slice(Math.max(0, index - 20), index + 1),
-        barIndex: index, timeframe: '15m', pendingOrder: pending.get(plan.id), costs,
+        barIndex: index, timeframe: plan.triggerTimeframe ?? '15m', pendingOrder: pending.get(plan.id),
         gate: (price) => input.gate?.(plan, price) ?? { approved: true, quantity: 1 },
       });
       nextPlans[planIndex] = step.plan;
       if (step.pendingOrder) pending.set(plan.id, step.pendingOrder);
       if (step.fill) {
         const order = step.fill.order;
-        openedOnBar.add(order.id);
-        positions.push({
-          id: order.id, symbol: plan.symbol, assetId: plan.symbol, side: 'buy', quantity: order.quantity,
-          entryPrice: step.fill.price, entryFee: step.fill.fee, stopLoss: plan.invalidation,
-          initialRisk: Math.abs(step.fill.price - plan.invalidation), initialQuantity: order.quantity,
-          targets: plan.targets, targetsTaken: [], barsHeld: 0, maxFavorablePrice: step.fill.price,
-          planId: plan.id, status: 'open', openedAt: new Date(candle.time * 1000).toISOString(),
+        const openedAt = new Date(candle.time * 1000).toISOString();
+        const opened = simulatePaperOrder(replayAccount, {
+          orderId: order.id, positionId: order.id, decisionId: `plan-${plan.id}`, assetId: plan.symbol,
+          symbol: plan.symbol, decision: { decision: 'BUY', entry: step.fill.price, invalidation: plan.invalidation,
+            targets: plan.targets.map(({ price }) => ({ price })), timestamp: openedAt },
+          riskApproved: true, portfolioApproved: true, quantity: order.quantity, requestedPrice: step.fill.price,
+          feeRate: costs.feeRate, slippageRate: costs.slippageRate, stopLoss: plan.invalidation,
+          takeProfit: plan.targets[0]?.price, targets: plan.targets, planId: plan.id,
+          datasetId: plan.datasetId, executionVersion: 'paper-simulator-1.0.0', timestamp: openedAt,
         });
+        if (opened.accepted) {
+          replayAccount = opened.account;
+          const position = replayAccount.positions.at(-1)!;
+          openedOnBar.add(position.id);
+          positions.push(position);
+        }
       }
     }
     plans = nextPlans;
@@ -97,34 +106,26 @@ export function replayClosedCandles(input: {
       if (openedOnBar.has(position.id)) { stillOpen.push(position); continue; }
       const plan = plans.find((candidate) => candidate.id === position.planId);
       const managed = managePaperPosition({ position, candle, barIndex: index, feeRate: costs.feeRate });
-      let remaining = position.quantity;
+      const managedPosition = { ...managed.position, quantity: position.quantity, entryFee: position.entryFee, entrySlippage: position.entrySlippage, status: 'open' as const };
+      replayAccount = { ...replayAccount, positions: replayAccount.positions.map((candidate) => candidate.id === position.id ? managedPosition : candidate) };
       for (const exit of managed.exits) {
-        const quantity = Math.min(exit.quantity, remaining);
-        remaining -= quantity;
-        const exitFee = exit.price * quantity * costs.feeRate;
-        const allocatedEntryFee = position.quantity > 0 ? position.entryFee * quantity / position.quantity : 0;
-        const gross = (exit.price - position.entryPrice) * quantity;
-        const pnl = gross - exitFee - allocatedEntryFee;
-        const risk = (position.initialRisk ?? 0) * quantity;
-        const initialRisk = position.initialRisk;
-        const mfeR = initialRisk && initialRisk > 0
-          ? position.side === 'buy' ? ((managed.position.maxFavorablePrice ?? position.entryPrice) - position.entryPrice) / initialRisk : (position.entryPrice - (managed.position.maxFavorablePrice ?? position.entryPrice)) / initialRisk
-          : null;
-        const maeR = initialRisk && initialRisk > 0
-          ? position.side === 'buy' ? ((managed.position.maxAdversePrice ?? position.entryPrice) - position.entryPrice) / initialRisk : (position.entryPrice - (managed.position.maxAdversePrice ?? position.entryPrice)) / initialRisk
-          : null;
+        const reduced = reducePaperPosition(replayAccount, position.id, exit.quantity, exit.price, costs.feeRate,
+          'paper-simulator-1.0.0', `replay-${index}-${position.id}-${trades.length}`, new Date(candle.time * 1000).toISOString(),
+          exit.reason, candle, costs.slippageRate);
+        if ('error' in reduced) continue;
+        replayAccount = reduced.account;
+        const trade = reduced.trade;
+        const risk = (position.initialRisk ?? 0) * trade.quantity;
         trades.push({
           planId: position.planId ?? '', symbol: position.symbol, entryTime: Date.parse(position.openedAt) / 1000,
-          exitTime: candle.time, entryPrice: position.entryPrice, exitPrice: exit.price, quantity,
-          fees: exitFee + allocatedEntryFee, slippage: Math.abs(position.entryPrice) * quantity * costs.slippageRate + exit.price * quantity * costs.slippageRate,
-          pnlAfterCosts: pnl, rMultipleAfterCosts: risk > 0 ? pnl / risk : 0, maeR, mfeR,
+          exitTime: candle.time, entryPrice: position.entryPrice, exitPrice: trade.exitPrice, quantity: trade.quantity,
+          fees: trade.fees, slippage: trade.slippage, pnlAfterCosts: trade.realizedPnl,
+          rMultipleAfterCosts: risk > 0 ? trade.realizedPnl / risk : 0, maeR: trade.maeR, mfeR: trade.mfeR,
           exitReason: exit.reason,
         });
       }
-      if (remaining > 0 && managed.position.status === 'open') {
-        const unallocatedEntryFee = position.quantity > 0 ? position.entryFee * remaining / position.quantity : 0;
-        stillOpen.push({ ...managed.position, quantity: remaining, entryFee: unallocatedEntryFee });
-      }
+      const current = replayAccount.positions.find((candidate) => candidate.id === position.id);
+      if (current?.status === 'open') stillOpen.push(current);
       else if (plan) {
         const planIndex = plans.indexOf(plan);
         if (planIndex >= 0 && plan.status === 'OPEN') plans[planIndex] = { ...plan, status: 'CLOSED', updatedAt: new Date(candle.time * 1000).toISOString() };

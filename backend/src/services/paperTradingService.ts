@@ -4,7 +4,7 @@ import { getMarket } from '../../../src/lib/markets';
 import type { TradeDecision } from '../engines/decision-engine';
 import { atr } from '../../../src/lib/indicators';
 import { analyzeMarketStructure } from '../../../src/lib/market-structure';
-import { getSupabaseClient, getSupabaseClientWithToken } from '../db';
+import { getSupabaseClient } from '../db';
 import { fetchMarketData } from './marketDataService';
 import { traderConfig } from '../trader/config';
 import { calculatePositionSize, markToMarket } from '../trader/risk';
@@ -17,6 +17,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { computeResearchMetrics, createDailyReview, type JournalSample } from '../trader/research';
 import { getMarketAvailability } from './marketAvailability';
 import { evaluateEventEntryGate, getEventRiskStatus } from '../trader/event-risk';
+import { candleIndex } from '../trader/candle-math';
 
 const testAccounts = new Map<string, PaperAccountState>();
 
@@ -25,7 +26,7 @@ interface LoadedAccount {
   version: number;
 }
 
-async function loadAccount(accountId: string, accessToken?: string): Promise<LoadedAccount> {
+async function loadAccount(accountId: string): Promise<LoadedAccount> {
   if (!accountId) throw new Error('An account ID is required.');
   if (process.env.NODE_ENV === 'test') {
     const account = testAccounts.get(accountId);
@@ -34,7 +35,7 @@ async function loadAccount(accountId: string, accessToken?: string): Promise<Loa
     testAccounts.set(accountId, created);
     return { account: created, version: 0 };
   }
-  const supabase = accessToken ? getSupabaseClientWithToken(accessToken) : getSupabaseClient();
+  const supabase = getSupabaseClient();
   for (let attempt = 0; attempt < 3; attempt++) {
     const { data, error } = await supabase
       .from('paper_sim_accounts')
@@ -45,18 +46,20 @@ async function loadAccount(accountId: string, accessToken?: string): Promise<Loa
     if (data?.state) return { account: data.state as PaperAccountState, version: Number(data.version) };
 
     const account: PaperAccountState = { accountId, cash: traderConfig.TRADER_STARTING_EQUITY, positions: [], trades: [] };
-    const { error: insertError } = await supabase.from('paper_sim_accounts').insert({ account_id: accountId, state: account, version: 0 });
-    if (!insertError) return { account, version: 0 };
-    if (insertError.code !== '23505') throw new Error(`Could not create paper account: ${insertError.message}`);
+    const { data: createdVersion, error: createError } = await supabase.rpc('record_paper_account_update', {
+      p_account_id: accountId, p_expected_version: -1, p_state: account, p_events: [],
+    });
+    if (createError) throw new Error(`Could not initialize paper account: ${createError.message}`);
+    if (Number(createdVersion) >= 0) return { account, version: Number(createdVersion) };
   }
   throw new Error('Could not initialize paper account after concurrent creation.');
 }
 
-export function getAccount(accountId = 'autonomy:default', accessToken?: string) {
-  return loadAccount(accountId, accessToken).then(({ account }) => account);
+export function getAccount(accountId = 'autonomy:default') {
+  return loadAccount(accountId).then(({ account }) => account);
 }
 
-export async function storeTradePlan(accountId: string, plan: TradePlan, accessToken?: string): Promise<void> {
+export async function storeTradePlan(accountId: string, plan: TradePlan): Promise<void> {
   await updateAccount(accountId, (account) => {
     if ((account.tradePlans ?? []).some((candidate) => candidate.id === plan.id)) return { account, result: undefined };
     const event: PlanEvent = {
@@ -65,11 +68,11 @@ export async function storeTradePlan(accountId: string, plan: TradePlan, accessT
       engineVersion: plan.engineVersions['market-structure'], occurredAt: plan.createdAt,
     };
     return { account: { ...account, tradePlans: [...(account.tradePlans ?? []), plan], planEvents: [...(account.planEvents ?? []), event] }, result: undefined };
-  }, accessToken);
+  });
 }
 
-export async function listStoredTradePlans(accountId: string, accessToken?: string): Promise<TradePlan[]> {
-  const account = await getAccount(accountId, accessToken);
+export async function listStoredTradePlans(accountId: string): Promise<TradePlan[]> {
+  const account = await getAccount(accountId);
   return account.tradePlans ?? [];
 }
 
@@ -78,7 +81,7 @@ export interface StoredPlanExecutionResult {
   events: PlanEvent[];
   orders: PendingPaperOrder[];
   filled: number;
-  shadowSignals: Array<{ planId: string; candleTime: number; reason: string }>;
+  shadowSignals: Array<{ planId: string; symbol: string; candleTime: number; reason: string }>;
 }
 
 export async function advanceStoredTradePlans(input: {
@@ -88,7 +91,7 @@ export async function advanceStoredTradePlans(input: {
   candle: Candle;
   candles: Candle[];
   shadowMode?: boolean;
-  accessToken?: string;
+  entriesAllowed?: boolean;
 }): Promise<StoredPlanExecutionResult> {
   const eventRisk = await getEventRiskStatus(input.symbol);
   return updateAccount(input.accountId, (startingAccount) => {
@@ -100,17 +103,17 @@ export async function advanceStoredTradePlans(input: {
     const events: PlanEvent[] = [];
     const shadowSignals: StoredPlanExecutionResult['shadowSignals'] = [];
     let filled = 0;
-    const timeframeSeconds: Record<Timeframe, number> = { '1m': 60, '3m': 180, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h': 14400, '1d': 86400, '1w': 604800, '1M': 2592000 };
-    const barIndex = Math.floor(input.candle.time / timeframeSeconds[input.timeframe]);
+    const barIndex = candleIndex(input.timeframe, input.candle.time);
     const plans = [...(account.tradePlans ?? [])];
     const pendingOrders = [...(account.pendingPaperOrders ?? [])];
     const isShadow = input.shadowMode ?? traderConfig.SHADOW_MODE_ENABLED;
 
     for (let index = 0; index < plans.length; index += 1) {
       const plan = plans[index]!;
-      if (plan.symbol !== input.symbol || !['WATCHING', 'ARMED', 'PENDING_ORDER'].includes(plan.status)) continue;
+      if (plan.symbol !== input.symbol || (plan.triggerTimeframe ?? traderConfig.TRIGGER_TIMEFRAMES[0]) !== input.timeframe || !['WATCHING', 'ARMED', 'PENDING_ORDER'].includes(plan.status)) continue;
       let gateResult: EntryGateResult = { approved: false, quantity: 0, reason: 'Entry gates have not passed.' };
       const gate = (entryPrice: number): EntryGateResult => {
+        if (input.entriesAllowed === false) return gateResult = { approved: false, quantity: 0, reason: 'Entry paused: trigger candle is older than the configured maximum entry age.' };
         const eventDecision = evaluateEventEntryGate(eventRisk, traderConfig.EVENT_BLACKOUT_MIN_IMPACT);
         if (!eventDecision.approved) return gateResult = { approved: false, quantity: 0, reason: eventDecision.reason, activeEventIds: eventDecision.activeEventIds };
         const market = getMarket(plan.symbol);
@@ -122,14 +125,20 @@ export async function advanceStoredTradePlans(input: {
         const target = plan.targets[0]?.price;
         const stopDistance = entryPrice - plan.invalidation;
         if (!target || stopDistance <= 0 || (target - entryPrice) / stopDistance < Math.max(traderConfig.MIN_RR, plan.minRR)) return gateResult = { approved: false, quantity: 0, reason: 'Plan risk/reward is below the configured minimum.' };
+        const instant = input.candle.time * 1000;
+        const dayStart = new Date(instant).setUTCHours(0, 0, 0, 0);
         const openPositions = account.positions.filter((position) => position.status === 'open');
+        const dailyEntries = new Map<string, string>();
+        for (const trade of account.trades) if (Date.parse(trade.openedAt) >= dayStart) dailyEntries.set(trade.positionId, trade.symbol);
+        for (const position of account.positions) if (Date.parse(position.openedAt) >= dayStart) dailyEntries.set(position.id, position.symbol);
+        if (dailyEntries.size >= traderConfig.MAX_TRADES_PER_DAY) return gateResult = { approved: false, quantity: 0, reason: `Daily trade cap reached (${traderConfig.MAX_TRADES_PER_DAY}).` };
+        const symbolEntries = [...dailyEntries.values()].filter((symbol) => symbol === plan.symbol).length;
+        if (symbolEntries >= traderConfig.MAX_TRADES_PER_SYMBOL_PER_DAY) return gateResult = { approved: false, quantity: 0, reason: `Daily trade cap for ${plan.symbol} reached (${traderConfig.MAX_TRADES_PER_SYMBOL_PER_DAY}).` };
         if (openPositions.some((position) => position.symbol === plan.symbol)) return gateResult = { approved: false, quantity: 0, reason: 'A paper position is already open for this symbol.' };
         if (openPositions.length >= traderConfig.MAX_CONCURRENT_POSITIONS) return gateResult = { approved: false, quantity: 0, reason: 'Maximum concurrent paper positions reached.' };
         const cluster = getCorrelationCluster(plan.symbol);
         const correlated = openPositions.filter((position) => getCorrelationCluster(position.symbol) === cluster).length;
         if (cluster && correlated >= traderConfig.MAX_CORRELATED_POSITIONS) return gateResult = { approved: false, quantity: 0, reason: 'Correlation cluster limit reached.' };
-        const instant = input.candle.time * 1000;
-        const dayStart = new Date(instant).setUTCHours(0, 0, 0, 0);
         const weekStart = dayStart - ((new Date(dayStart).getUTCDay() + 6) % 7) * 86_400_000;
         const dailyPnl = account.trades.filter((trade) => Date.parse(trade.closedAt) >= dayStart).reduce((sum, trade) => sum + trade.realizedPnl, 0);
         const weeklyPnl = account.trades.filter((trade) => Date.parse(trade.closedAt) >= weekStart).reduce((sum, trade) => sum + trade.realizedPnl, 0);
@@ -162,7 +171,7 @@ export async function advanceStoredTradePlans(input: {
       if (isShadow && (plan.status !== 'PENDING_ORDER' && step.plan.status === 'PENDING_ORDER' || step.fill !== undefined)) {
         const signalKey = `${plan.id}:${input.candle.time}`;
         if (!(account.shadowSignals ?? []).some((signal) => `${signal.planId}:${signal.candleTime}` === signalKey)) {
-          shadowSignals.push({ planId: plan.id, candleTime: input.candle.time, reason: step.fill ? 'Shadow order would have filled on this later candle; no paper position was opened.' : 'Trigger confirmed; shadow order queued without opening a paper position.' });
+          shadowSignals.push({ planId: plan.id, symbol: plan.symbol, candleTime: input.candle.time, reason: step.fill ? 'Shadow order would have filled on this later candle; no paper position was opened.' : 'Trigger confirmed; shadow order queued without opening a paper position.' });
         }
         nextPlan = { ...plan, status: 'PENDING_ORDER', lastReason: step.fill ? 'Shadow order would have filled; live paper opening is disabled.' : 'Trigger confirmed; shadow order queued without opening a paper position.', updatedAt: new Date(input.candle.time * 1000).toISOString() };
         for (const event of step.events) if (event.toStatus !== 'PENDING_ORDER' && event.toStatus !== 'OPEN') events.push(event);
@@ -191,7 +200,7 @@ export async function advanceStoredTradePlans(input: {
           const result = simulatePaperOrder(account, {
             orderId: fill.order.id, positionId: `position-${fill.order.id}`, decisionId: `plan-${plan.id}`,
             assetId: plan.symbol, symbol: plan.symbol, decision, riskApproved: true, portfolioApproved: true,
-            quantity: fill.order.quantity, requestedPrice: fill.price, feeRate: traderConfig.FEE_RATE, slippageRate: 0,
+            quantity: fill.order.quantity, requestedPrice: fill.price, feeRate: traderConfig.FEE_RATE, slippageRate: traderConfig.SLIPPAGE_RATE,
             stopLoss: plan.invalidation, takeProfit: plan.targets[0]?.price, targets: plan.targets,
             planId: plan.id, datasetId: plan.datasetId, executionVersion: 'paper-simulator-1.0.0', timestamp: decision.timestamp,
           });
@@ -213,31 +222,67 @@ export async function advanceStoredTradePlans(input: {
       processedCandles: { ...account.processedCandles, [checkpoint]: input.candle.time },
     };
     return { account, result: { plans, events, orders: pendingOrders, filled, shadowSignals } };
-  }, input.accessToken);
+  });
+}
+
+function ledgerEvents(previous: PaperAccountState, next: PaperAccountState) {
+  const events: Array<{ idempotencyKey: string; eventType: string; payload: unknown }> = [];
+  const add = (eventType: string, idempotencyKey: string, payload: unknown) => events.push({ eventType, idempotencyKey, payload });
+  const previousPlanEvents = new Set((previous.planEvents ?? []).map((event) => event.id));
+  for (const event of next.planEvents ?? []) if (!previousPlanEvents.has(event.id)) add('plan.event', `plan-event:${event.id}`, event);
+  const previousTrades = new Set(previous.trades.map((trade) => trade.id));
+  for (const trade of next.trades) if (!previousTrades.has(trade.id)) {
+    add('paper.trade.closed', `trade:${trade.id}`, trade);
+    add('paper.fill.exit', `exit-fill:${trade.id}`, trade);
+  }
+  const previousShadows = new Set((previous.shadowSignals ?? []).map((signal) => `${signal.planId}:${signal.candleTime}`));
+  for (const signal of next.shadowSignals ?? []) {
+    const key = `${signal.planId}:${signal.candleTime}`;
+    if (!previousShadows.has(key)) add('shadow.signal', `shadow:${key}`, signal);
+  }
+  const previousOrders = new Map((previous.pendingPaperOrders ?? []).map((order) => [order.id, order]));
+  for (const order of next.pendingPaperOrders ?? []) {
+    if (JSON.stringify(previousOrders.get(order.id)) !== JSON.stringify(order)) add('paper.order', `order:${order.id}:${order.status}`, order);
+  }
+  const previousPositions = new Map(previous.positions.map((position) => [position.id, position]));
+  for (const position of next.positions) {
+    if (JSON.stringify(previousPositions.get(position.id)) !== JSON.stringify(position)) {
+      const digest = createHash('sha256').update(JSON.stringify(position)).digest('hex');
+      add('paper.position', `position:${position.id}:${digest}`, position);
+      if (position.status === 'open' && previousPositions.get(position.id)?.status !== 'open') {
+        add('paper.fill', `fill:${position.id}`, { position, orderId: position.id, candleTime: Date.parse(position.openedAt) / 1000 });
+      }
+    }
+  }
+  const previousJournal = new Set((previous.tradeJournal ?? []).map((entry) => entry.id));
+  for (const entry of next.tradeJournal ?? []) if (!previousJournal.has(entry.id)) add('trade.journal', `journal:${entry.id}`, entry);
+  const previousReviews = new Set((previous.dailyReviews ?? []).map((review) => review.reviewDate));
+  for (const review of next.dailyReviews ?? []) if (!previousReviews.has(review.reviewDate)) add('daily.review', `review:${review.reviewDate}`, review);
+  const previousGates = new Set((previous.executionGateResults ?? []).map((entry) => entry.id));
+  for (const entry of next.executionGateResults ?? []) if (!previousGates.has(entry.id)) add('risk.gate', `risk-gate:${entry.id}`, entry);
+  return events;
 }
 
 async function updateAccount<T>(
   accountId: string,
   update: (account: PaperAccountState) => { account: PaperAccountState; result: T },
-  accessToken?: string,
 ): Promise<T> {
   for (let attempt = 0; attempt < 5; attempt++) {
-    const loaded = await loadAccount(accountId, accessToken);
+    const loaded = await loadAccount(accountId);
     const changed = update(loaded.account);
     if (process.env.NODE_ENV === 'test') {
       testAccounts.set(accountId, changed.account);
       return changed.result;
     }
-    const supabase = accessToken ? getSupabaseClientWithToken(accessToken) : getSupabaseClient();
-    const { data, error } = await supabase
-      .from('paper_sim_accounts')
-      .update({ state: changed.account, version: loaded.version + 1 })
-      .eq('account_id', accountId)
-      .eq('version', loaded.version)
-      .select('version')
-      .maybeSingle();
-    if (error) throw new Error(`Could not update paper account: ${error.message}`);
-    if (data) return changed.result;
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase.rpc('record_paper_account_update', {
+      p_account_id: accountId,
+      p_expected_version: loaded.version,
+      p_state: changed.account,
+      p_events: ledgerEvents(loaded.account, changed.account),
+    });
+    if (error) throw new Error(`Could not atomically record paper account and ledger update: ${error.message}`);
+    if (Number(data) >= 0) return changed.result;
   }
   throw new Error('Paper account changed concurrently too many times. Please retry.');
 }
@@ -266,20 +311,22 @@ function recordPaperTrade(account: PaperAccountState, trade: PaperTrade, timefra
   return { ...updated, tradeJournal: [...(updated.tradeJournal ?? []), journal] };
 }
 
-export async function closeOpenPaperPosition(accountId: string, symbol: string, accessToken?: string): Promise<PaperTrade> {
+export async function closeOpenPaperPosition(accountId: string, symbol: string): Promise<PaperTrade> {
   const candles = (await fetchMarketData(symbol, '1m', 1, { priority: true })).candles;
   const candle = candles.at(-1);
   const exitPrice = candle?.close;
   if (!exitPrice || !Number.isFinite(exitPrice)) throw new Error('A current market price is unavailable.');
   return updateAccount(accountId, (account) => {
-    const result = closePaperPosition(account, symbol, exitPrice, traderConfig.FEE_RATE, 'paper-simulator-1.0.0', `trade-${Date.now()}`, undefined, candle);
+    const result = closePaperPosition(account, symbol, exitPrice, traderConfig.FEE_RATE, 'paper-simulator-1.0.0', `trade-${Date.now()}`, undefined, candle, traderConfig.SLIPPAGE_RATE);
     if ('error' in result) throw new Error(result.error);
     return { account: recordPaperTrade(result.account, result.trade, '1m', candle), result: result.trade };
-  }, accessToken);
+  });
 }
 
 export async function manageOpenPositions(accountId: string, symbol: string, candle: Candle, history: Candle[] = [candle], thesisInvalidated = false, timeframe: Timeframe = traderConfig.MGMT_TIMEFRAME as Timeframe): Promise<PaperTrade[]> {
   return updateAccount(accountId, (startingAccount) => {
+    const checkpoint = candleCheckpoint(symbol, timeframe, 'manager');
+    if (startingAccount.processedCandles?.[checkpoint] === candle.time) return { account: startingAccount, result: [] };
     let account = startingAccount;
     const closedTrades: PaperTrade[] = [];
     const openPositions = account.positions.filter((position) => position.status === 'open' && position.symbol === symbol);
@@ -311,7 +358,7 @@ export async function manageOpenPositions(accountId: string, symbol: string, can
         : candidate) };
       for (const exit of managed.exits) {
         const result = reducePaperPosition(account, position.id, exit.quantity, exit.price, traderConfig.FEE_RATE,
-          'paper-simulator-1.0.0', `trade-${Date.now()}-${closedTrades.length}`, new Date(candle.time * 1000).toISOString(), exit.reason, candle);
+          'paper-simulator-1.0.0', `trade-${Date.now()}-${closedTrades.length}`, new Date(candle.time * 1000).toISOString(), exit.reason, candle, traderConfig.SLIPPAGE_RATE);
         if ('trade' in result) {
           account = recordPaperTrade(result.account, result.trade, timeframe, candle);
           closedTrades.push(result.trade);
@@ -332,7 +379,7 @@ export async function manageOpenPositions(accountId: string, symbol: string, can
           : candidate) };
       }
     }
-    return { account, result: closedTrades };
+    return { account: { ...account, processedCandles: { ...account.processedCandles, [checkpoint]: candle.time } }, result: closedTrades };
   });
 }
 
@@ -382,8 +429,7 @@ export async function executeDecision(input: {
   symbol: string;
   decision: TradeDecision;
   processedCandle?: { timeframe: string; time: number };
-    marketDataStale?: boolean;
-  accessToken?: string;
+  marketDataStale?: boolean;
 }) {
   const accountId = input.accountId ?? 'autonomy:default';
   const decision = input.decision;
@@ -392,7 +438,7 @@ export async function executeDecision(input: {
   const quoteCurrency = market?.priceCurrency ?? market?.quoteAsset;
   const orderId = `paper-${Date.now()}`;
   const checkpoint = input.processedCandle ? candleCheckpoint(input.symbol, input.processedCandle.timeframe, 'executor') : undefined;
-  const accountSnapshot = await getAccount(accountId, input.accessToken);
+  const accountSnapshot = await getAccount(accountId);
   const markPrices: Record<string, number> = { [input.symbol]: requestedPrice };
   if (process.env.NODE_ENV !== 'test') {
     await Promise.all(accountSnapshot.positions.filter((position) => position.status === 'open').map(async (position) => {
@@ -418,6 +464,21 @@ export async function executeDecision(input: {
         assetId: input.symbol, symbol: input.symbol, decision, riskApproved: false, portfolioApproved: false,
         quantity: 0, requestedPrice: 0, feeRate: 0, slippageRate: 0, executionVersion: 'paper-simulator-1.0.0',
       }) };
+    }
+    const executionTime = Date.parse(decision.timestamp);
+    const dayStart = new Date(Number.isFinite(executionTime) ? executionTime : Date.now()).setUTCHours(0, 0, 0, 0);
+    const dailyEntries = new Map<string, string>();
+    for (const trade of account.trades) if (Date.parse(trade.openedAt) >= dayStart) dailyEntries.set(trade.positionId, trade.symbol);
+    for (const position of account.positions) if (Date.parse(position.openedAt) >= dayStart) dailyEntries.set(position.id, position.symbol);
+    const capReason = dailyEntries.size >= traderConfig.MAX_TRADES_PER_DAY
+      ? `Daily trade cap reached (${traderConfig.MAX_TRADES_PER_DAY}).`
+      : [...dailyEntries.values()].filter((entrySymbol) => entrySymbol === input.symbol).length >= traderConfig.MAX_TRADES_PER_SYMBOL_PER_DAY
+        ? `Daily trade cap for ${input.symbol} reached (${traderConfig.MAX_TRADES_PER_SYMBOL_PER_DAY}).`
+        : undefined;
+    if (capReason) {
+      const gate = { id: randomUUID(), accountId, symbol: input.symbol, gate: 'daily-trade-cap', result: 'rejected' as const, reason: capReason, occurredAt: decision.timestamp };
+      const nextAccount = { ...account, executionGateResults: [...(account.executionGateResults ?? []), gate] };
+      return { account: nextAccount, result: { accepted: false, orderId, status: 'rejected', reason: capReason, account: nextAccount } };
     }
     const snapshot = markToMarket(account, markPrices);
     const stop = decision.invalidation;
@@ -470,5 +531,5 @@ export async function executeDecision(input: {
       ? { ...result.account, processedCandles: { ...result.account.processedCandles, [checkpoint]: input.processedCandle!.time } }
       : result.account;
     return { account: nextAccount, result: { ...result, account: nextAccount } };
-  }, input.accessToken);
+  });
 }

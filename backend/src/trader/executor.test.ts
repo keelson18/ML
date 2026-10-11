@@ -35,7 +35,7 @@ describe('plan executor', () => {
     expect(sameCandle.reason).toContain('creation candle');
   });
 
-  it('fills only on a later candle and applies slippage and fees', () => {
+  it('returns the raw later-candle execution price for the paper simulator', () => {
     const triggerBar = bar(900);
     const created = advanceTradePlan({
       plan, candle: triggerBar, recentCandles: [triggerBar], barIndex: 20, timeframe: '15m',
@@ -48,11 +48,10 @@ describe('plan executor', () => {
     });
     expect(filled.plan.status).toBe('OPEN');
     expect(filled.pendingOrder?.status).toBe('filled');
-    expect(filled.fill?.price).toBeGreaterThan(nextBar.open);
-    expect(filled.fill?.fee).toBeGreaterThan(0);
+    expect(filled.fill?.price).toBe(nextBar.open);
   });
 
-  it('fills a gapped limit order at the open before applying slippage', () => {
+  it('fills a gapped limit order at the raw open price', () => {
     const pendingOrder: PendingPaperOrder = {
       id: 'order-1', planId: plan.id, accountId: plan.accountId, symbol: plan.symbol, side: 'long',
       orderType: 'limit', price: 100, quantity: 1, createdAtBar: 3, expiresAtBar: 10, status: 'pending',
@@ -62,7 +61,7 @@ describe('plan executor', () => {
       plan: { ...plan, status: 'PENDING_ORDER' }, pendingOrder, candle: gapBar, recentCandles: [gapBar], barIndex: 4, timeframe: '15m',
       gate: () => ({ approved: true, quantity: 1 }),
     });
-    expect(result.fill?.price).toBeLessThan(100);
+    expect(result.fill?.price).toBe(97);
   });
 
   it('rejects a pending fill when the current entry gate blocks it', () => {

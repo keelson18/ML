@@ -16,7 +16,7 @@ export interface ExecutorStep {
   plan: TradePlan;
   pendingOrder?: PendingPaperOrder;
   events: PlanEvent[];
-  fill?: { order: PendingPaperOrder; price: number; fee: number; slippage: number };
+  fill?: { order: PendingPaperOrder; price: number };
   reason: string;
 }
 
@@ -76,12 +76,9 @@ export function advanceTradePlan(input: {
   barIndex: number;
   timeframe: PlanEvent['timeframe'];
   pendingOrder?: PendingPaperOrder;
-  costs?: { feeRate: number; slippageRate: number };
   gate: (entryPrice: number) => EntryGateResult;
 }): ExecutorStep {
   const { plan, candle, previousCandle, recentCandles, barIndex, timeframe, pendingOrder } = input;
-  const feeRate = input.costs?.feeRate ?? traderConfig.FEE_RATE;
-  const slippageRate = input.costs?.slippageRate ?? traderConfig.SLIPPAGE_RATE;
   if (pendingOrder?.status === 'pending') {
     if (barIndex > pendingOrder.expiresAtBar) {
       const cancelled = { ...pendingOrder, status: 'cancelled' as const };
@@ -101,11 +98,9 @@ export function advanceTradePlan(input: {
       const reason = fillGate.reason ?? 'Entry gates rejected this pending fill.';
       return { plan: { ...plan, lastReason: reason, activeEventIds: fillGate.activeEventIds ?? [] }, pendingOrder, events: [gateEvent(plan, reason, fillGate.activeEventIds ?? [], candle, timeframe)], reason };
     }
-    const price = rawPrice * (pendingOrder.side === 'long' ? 1 + slippageRate : 1 - slippageRate);
     const filledOrder = { ...pendingOrder, quantity: Math.min(pendingOrder.quantity, fillGate.quantity), status: 'filled' as const };
-    const fee = price * filledOrder.quantity * feeRate;
-    const event = eventFor(plan, 'OPEN', 'executor', 'Pending order filled on a later candle with configured costs.', candle, timeframe);
-    return { plan: { ...plan, status: 'OPEN', updatedAt: event.occurredAt, lastReason: undefined, activeEventIds: fillGate.activeEventIds ?? [] }, pendingOrder: filledOrder, fill: { order: filledOrder, price, fee, slippage: Math.abs(price - rawPrice) }, events: [event], reason: event.reason };
+    const event = eventFor(plan, 'OPEN', 'executor', 'Pending order filled on a later candle.', candle, timeframe);
+    return { plan: { ...plan, status: 'OPEN', updatedAt: event.occurredAt, lastReason: undefined, activeEventIds: fillGate.activeEventIds ?? [] }, pendingOrder: filledOrder, fill: { order: filledOrder, price: rawPrice }, events: [event], reason: event.reason };
   }
 
   if (!['WATCHING', 'ARMED'].includes(plan.status)) return { plan, events: [], reason: `Plan is ${plan.status}; executor made no change.` };

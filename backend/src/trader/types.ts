@@ -23,6 +23,7 @@ export interface TradePlan {
   htfBias: HtfBias;
   zone: { low: number; high: number };
   trigger: TriggerRule;
+  triggerTimeframe?: Timeframe;
   invalidation: number;
   targets: PlannedTarget[];
   minRR: number;

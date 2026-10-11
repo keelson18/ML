@@ -19,3 +19,7 @@ No migration files were removed or renamed. Production-applied migration IDs wer
 4. Only then propose a migration rename/removal, with an explicit backup and rollout plan.
 
 Until that evidence is supplied, duplicates remain in place. Applying files through the SQL Editor also requires separately recording which repository migrations were applied; SQL execution alone does not synchronize CLI migration history.
+
+## Quantum paper core
+
+`supabase/migrations/20261014000000_quantum_paper_core.sql` is a new owner-applied migration. It creates the append-only hash-chained decision ledger, relational paper-fill and shadow-signal projections, per-user autopilot enrollment, service-role-only transactional account updates, and an idempotent backfill of existing `paper_sim_accounts.state` snapshots. Do not enable autopilot until the project owner has applied it and verified the migration against the target project's history; this workspace did not apply it to a remote database.

@@ -1,0 +1,272 @@
+import type { Candle, Timeframe } from '../../../src/lib/types';
+import { getMarket } from '../../../src/lib/markets';
+import { getSupabaseClient } from '../db';
+import { fetchMarketData, type MarketDataSeries } from '../services/marketDataService';
+import { advanceStoredTradePlans, getAccount, listStoredTradePlans, manageOpenPositions, storeTradePlan } from '../services/paperTradingService';
+import { getMarketAvailability } from '../services/marketAvailability';
+import { createTradePlan } from '../trader/planner';
+import { traderConfig } from '../trader/config';
+import { candleSeconds, latestClosedCandleTime, selectClosedCandles } from '../trader/candle-math';
+import { nextScheduledRunAt } from './candle-clock';
+
+export const AUTOPILOT_TIMEFRAMES = [...new Set([
+  ...traderConfig.HTF_TIMEFRAMES,
+  ...traderConfig.TRIGGER_TIMEFRAMES,
+  traderConfig.MGMT_TIMEFRAME,
+])] as Timeframe[];
+
+export interface PaperAutopilotConfig {
+  account_id: string;
+  enabled: boolean;
+  symbols: string[];
+  paused_reason: string | null;
+  last_run_at: string | null;
+}
+
+export interface SeriesRequest { symbol: string; timeframe: Timeframe }
+
+export function uniqueSeriesRequests(requests: SeriesRequest[]): SeriesRequest[] {
+  const unique = new Map<string, SeriesRequest>();
+  for (const request of requests) unique.set(`${request.symbol}:${request.timeframe}`, request);
+  return [...unique.values()];
+}
+
+export function replayCandlesAfter(candles: Candle[], checkpoint: number | undefined, maximum: number): Candle[] {
+  return candles.filter((candle) => checkpoint === undefined || candle.time > checkpoint).slice(0, maximum);
+}
+
+export async function replaySequentialCandles(
+  candles: Candle[], checkpoint: number | undefined, maximum: number,
+  process: (candle: Candle, history: Candle[]) => Promise<void>,
+): Promise<number> {
+  const pending = replayCandlesAfter(candles, checkpoint, maximum);
+  for (const candle of pending) {
+    const index = candles.findIndex((candidate) => candidate.time === candle.time);
+    await process(candle, candles.slice(0, index + 1));
+  }
+  return pending.length;
+}
+
+export function entryCandleIsFresh(candle: Candle, timeframe: Timeframe, now: number): boolean {
+  const durationMs = candleSeconds(timeframe, candle.time) * 1000;
+  return now - (candle.time * 1000 + durationMs) <= traderConfig.MAX_ENTRY_AGE_BARS * durationMs;
+}
+
+export function isAutopilotSymbol(symbol: string): boolean {
+  const market = getMarket(symbol);
+  return Boolean(market?.isActive && market.provider === 'massive' && market.marketType === 'crypto' && market.priceCurrency === 'USD');
+}
+
+export class PaperAutopilotScheduler {
+  private timer?: ReturnType<typeof setTimeout>;
+  private active = false;
+  private running?: Promise<void>;
+  private readonly lastBoundaries = new Map<Timeframe, number>();
+  private readonly accountQueues = new Map<string, Promise<void>>();
+
+  start(): void {
+    if (this.active) return;
+    this.active = true;
+    void this.runScheduledCycle();
+  }
+
+  stop(): void {
+    this.active = false;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = undefined;
+  }
+
+  async runAccountNow(accountId: string): Promise<{ pausedReason?: string; processed: number }> {
+    const { data, error } = await getSupabaseClient().from('paper_autopilot').select('*').eq('account_id', accountId).maybeSingle();
+    if (error) throw new Error('Autopilot settings are unavailable.');
+    if (!data?.enabled) throw new Error(data?.paused_reason ?? 'Enable paper autopilot before running it.');
+    return this.runAccounts([data as PaperAutopilotConfig], new Set(AUTOPILOT_TIMEFRAMES), Date.now());
+  }
+
+  private scheduleNext(): void {
+    if (!this.active) return;
+    const nextRun = Math.min(...AUTOPILOT_TIMEFRAMES.map((timeframe) => nextScheduledRunAt(Date.now(), timeframe, traderConfig.CLOSE_GRACE_MS)));
+    this.timer = setTimeout(() => { void this.runScheduledCycle(); }, Math.max(0, nextRun - Date.now()));
+  }
+
+  private async runScheduledCycle(): Promise<void> {
+    if (this.running) return this.running;
+    this.running = (async () => {
+      try {
+        const now = Date.now();
+        const due = new Set<Timeframe>();
+        for (const timeframe of AUTOPILOT_TIMEFRAMES) {
+          const boundary = latestClosedCandleTime(now, timeframe, traderConfig.CLOSE_GRACE_MS);
+          if (this.lastBoundaries.get(timeframe) !== boundary) due.add(timeframe);
+          this.lastBoundaries.set(timeframe, boundary);
+        }
+        if (due.size > 0) {
+          const { data, error } = await getSupabaseClient().rpc('list_enabled_paper_autopilots');
+          if (error) throw new Error('Could not list opted-in paper autopilot accounts.');
+          const rows = (data ?? []) as PaperAutopilotConfig[];
+          await this.runAccounts(rows, due, now);
+        }
+      } catch (error) {
+        console.error('[paper-autopilot] scheduler cycle failed:', error instanceof Error ? error.message : 'unknown error');
+      } finally {
+        this.running = undefined;
+        this.scheduleNext();
+      }
+    })();
+    return this.running;
+  }
+
+  private async runAccounts(rows: PaperAutopilotConfig[], due: Set<Timeframe>, now: number): Promise<{ pausedReason?: string; processed: number }> {
+    if (rows.length === 0) return { processed: 0 };
+    const snapshots = new Map<string, Awaited<ReturnType<typeof getAccount>>>();
+    let pausedReason: string | undefined;
+    for (const row of rows) {
+      try { snapshots.set(row.account_id, await getAccount(row.account_id)); }
+      catch (error) {
+        const reason = error instanceof Error ? error.message : 'Paper account schema is unavailable.';
+        pausedReason ??= reason;
+        try { await getSupabaseClient().rpc('pause_paper_autopilot', { p_account_id: row.account_id, p_reason: reason }); }
+        catch { }
+      }
+    }
+    const availableRows = rows.filter((row) => snapshots.has(row.account_id));
+    if (availableRows.length === 0) return { pausedReason, processed: 0 };
+
+    const requestsBySymbol = new Map<string, Set<Timeframe>>();
+    const managedSymbolsByAccount = new Map<string, Set<string>>();
+    for (const row of availableRows) {
+      const account = snapshots.get(row.account_id)!;
+      const activePlans = (account.tradePlans ?? []).filter((plan) => ['WATCHING', 'ARMED', 'PENDING_ORDER'].includes(plan.status));
+      const openSymbols = new Set(account.positions.filter((position) => position.status === 'open').map((position) => position.symbol));
+      const managedSymbols = new Set([...row.symbols, ...openSymbols]);
+      managedSymbolsByAccount.set(row.account_id, managedSymbols);
+      for (const symbol of managedSymbols) {
+        const requested = requestsBySymbol.get(symbol) ?? new Set<Timeframe>();
+        const isConfigured = row.symbols.includes(symbol);
+        if (due.has(traderConfig.MGMT_TIMEFRAME as Timeframe) && openSymbols.has(symbol)) requested.add(traderConfig.MGMT_TIMEFRAME as Timeframe);
+        if (isConfigured) {
+          for (const timeframe of traderConfig.TRIGGER_TIMEFRAMES) {
+            if (due.has(timeframe as Timeframe) && activePlans.some((plan) => plan.symbol === symbol && (plan.triggerTimeframe ?? traderConfig.TRIGGER_TIMEFRAMES[0]) === timeframe)) requested.add(timeframe as Timeframe);
+          }
+          if (traderConfig.HTF_TIMEFRAMES.some((timeframe) => due.has(timeframe as Timeframe))) {
+            for (const timeframe of [...traderConfig.HTF_TIMEFRAMES, ...traderConfig.TRIGGER_TIMEFRAMES]) requested.add(timeframe as Timeframe);
+          }
+        }
+        requestsBySymbol.set(symbol, requested);
+      }
+    }
+
+    const seriesByKey = new Map<string, MarketDataSeries>();
+    const failuresByKey = new Map<string, string>();
+    const seriesRequests = uniqueSeriesRequests([...requestsBySymbol].flatMap(([symbol, timeframes]) =>
+      [...timeframes].map((timeframe) => ({ symbol, timeframe }))));
+    let previousRequestWasFresh = false;
+    for (const { symbol, timeframe } of seriesRequests) {
+      if (previousRequestWasFresh && traderConfig.SCHEDULER_SYMBOL_DELAY_MS > 0) await new Promise((resolve) => setTimeout(resolve, traderConfig.SCHEDULER_SYMBOL_DELAY_MS));
+      const key = `${symbol}:${timeframe}`;
+      const startedAt = Date.now();
+      try {
+        const series = await fetchMarketData(symbol, timeframe, 1000, { priority: true });
+        previousRequestWasFresh = series.fetchedAt >= startedAt;
+        if (series.stale) throw new Error(`Stale ${timeframe} market data for ${symbol}.`);
+        seriesByKey.set(key, series);
+      } catch (error) {
+        previousRequestWasFresh = true;
+        failuresByKey.set(key, error instanceof Error ? error.message : `Market data unavailable for ${symbol} ${timeframe}.`);
+      }
+    }
+
+    let processed = 0;
+    for (const row of availableRows) {
+      const account = snapshots.get(row.account_id)!;
+      await this.withAccountLock(row.account_id, async () => {
+        const managedSymbols = managedSymbolsByAccount.get(row.account_id)!;
+        const missing = [...requestsBySymbol.entries()].flatMap(([symbol, timeframes]) => managedSymbols.has(symbol)
+          ? [...timeframes].map((timeframe) => failuresByKey.get(`${symbol}:${timeframe}`)).filter((reason): reason is string => Boolean(reason))
+          : []);
+        const accountEntryPause = missing[0];
+        if (accountEntryPause) {
+          pausedReason = accountEntryPause;
+          await getSupabaseClient().rpc('pause_paper_autopilot', { p_account_id: row.account_id, p_reason: accountEntryPause });
+        } else if (row.paused_reason) {
+          await getSupabaseClient().rpc('resume_paper_autopilot', { p_account_id: row.account_id });
+        }
+        for (const symbol of managedSymbols) {
+          const managerTimeframe = traderConfig.MGMT_TIMEFRAME as Timeframe;
+          if (due.has(managerTimeframe) && account.positions.some((position) => position.status === 'open' && position.symbol === symbol)) {
+            const managerSeries = seriesByKey.get(`${symbol}:${managerTimeframe}`);
+            if (managerSeries) processed += await this.replayManagement(row.account_id, symbol, managerTimeframe, managerSeries, now);
+          }
+        }
+        for (const symbol of row.symbols) {
+          const plannerDue = traderConfig.HTF_TIMEFRAMES.some((timeframe) => due.has(timeframe as Timeframe));
+          if (plannerDue) {
+            const daily = seriesByKey.get(`${symbol}:1d`);
+            const fourHour = seriesByKey.get(`${symbol}:4h`);
+            if (daily && fourHour && !accountEntryPause) {
+              const existingPlans = await listStoredTradePlans(row.account_id);
+              for (const trigger of traderConfig.TRIGGER_TIMEFRAMES as Timeframe[]) {
+                if (existingPlans.some((plan) => plan.symbol === symbol && (plan.triggerTimeframe ?? traderConfig.TRIGGER_TIMEFRAMES[0]) === trigger && ['WATCHING', 'ARMED', 'PENDING_ORDER'].includes(plan.status))) continue;
+                const triggerSeries = seriesByKey.get(`${symbol}:${trigger}`);
+                if (!triggerSeries) continue;
+                const dailyCandles = selectClosedCandles(daily.candles, '1d', now, traderConfig.CLOSE_GRACE_MS);
+                const fourHourCandles = selectClosedCandles(fourHour.candles, '4h', now, traderConfig.CLOSE_GRACE_MS);
+                const triggerCandles = selectClosedCandles(triggerSeries.candles, trigger, now, traderConfig.CLOSE_GRACE_MS);
+                const result = createTradePlan({ accountId: row.account_id, symbol, htfCandles: { '1d': dailyCandles, '4h': fourHourCandles }, triggerCandles, triggerTimeframe: trigger, datasetId: `${daily.dataset.id}:${fourHour.dataset.id}:${triggerSeries.dataset.id}` });
+                if (result.plan) await storeTradePlan(row.account_id, result.plan);
+              }
+            }
+          }
+          for (const timeframe of traderConfig.TRIGGER_TIMEFRAMES as Timeframe[]) {
+            if (!due.has(timeframe)) continue;
+            const series = seriesByKey.get(`${symbol}:${timeframe}`);
+            if (!series || accountEntryPause) continue;
+            processed += await this.replayEntries(row.account_id, symbol, timeframe, series, now);
+          }
+        }
+        await getSupabaseClient().rpc('touch_paper_autopilot_run', { p_account_id: row.account_id });
+      }).catch(async (error: unknown) => {
+        const reason = error instanceof Error ? error.message : 'Paper autopilot account processing failed.';
+        pausedReason ??= reason;
+        try { await getSupabaseClient().rpc('pause_paper_autopilot', { p_account_id: row.account_id, p_reason: reason }); }
+        catch { }
+      });
+    }
+    return { pausedReason, processed };
+  }
+
+  private async replayManagement(accountId: string, symbol: string, timeframe: Timeframe, series: MarketDataSeries, now: number): Promise<number> {
+    const candles = selectClosedCandles(series.candles, timeframe, now, traderConfig.CLOSE_GRACE_MS);
+    const account = await getAccount(accountId);
+    const checkpoint = account.processedCandles?.[`${symbol}:manager:${timeframe}`];
+    return replaySequentialCandles(candles, checkpoint, traderConfig.SCHEDULER_MAX_CATCH_UP_BARS,
+      (candle, history) => manageOpenPositions(accountId, symbol, candle, history, false, timeframe).then(() => undefined));
+  }
+
+  private async replayEntries(accountId: string, symbol: string, timeframe: Timeframe, series: MarketDataSeries, now: number): Promise<number> {
+    const candles = selectClosedCandles(series.candles, timeframe, now, traderConfig.CLOSE_GRACE_MS);
+    const account = await getAccount(accountId);
+    const checkpoint = account.processedCandles?.[`${symbol}:executor:${timeframe}`] ?? account.processedCandles?.[`${symbol}:${timeframe}`];
+    return replaySequentialCandles(candles, checkpoint, traderConfig.SCHEDULER_MAX_CATCH_UP_BARS,
+      async (candle, history) => {
+        const allowEntries = entryCandleIsFresh(candle, timeframe, now);
+        await advanceStoredTradePlans({ accountId, symbol, timeframe, candle, candles: history, entriesAllowed: allowEntries });
+      });
+  }
+
+  private async withAccountLock<T>(accountId: string, run: () => Promise<T>): Promise<T> {
+    const previous = this.accountQueues.get(accountId) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    const queued = previous.then(() => current);
+    this.accountQueues.set(accountId, queued);
+    await previous;
+    try { return await run(); }
+    finally {
+      release();
+      if (this.accountQueues.get(accountId) === queued) this.accountQueues.delete(accountId);
+    }
+  }
+}
+
+export const paperAutopilotScheduler = new PaperAutopilotScheduler();

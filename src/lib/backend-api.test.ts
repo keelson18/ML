@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { advanceTraderPlans, fetchCanonicalMarketData } from './backend-api';
+import { fetchCanonicalMarketData, runTraderAutopilotNow } from './backend-api';
 import { supabase } from './supabase';
 
 vi.mock('./supabase', () => ({
@@ -60,9 +60,9 @@ describe('authenticated backend responses', () => {
     await expect(fetchCanonicalMarketData('BTCUSD', '1h')).rejects.toThrow('Authentication required.');
   });
 
-  it('does not set JSON content-type for a bodyless POST', async () => {
-    fetchMock.mockResolvedValue(new Response(JSON.stringify({ advancedPlans: 0, filledOrders: 0, shadowSignals: [], closedTrades: [], staleSymbols: [], shadowMode: true }), { status: 200 }));
-    await advanceTraderPlans();
+  it('sends Run now as an authenticated bodyless POST', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ processed: 0 }), { status: 200 }));
+    await runTraderAutopilotNow();
     const init = fetchMock.mock.calls[0]?.[1];
     expect(init?.method).toBe('POST');
     expect(new Headers(init?.headers).has('Content-Type')).toBe(false);

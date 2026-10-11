@@ -6,7 +6,7 @@ export async function positionRoutes(app: FastifyInstance) {
     const accountId = request.authenticatedUserId;
     if (!accountId) return reply.code(401).send({ error: 'Authentication required' });
     if (!request.accessToken) return reply.code(401).send({ error: 'Authentication required' });
-    return getAccount(accountId, request.accessToken);
+    return getAccount(accountId);
   });
 
   app.post<{ Body: { symbol: string } }>('/api/v1/paper/close', { preHandler: app.requireAuth }, async (request, reply) => {
@@ -18,7 +18,7 @@ export async function positionRoutes(app: FastifyInstance) {
     }
     try {
       if (!request.accessToken) return reply.code(401).send({ error: 'Authentication required' });
-      return { trade: await closeOpenPaperPosition(accountId, symbol, request.accessToken) };
+      return { trade: await closeOpenPaperPosition(accountId, symbol) };
     } catch (error) {
       return reply.code(400).send({ error: error instanceof Error ? error.message : 'Could not close paper position.' });
     }

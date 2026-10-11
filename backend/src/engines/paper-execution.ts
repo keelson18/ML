@@ -20,6 +20,7 @@ export interface PaperPosition {
   quantity: number;
   entryPrice: number;
   entryFee: number;
+  entrySlippage?: number;
   stopLoss?: number;
   takeProfit?: number;
   initialRisk?: number;
@@ -47,7 +48,11 @@ export interface PaperTrade {
   entryPrice: number;
   exitPrice: number;
   fees: number;
+  entryFee?: number;
+  exitFee?: number;
   slippage: number;
+  entrySlippage?: number;
+  exitSlippage?: number;
   realizedPnl: number;
   executionVersion: string;
   openedAt: string;
@@ -68,7 +73,8 @@ export interface PaperAccountState {
   planEvents?: PlanEvent[];
   tradeJournal?: PaperJournalEntry[];
   dailyReviews?: Array<{ reviewDate: string; metrics: unknown }>;
-  shadowSignals?: Array<{ planId: string; candleTime: number; reason: string }>;
+  shadowSignals?: Array<{ planId: string; symbol: string; candleTime: number; reason: string }>;
+  executionGateResults?: Array<{ id: string; accountId: string; symbol: string; gate: string; result: 'rejected'; reason: string; occurredAt: string }>;
 }
 
 export interface PaperOrderRequest {
@@ -156,6 +162,7 @@ export function simulatePaperOrder(
     quantity: request.quantity,
     entryPrice: fillPrice,
     entryFee: fee,
+    entrySlippage: Math.abs(fillPrice - request.requestedPrice) * request.quantity,
     stopLoss: request.stopLoss,
     takeProfit: request.takeProfit,
     initialRisk: request.stopLoss === undefined ? undefined : Math.abs(fillPrice - request.stopLoss),
@@ -196,10 +203,11 @@ export function closePaperPosition(
   tradeId: string,
   timestamp = new Date().toISOString(),
   candle?: Pick<Candle, 'high' | 'low'>,
+  slippageRate = 0,
 ): { account: PaperAccountState; trade: PaperTrade } | { account: PaperAccountState; error: string } {
   const position = account.positions.find((candidate) => candidate.status === 'open' && candidate.symbol === symbol);
   if (!position) return { account, error: 'No open paper position exists for this symbol.' };
-  return reducePaperPosition(account, position.id, position.quantity, exitPrice, feeRate, executionVersion, tradeId, timestamp, 'stop-or-target', candle);
+  return reducePaperPosition(account, position.id, position.quantity, exitPrice, feeRate, executionVersion, tradeId, timestamp, 'stop-or-target', candle, slippageRate);
 }
 
 export function reducePaperPosition(
@@ -213,18 +221,22 @@ export function reducePaperPosition(
   timestamp = new Date().toISOString(),
   exitReason = 'manual-reduction',
   candle?: Pick<Candle, 'high' | 'low'>,
+  slippageRate = 0,
 ): { account: PaperAccountState; trade: PaperTrade } | { account: PaperAccountState; error: string } {
   const position = account.positions.find((candidate) => candidate.status === 'open' && candidate.id === positionId);
   if (!position) return { account, error: 'No open paper position exists for this symbol.' };
-  if (!validPositive(requestedQuantity) || !validPositive(exitPrice) || !Number.isFinite(feeRate) || feeRate < 0) {
+  if (!validPositive(requestedQuantity) || !validPositive(exitPrice) || !Number.isFinite(feeRate) || feeRate < 0 || !Number.isFinite(slippageRate) || slippageRate < 0 || slippageRate >= 1) {
     return { account, error: 'Exit price must be positive and fee rate must be non-negative.' };
   }
 
   const quantity = Math.min(position.quantity, requestedQuantity);
-  const exitNotional = exitPrice * quantity;
+  const fillPrice = position.side === 'buy' ? exitPrice * (1 - slippageRate) : exitPrice * (1 + slippageRate);
+  const exitNotional = fillPrice * quantity;
   const exitFee = exitNotional * feeRate;
   const allocatedEntryFee = position.quantity > 0 ? position.entryFee * quantity / position.quantity : 0;
-  const pricePnl = position.side === 'buy' ? (exitPrice - position.entryPrice) * quantity : (position.entryPrice - exitPrice) * quantity;
+  const allocatedEntrySlippage = position.quantity > 0 ? (position.entrySlippage ?? 0) * quantity / position.quantity : 0;
+  const exitSlippage = Math.abs(exitPrice - fillPrice) * quantity;
+  const pricePnl = position.side === 'buy' ? (fillPrice - position.entryPrice) * quantity : (position.entryPrice - fillPrice) * quantity;
   const realizedPnl = pricePnl - allocatedEntryFee - exitFee;
   const releasedCash = position.side === 'buy' ? exitNotional - exitFee : position.entryPrice * quantity + pricePnl - exitFee;
   const remainingQuantity = Math.max(0, position.quantity - quantity);
@@ -250,6 +262,7 @@ export function reducePaperPosition(
     maxAdversePrice: adversePrice,
     quantity: isClosed ? 0 : remainingQuantity,
     entryFee: Math.max(0, position.entryFee - allocatedEntryFee),
+    entrySlippage: Math.max(0, (position.entrySlippage ?? 0) * (position.quantity - quantity) / position.quantity),
     status: isClosed ? 'closed' : 'open',
     closedAt: isClosed ? timestamp : undefined,
   };
@@ -260,9 +273,13 @@ export function reducePaperPosition(
     side: position.side,
     quantity,
     entryPrice: position.entryPrice,
-    exitPrice,
-    fees: position.entryFee + exitFee,
-    slippage: 0,
+    exitPrice: fillPrice,
+    fees: allocatedEntryFee + exitFee,
+    entryFee: allocatedEntryFee,
+    exitFee,
+    slippage: allocatedEntrySlippage + exitSlippage,
+    entrySlippage: allocatedEntrySlippage,
+    exitSlippage,
     realizedPnl,
     executionVersion,
     openedAt: position.openedAt,

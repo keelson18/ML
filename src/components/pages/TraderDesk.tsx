@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, ClipboardList, Clock3, RefreshCw, ShieldCheck } from 'lucide-react';
 import PageFrame from '../PageFrame';
-import { advanceTraderPlans, fetchActiveEventBlackouts, fetchAutonomyStatus, fetchTraderHistory, fetchTraderOverview, fetchTraderPlans, refreshTraderPlans, type AutonomyStatus, type EventBlackout, type TraderAdvanceResult, type TraderOverview, type TraderPlan } from '../../lib/backend-api';
+import { fetchActiveEventBlackouts, fetchAutonomyStatus, fetchTraderAutopilot, fetchTraderHistory, fetchTraderOverview, fetchTraderPlans, refreshTraderPlans, runTraderAutopilotNow, updateTraderAutopilot, type AutonomyStatus, type EventBlackout, type TraderAutopilotRunResult, type TraderAutopilotSettings, type TraderOverview, type TraderPlan } from '../../lib/backend-api';
+import { MARKET_UNIVERSE } from '../../lib/markets';
+
+const AUTOPILOT_MARKETS = MARKET_UNIVERSE.filter((market) => market.isActive && market.provider === 'massive' && market.marketType === 'crypto' && market.priceCurrency === 'USD');
 
 type Review = { review_date?: string; reviewDate?: string; metrics?: { sampleSize?: number; sampleWarning?: string; expectancyR?: number | null } };
 type Journal = { id?: string; symbol?: string; setup_type?: string; outcome_r?: number; r_multiple?: number; created_at?: string; status?: string; active_event_ids?: string[]; metrics?: { rMultiple?: number; maeR?: number | null; mfeR?: number | null; pnl?: number; exitReason?: string } };
@@ -19,25 +22,30 @@ export default function TraderDesk() {
   const [bias, setBias] = useState<BiasRow[]>([]);
   const [eventBlackouts, setEventBlackouts] = useState<EventBlackout[]>([]);
   const [eventCalendarError, setEventCalendarError] = useState(false);
-  const [advanceResult, setAdvanceResult] = useState<TraderAdvanceResult | null>(null);
+  const [autopilot, setAutopilot] = useState<TraderAutopilotSettings | null>(null);
+  const [autopilotEnabled, setAutopilotEnabled] = useState(false);
+  const [autopilotSymbols, setAutopilotSymbols] = useState<string[]>([]);
+  const [autopilotDirty, setAutopilotDirty] = useState(false);
+  const [autopilotRun, setAutopilotRun] = useState<TraderAutopilotRunResult | null>(null);
+  const [autopilotBusy, setAutopilotBusy] = useState(false);
+  const [autopilotError, setAutopilotError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState(false);
 
-  const load = useCallback(async (advance = true) => {
-    setLoading(true);
+  const load = useCallback(async () => {
     setError(null);
-    if (advance) {
-      try { setAdvanceResult(await advanceTraderPlans()); }
-      catch { /* existing saved plans and account data remain readable when the executor is offline */ }
-    }
-    const [planResult, overviewResult, autonomyResult, reviewResult, journalResult, eventsResult] = await Promise.allSettled([
-      fetchTraderPlans(), fetchTraderOverview(), fetchAutonomyStatus(), fetchTraderHistory<Review>('reviews'), fetchTraderHistory<Journal>('journal'), fetchActiveEventBlackouts(),
+    const [planResult, overviewResult, autonomyResult, autopilotResult, reviewResult, journalResult, eventsResult] = await Promise.allSettled([
+      fetchTraderPlans(), fetchTraderOverview(), fetchAutonomyStatus(), fetchTraderAutopilot(), fetchTraderHistory<Review>('reviews'), fetchTraderHistory<Journal>('journal'), fetchActiveEventBlackouts(),
     ]);
     if (planResult.status === 'fulfilled') setPlans(planResult.value);
     if (overviewResult.status === 'fulfilled') setOverview(overviewResult.value);
     if (autonomyResult.status === 'fulfilled') setAutonomy(autonomyResult.value);
+    if (autopilotResult.status === 'fulfilled') {
+      setAutopilot(autopilotResult.value);
+      if (!autopilotDirty) { setAutopilotEnabled(autopilotResult.value.enabled); setAutopilotSymbols(autopilotResult.value.symbols); }
+    }
     if (reviewResult.status === 'fulfilled') setReviews(reviewResult.value);
     if (journalResult.status === 'fulfilled') setJournal(journalResult.value);
     if (eventsResult.status === 'fulfilled') { setEventBlackouts(eventsResult.value); setEventCalendarError(false); }
@@ -45,9 +53,39 @@ export default function TraderDesk() {
     setHistoryError(reviewResult.status === 'rejected' || journalResult.status === 'rejected');
     if (planResult.status === 'rejected' && overviewResult.status === 'rejected') setError('Trader Desk data is unavailable. Check backend health and whether the latest Trader Desk migration has been applied.');
     setLoading(false);
-  }, []);
+  }, [autopilotDirty]);
 
-  useEffect(() => { void load(); const timer = window.setInterval(() => { void (async () => { try { setAdvanceResult(await advanceTraderPlans()); await load(false); } catch { /* the next tick retries */ } })(); }, 60_000); return () => window.clearInterval(timer); }, [load]);
+  useEffect(() => { void load(); const timer = window.setInterval(() => { void load(); }, 60_000); return () => window.clearInterval(timer); }, [load]);
+
+  const saveAutopilot = async () => {
+    setAutopilotBusy(true);
+    setAutopilotError(null);
+    try {
+      const saved = await updateTraderAutopilot({ enabled: autopilotEnabled, symbols: autopilotSymbols });
+      setAutopilot(saved);
+      setAutopilotEnabled(saved.enabled);
+      setAutopilotSymbols(saved.symbols);
+      setAutopilotDirty(false);
+    } catch (cause) {
+      setAutopilotError(cause instanceof Error ? cause.message : 'Could not save paper autopilot settings.');
+    } finally { setAutopilotBusy(false); }
+  };
+
+  const runAutopilot = async () => {
+    setAutopilotBusy(true);
+    setAutopilotError(null);
+    try {
+      setAutopilotRun(await runTraderAutopilotNow());
+      const current = await fetchTraderAutopilot();
+      setAutopilot(current);
+      setAutopilotEnabled(current.enabled);
+      setAutopilotSymbols(current.symbols);
+      setAutopilotDirty(false);
+      await load();
+    } catch (cause) {
+      setAutopilotError(cause instanceof Error ? cause.message : 'Paper autopilot could not run.');
+    } finally { setAutopilotBusy(false); }
+  };
 
   const refresh = async () => {
     setRefreshing(true);
@@ -56,7 +94,6 @@ export default function TraderDesk() {
       const result = await refreshTraderPlans();
       setPlans(result.plans);
       setBias(result.watchlist);
-      setAdvanceResult(await advanceTraderPlans());
       const fresh = await fetchTraderOverview();
       setOverview(fresh);
     } catch (cause) {
@@ -88,9 +125,22 @@ export default function TraderDesk() {
       {eventCalendarError && <div role="alert" className="mb-5 rounded-xl border border-danger/30 bg-danger/10 p-3 text-sm text-danger">Event calendar health could not be verified. New entries are blocked until event-risk data is available.</div>}
       {!!eventBlackouts.length && <div role="status" className="mb-5 rounded-xl border border-warning/30 bg-warning/10 p-3 text-sm text-warning"><strong>Event blackout active.</strong> {eventBlackouts.map((event) => `${event.title} (${Math.max(0, Math.ceil((Date.parse(event.ends_at) - Date.now()) / 60_000))} min remaining)`).join(' · ')} New entries matching the configured impact threshold are blocked.</div>}
       {!!overview?.staleSymbols.length && <div role="status" className="mb-5 rounded-xl border border-warning/30 bg-warning/10 p-3 text-sm text-warning">Stale price data: {overview.staleSymbols.join(', ')}. Open position marks use the last stored entry price until fresh data is available.</div>}
-      {advanceResult?.shadowMode && <div role="status" className="mb-5 rounded-xl border border-primary/30 bg-primary/5 p-3 text-sm text-text">Shadow mode is enabled. Confirmed triggers are recorded for research, but they do not open paper positions.</div>}
-      {!!advanceResult?.staleSymbols.length && <div role="status" className="mb-5 rounded-xl border border-warning/30 bg-warning/10 p-3 text-sm text-warning">Execution and management skipped stale candles for: {advanceResult.staleSymbols.join(', ')}.</div>}
-      {!!advanceResult?.shadowSignals.length && <div className="mb-5 rounded-xl border border-border bg-surface p-4"><h2 className="text-sm font-semibold text-text">Would-have-traded signals</h2><div className="mt-2 space-y-2">{advanceResult.shadowSignals.slice(-4).map((signal) => <p key={`${signal.planId}:${signal.candleTime}`} className="text-xs text-muted">{signal.reason} · {new Date(signal.candleTime * 1000).toLocaleString()}</p>)}</div></div>}
+      {overview && <div role="status" className={`mb-5 rounded-xl border p-3 text-sm ${overview.ledgerStatus === 'broken' || !overview.reconciliation.ok ? 'border-danger/30 bg-danger/10 text-danger' : overview.ledgerStatus === 'verified' ? 'border-success/30 bg-success/10 text-success' : 'border-warning/30 bg-warning/10 text-warning'}`}>Ledger: {overview.ledgerStatus} · Account reconciliation: {overview.reconciliation.ok ? 'balanced' : `difference ${money(overview.reconciliation.difference)}`}{overview.ledgerStatus === 'unavailable' ? ' · Apply the paper core migration or verify the database connection.' : ''}</div>}
+      <section className="mb-6 rounded-xl border border-border bg-surface p-4" aria-labelledby="autopilot-title">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div><h2 id="autopilot-title" className="font-semibold text-text">Paper autopilot</h2><p className="mt-1 text-xs text-muted">Server-scheduled, opt-in execution; it runs only for this account and never submits live orders.</p></div>
+          <span className={`rounded-full px-2.5 py-1 text-xs ${autopilot?.enabled ? 'bg-success/10 text-success' : 'bg-bg text-muted'}`}>{autopilot ? (autopilot.enabled ? 'Enabled' : 'Off') : 'Status unavailable'}</span>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <label className="flex items-center gap-2 text-sm text-text"><input type="checkbox" checked={autopilotEnabled} onChange={(event) => { setAutopilotEnabled(event.target.checked); setAutopilotDirty(true); }} disabled={!autopilot || autopilotBusy} />Enable autopilot for my paper account</label>
+          <div className="text-xs text-muted">Last run: {autopilot?.lastRunAt ? new Date(autopilot.lastRunAt).toLocaleString() : 'Not run yet'}</div>
+        </div>
+        <fieldset className="mt-3"><legend className="text-xs font-medium text-text">Symbols (maximum 3)</legend><div className="mt-2 flex flex-wrap gap-3">{AUTOPILOT_MARKETS.map((market) => <label key={market.symbol} className="flex items-center gap-1.5 text-xs text-muted"><input type="checkbox" checked={autopilotSymbols.includes(market.symbol)} onChange={(event) => { setAutopilotSymbols((symbols) => event.target.checked ? [...symbols, market.symbol] : symbols.filter((symbol) => symbol !== market.symbol)); setAutopilotDirty(true); }} disabled={!autopilot || autopilotBusy || (!autopilotSymbols.includes(market.symbol) && autopilotSymbols.length >= 3)} />{market.symbol}</label>)}</div></fieldset>
+        {autopilot?.pausedReason && <p role="status" className="mt-3 rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-warning">Autopilot paused: {autopilot.pausedReason}. Existing positions remain managed when fresh management data is available.</p>}
+        {autopilotRun && <p role="status" className="mt-3 text-xs text-muted">Run now processed {autopilotRun.processed} candle updates{autopilotRun.pausedReason ? ` · paused: ${autopilotRun.pausedReason}` : ''}.</p>}
+        {autopilotError && <p role="alert" className="mt-3 text-xs text-danger">{autopilotError}</p>}
+        <div className="mt-4 flex flex-wrap gap-2"><button type="button" onClick={() => void saveAutopilot()} disabled={!autopilot || autopilotBusy || autopilotSymbols.length === 0} className="rounded-lg border border-border px-3 py-2 text-xs font-medium text-text disabled:opacity-50">{autopilotBusy ? 'Working…' : 'Save settings'}</button><button type="button" onClick={() => void runAutopilot()} disabled={!autopilot?.enabled || autopilotBusy || autopilotDirty} className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-black disabled:opacity-50">Run now</button></div>
+      </section>
 
       <div className="grid gap-5 xl:grid-cols-[1.35fr_1fr]">
         <section className="rounded-xl border border-border bg-surface p-4" aria-labelledby="plans-title">

@@ -10,7 +10,7 @@ export async function coachContextRoutes(app: FastifyInstance) {
   }, async (request, reply) => {
     if (!request.accessToken || !request.authenticatedUserId) return reply.code(401).send({ error: 'Authentication required.' });
     try {
-      const account = await getAccount(request.authenticatedUserId, request.accessToken);
+      const account = await getAccount(request.authenticatedUserId);
       return { generatedAt: new Date().toISOString(), ...buildCoachRecords(account, account.tradePlans ?? []) };
     } catch (error) {
       request.log.error({ reason: error instanceof Error ? error.message : 'unknown' }, 'Coach context failed');
