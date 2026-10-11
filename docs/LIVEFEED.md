@@ -42,6 +42,7 @@ Each subscribe message covers one channel. The subscribe payload is `{ type: "su
 - `src/lib/providers/stream-client.ts` fetches a ticket, opens one shared socket, and subscribes per symbol and timeframe. Only the forming candle is streamed; closed candles still come from REST polling, which keeps running.
 - The header shows **Live** only while the server reports the symbol as `stream`. REST-only operation shows **Polling**.
 - Streamed forming candles set `volume: 0` because the client `Candle` type needs a number. They replace the REST forming bar until the next REST bar. No chart draws volume today.
+- A stream connection is closed by the server after `LIVE_FEED_MAX_CONNECTION_MS` so the client must request a fresh ticket and reauthenticate.
 - Not browser-tested in this session.
 
 ## Known gaps
@@ -57,8 +58,8 @@ Each subscribe message covers one channel. The subscribe payload is `{ type: "su
 
 ## Massive request budget
 
-- Limits are config, not constants: `MASSIVE_REQUESTS_PER_WINDOW` (default 5, the free Basic tier at the date above), `MASSIVE_BUDGET_WINDOW_MS`, `MASSIVE_BUDGET_MAX_WAIT_MS`, `MASSIVE_BUDGET_MAX_QUEUE`. Set the window quota to your plan's limit.
-- Every server-side Massive request, including the market availability probe and autonomy reads, takes a slot from one shared budget. Browsers never call Massive.
+- Limits are config, not constants: `MASSIVE_REQUESTS_PER_WINDOW` (default 5, the free Basic tier at the date above), `MASSIVE_BUDGET_WINDOW_MS`, `MASSIVE_BUDGET_MAX_WAIT_MS`, `MASSIVE_BUDGET_MAX_QUEUE`, and `MASSIVE_TRADER_RESERVED_REQUESTS`. Set the window quota to your plan's limit.
+- Every server-side Massive request, including the market availability probe and autonomy reads, takes a slot from one shared budget. Browsers never call Massive. Trader/autopilot reads pass `priority: true`; standard chart/admin reads are capped below the full quota by `MASSIVE_TRADER_RESERVED_REQUESTS` so the trader has a reserved share.
 - A request that cannot get a slot within `MASSIVE_BUDGET_MAX_WAIT_MS` fails with 429 and `Retry-After`, without calling Massive. If a cached series is still inside its stale bound, that series is served instead.
 - A Massive 429 pauses all Massive requests for its `Retry-After` (or one window if the header is absent).
 - Twelve Data REST calls use a separate budget: `TWELVEDATA_REQUESTS_PER_WINDOW` (default 8 per `TWELVEDATA_BUDGET_WINDOW_MS`, set to the free-tier per-minute limit the owner gave), with its own wait and queue limits. A Twelve Data 429 pauses only Twelve Data. Twelve Data's daily caps are not enforced here.

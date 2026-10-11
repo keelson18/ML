@@ -19,6 +19,7 @@ export default function AuthScreen() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const passwordStrong = password.length >= 12 && /[a-z]/.test(password) && /[A-Z]/.test(password) && /[0-9]/.test(password);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,8 +40,8 @@ export default function AuthScreen() {
         setError('Phone number is required.');
         return;
       }
-      if (password.length < 8) {
-        setError('Password must be at least 8 characters.');
+      if (!passwordStrong) {
+        setError('Password must be at least 12 characters and include uppercase, lowercase, and a number.');
         return;
       }
       if (password !== confirmPassword) {
@@ -157,11 +158,11 @@ export default function AuthScreen() {
                     id="password"
                     type={showPassword ? 'text' : 'password'}
                     required
-                    minLength={8}
+                    minLength={12}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className={inputClass}
-                    placeholder="••••••••"
+                    placeholder="12+ chars, upper/lowercase and a number"
                   />
                   <button
                     type="button"
@@ -182,11 +183,11 @@ export default function AuthScreen() {
                     id="confirm-password"
                     type={showConfirmPassword ? 'text' : 'password'}
                     required
-                    minLength={8}
+                    minLength={12}
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     className={inputClass}
-                    placeholder="••••••••"
+                    placeholder="12+ chars, upper/lowercase and a number"
                   />
                   <button
                     type="button"

@@ -25,7 +25,7 @@ async function buildContext(input: AnalyzeInput, accountId: string, accessToken?
     for (const position of openPositions) markPrices[position.symbol] = position.entryPrice;
   } else {
     await Promise.all(openPositions.map(async (position) => {
-      const series = await fetchMarketData(position.symbol, '1m', 2);
+      const series = await fetchMarketData(position.symbol, '1m', 2, { priority: true });
       const mark = series.candles.at(-1)?.close;
       if (!mark || !Number.isFinite(mark)) throw new Error('A mark-to-market price is unavailable for an open position.');
       markPrices[position.symbol] = mark;

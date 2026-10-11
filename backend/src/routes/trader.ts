@@ -37,7 +37,7 @@ export async function traderRoutes(app: FastifyInstance) {
       const results = [];
       const staleSymbols: string[] = [];
       for (const symbol of [...new Set(plans.map((plan) => plan.symbol))]) {
-        const series = await fetchMarketData(symbol, triggerTimeframe, 100);
+        const series = await fetchMarketData(symbol, triggerTimeframe, 100, { priority: true });
         if (series.stale) { staleSymbols.push(symbol); continue; }
         const candles = closedCandles(series.candles, triggerTimeframe);
         const candle = candles.at(-1);
@@ -50,7 +50,7 @@ export async function traderRoutes(app: FastifyInstance) {
       const managementTimeframe = traderConfig.MGMT_TIMEFRAME as Timeframe;
       const closedTrades = [];
       for (const symbol of openSymbols) {
-        const series = await fetchMarketData(symbol, managementTimeframe, 100);
+        const series = await fetchMarketData(symbol, managementTimeframe, 100, { priority: true });
         if (series.stale) { staleSymbols.push(symbol); continue; }
         const candles = closedCandles(series.candles, managementTimeframe);
         const candle = candles.at(-1);
@@ -58,7 +58,7 @@ export async function traderRoutes(app: FastifyInstance) {
         closedTrades.push(...await manageOpenPositions(accountId, symbol, candle, candles, false, managementTimeframe));
         await markCandleProcessed(accountId, symbol, managementTimeframe, candle.time, 'manager');
       }
-      const daily = await fetchMarketData(plans[0]?.symbol ?? MARKET_UNIVERSE.find((market) => market.marketType === 'crypto')!.symbol, '1d', 2).catch(() => undefined);
+      const daily = await fetchMarketData(plans[0]?.symbol ?? MARKET_UNIVERSE.find((market) => market.marketType === 'crypto')!.symbol, '1d', 2, { priority: true }).catch(() => undefined);
       const lastDaily = daily && closedCandles(daily.candles, '1d').at(-1);
       if (lastDaily) await generateDailyAccountReview(accountId, new Date(lastDaily.time * 1000).toISOString().slice(0, 10));
       return {
@@ -85,7 +85,7 @@ export async function traderRoutes(app: FastifyInstance) {
       const staleSymbols: string[] = [];
       await Promise.all(open.map(async (position) => {
         try {
-          const data = await fetchMarketData(position.symbol, '1m', 2);
+          const data = await fetchMarketData(position.symbol, '1m', 2, { priority: true });
           const mark = data.candles.at(-1)?.close;
           if (!mark || !Number.isFinite(mark) || data.stale) staleSymbols.push(position.symbol);
           prices[position.symbol] = mark && Number.isFinite(mark) ? mark : position.entryPrice;
@@ -150,9 +150,9 @@ export async function traderRoutes(app: FastifyInstance) {
     for (const market of candidates) {
       try {
         const [daily, fourHour, trigger] = await Promise.all([
-          fetchMarketData(market.symbol, '1d', 100),
-          fetchMarketData(market.symbol, '4h', 100),
-          fetchMarketData(market.symbol, traderConfig.TRIGGER_TIMEFRAMES[0] as Timeframe, 100),
+          fetchMarketData(market.symbol, '1d', 100, { priority: true }),
+          fetchMarketData(market.symbol, '4h', 100, { priority: true }),
+          fetchMarketData(market.symbol, traderConfig.TRIGGER_TIMEFRAMES[0] as Timeframe, 100, { priority: true }),
         ]);
         if (traderConfig.STALE_DATA_BLOCKS_ENTRIES && (daily.stale || fourHour.stale || trigger.stale)) continue;
         const dailyCandles = closedCandles(daily.candles, '1d');

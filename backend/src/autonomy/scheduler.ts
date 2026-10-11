@@ -78,7 +78,7 @@ export class AutonomousScheduler {
   private async runJob(job: ScheduledJob) {
     for (const symbol of this.symbols) {
       try {
-        const series = await fetchMarketData(symbol, job.timeframe, 1000);
+        const series = await fetchMarketData(symbol, job.timeframe, 1000, { priority: true });
         const failureKey = `${job.role}:${job.timeframe}:${symbol}`;
         this.failuresBySymbol.set(failureKey, 0);
         if (series.stale) {

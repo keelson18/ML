@@ -4,7 +4,7 @@ import { WebSocket, WebSocketServer, type RawData } from 'ws';
 import { z } from 'zod';
 import { getMarket } from '../../../src/lib/markets';
 import { TIMEFRAMES, type Timeframe } from '../../../src/lib/types';
-import { CandleAggregator, isAggregatableTimeframe } from './candle-aggregator';
+import { CandleAggregator, isAggregatableTimeframe, isCurrentBucket } from './candle-aggregator';
 import type { FeedRouter } from './feed-router';
 import type { TicketStore } from './stream-tickets';
 import type { LiveFeed, Tick } from './types';
@@ -32,6 +32,7 @@ export interface StreamGatewayOptions {
   maxSubscriptions: number;
   maxMessageBytes: number;
   maxBufferedBytes: number;
+  maxConnectionMs: number;
 }
 
 interface Client {
@@ -109,7 +110,11 @@ export class StreamGateway {
     const client: Client = { socket, userId, subscriptions: new Map() };
     this.clients.add(client);
     socket.on('message', (data: RawData) => this.handleClientMessage(client, data));
-    socket.on('close', () => this.removeClient(client));
+    const lifetime = setTimeout(() => socket.close(4001, 'connection_lifetime'), this.options.maxConnectionMs);
+    socket.on('close', () => {
+      clearTimeout(lifetime);
+      this.removeClient(client);
+    });
     socket.on('error', () => socket.close());
     this.sendJson(client, { type: 'hello', serverTime: new Date().toISOString(), maxSubscriptions: this.options.maxSubscriptions, maxMessageBytes: this.options.maxMessageBytes });
   }
@@ -159,9 +164,12 @@ export class StreamGateway {
     for (const symbol of accepted) {
       let subscription = client.subscriptions.get(symbol);
       if (!subscription) {
+        if (!this.retain(symbol)) {
+          this.sendError(client, 'feed_limit', [symbol]);
+          continue;
+        }
         subscription = { timeframes: new Set() };
         client.subscriptions.set(symbol, subscription);
-        this.retain(symbol);
       }
       for (const timeframe of timeframes) subscription.timeframes.add(timeframe);
     }
@@ -181,9 +189,11 @@ export class StreamGateway {
       return;
     }
     const last = this.lastTicks.get(symbol);
-    const forming = [...subscription.timeframes]
-      .map((timeframe) => this.aggregator.formingCandle(symbol, timeframe))
-      .filter((candle) => candle !== undefined);
+    const now = Date.now();
+    const forming = [...subscription.timeframes].flatMap((timeframe) => {
+      const candle = this.aggregator.formingCandle(symbol, timeframe);
+      return candle && isCurrentBucket(candle, timeframe, now) ? [candle] : [];
+    });
     this.sendJson(client, {
       type: 'snapshot',
       symbol,
@@ -233,10 +243,17 @@ export class StreamGateway {
     return this.options.feeds.find((feed) => feed.supports(symbol));
   }
 
-  private retain(symbol: string): void {
+  private retain(symbol: string): boolean {
     const count = (this.refCounts.get(symbol) ?? 0) + 1;
+    if (count === 1) {
+      try {
+        this.feedFor(symbol)?.subscribe([symbol]);
+      } catch {
+        return false;
+      }
+    }
     this.refCounts.set(symbol, count);
-    if (count === 1) this.feedFor(symbol)?.subscribe([symbol]);
+    return true;
   }
 
   private release(symbol: string): void {
@@ -246,6 +263,7 @@ export class StreamGateway {
       return;
     }
     this.refCounts.delete(symbol);
+    this.aggregator.forget(symbol);
     this.feedFor(symbol)?.unsubscribe([symbol]);
   }
 

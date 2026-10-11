@@ -71,7 +71,7 @@ export class AutonomousPipeline {
     role: PipelineRole = 'executor',
     candlesAreClosed = false,
   ): Promise<PipelineResult> {
-    const fetchedSeries = candles ? undefined : await fetchMarketData(symbol, timeframe, 501);
+    const fetchedSeries = candles ? undefined : await fetchMarketData(symbol, timeframe, 501, { priority: true });
     const rawCandles = candles ?? fetchedSeries!.candles;
     const series = candlesAreClosed ? rawCandles : selectClosedCandles(rawCandles, timeframe, Date.now(), traderConfig.CLOSE_GRACE_MS);
     const closedCandle = series.at(-1);
@@ -117,7 +117,7 @@ export class AutonomousPipeline {
     if (role === 'planner') {
       const triggerTimeframe = traderConfig.TRIGGER_TIMEFRAMES[0] as Timeframe;
       const [daily, fourHour, trigger] = await Promise.all([
-        fetchMarketData(symbol, '1d', 100), fetchMarketData(symbol, '4h', 100), fetchMarketData(symbol, triggerTimeframe, 100),
+        fetchMarketData(symbol, '1d', 100, { priority: true }), fetchMarketData(symbol, '4h', 100, { priority: true }), fetchMarketData(symbol, triggerTimeframe, 100, { priority: true }),
       ]);
       if (traderConfig.STALE_DATA_BLOCKS_ENTRIES && (daily.stale || fourHour.stale || trigger.stale)) {
         return { ...this.skip(symbol, timeframe, closedCandle, 'Stale market data; planner produced no plan.'), role, closedTrades, marketDataStale: true };

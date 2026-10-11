@@ -47,11 +47,13 @@ export class MarketDataProviderError extends Error {
 const inFlightMarketRequests = new Map<string, Map<number, Promise<MarketDataSeries>>>();
 
 function createMassiveBudget(): ProviderBudget {
+  const reservedForPriority = Math.min(config.massiveTraderReservedRequests, config.massiveRequestsPerWindow - 1);
   return new ProviderBudget({
     requestsPerWindow: config.massiveRequestsPerWindow,
     windowMs: config.massiveBudgetWindowMs,
     maxWaitMs: config.massiveBudgetMaxWaitMs,
     maxQueue: config.massiveBudgetMaxQueue,
+    reservedForPriority,
   });
 }
 let massiveBudget = createMassiveBudget();
@@ -89,7 +91,7 @@ export async function probeMarketData(canonicalSymbol: string): Promise<{ candle
   if (!instrument || instrument.marketType !== 'crypto' || instrument.provider !== 'massive' || !instrument.sourceSymbol) {
     throw new Error('Market probe is not configured for this instrument.');
   }
-  const candles = await fetchFromProvider(instrument, '1m', 5);
+  const candles = await fetchFromProvider(instrument, '1m', 5, false);
   validateCandles(candles, canonicalSymbol);
   if (candles.length === 0) throw new Error('Provider returned no candles.');
   return { candleCount: candles.length };
@@ -118,7 +120,11 @@ export interface MarketDataSeries {
   stale: boolean;
 }
 
-export function fetchMarketData(canonicalSymbol: string, timeframe: Timeframe, limit = 1000): Promise<MarketDataSeries> {
+export interface MarketDataFetchOptions {
+  priority?: boolean;
+}
+
+export function fetchMarketData(canonicalSymbol: string, timeframe: Timeframe, limit = 1000, options: MarketDataFetchOptions = {}): Promise<MarketDataSeries> {
   if (!Number.isInteger(limit) || limit < 1 || limit > 1000) return Promise.reject(new Error('Candle limit must be an integer between 1 and 1000.'));
 
   // Check TTL cache first — return fresh or stale entry
@@ -131,7 +137,8 @@ export function fetchMarketData(canonicalSymbol: string, timeframe: Timeframe, l
   }
 
   // De-duplicate in-flight requests
-  const inflightKey = JSON.stringify([canonicalSymbol, timeframe]);
+  const priority = options.priority ?? false;
+  const inflightKey = JSON.stringify([canonicalSymbol, timeframe, priority]);
   const requests = inFlightMarketRequests.get(inflightKey);
   const matchingRequest = [...(requests ?? [])]
     .filter(([requestedLimit]) => requestedLimit >= limit)
@@ -143,7 +150,7 @@ export function fetchMarketData(canonicalSymbol: string, timeframe: Timeframe, l
   }
 
   const pending = requests ?? new Map<number, Promise<MarketDataSeries>>();
-  const request = fetchMarketDataUncoalesced(canonicalSymbol, timeframe, limit);
+  const request = fetchMarketDataUncoalesced(canonicalSymbol, timeframe, limit, priority);
   pending.set(limit, request);
   inFlightMarketRequests.set(inflightKey, pending);
   return request.finally(() => {
@@ -175,7 +182,7 @@ function evictOldestCacheEntries(): void {
   }
 }
 
-async function fetchMarketDataUncoalesced(canonicalSymbol: string, timeframe: Timeframe, limit: number): Promise<MarketDataSeries> {
+async function fetchMarketDataUncoalesced(canonicalSymbol: string, timeframe: Timeframe, limit: number, priority: boolean): Promise<MarketDataSeries> {
   const configuredInstrument = getMarket(canonicalSymbol);
   if (!configuredInstrument) throw new Error(`Unknown canonical instrument: ${canonicalSymbol}`);
   const sourceSymbol = configuredInstrument.sourceSymbol ?? (
@@ -194,7 +201,7 @@ async function fetchMarketDataUncoalesced(canonicalSymbol: string, timeframe: Ti
     sourceSymbol,
   };
 
-  const candles = await fetchFromProvider(instrument, timeframe, limit);
+  const candles = await fetchFromProvider(instrument, timeframe, limit, priority);
   validateCandles(candles, canonicalSymbol);
   const provider = instrument.provider;
   const sourceInstrument = sourceSymbol;
@@ -257,7 +264,7 @@ async function fetchMarketDataUncoalesced(canonicalSymbol: string, timeframe: Ti
   return series;
 }
 
-async function fetchFromProvider(instrument: Market, timeframe: Timeframe, requestedLimit: number): Promise<Candle[]> {
+async function fetchFromProvider(instrument: Market, timeframe: Timeframe, requestedLimit: number, priority: boolean): Promise<Candle[]> {
   const sourceSymbol = instrument.sourceSymbol;
   if (!sourceSymbol) throw new Error(`No source symbol is configured for ${instrument.canonicalSymbol}.`);
 
@@ -272,7 +279,7 @@ async function fetchFromProvider(instrument: Market, timeframe: Timeframe, reque
     const query = new URLSearchParams({ adjusted: 'true', sort: 'asc', limit: String(limit) });
     const url = `${MASSIVE_REST}/v2/aggs/ticker/${encodeURIComponent(sourceSymbol)}/range/${interval.multiplier}/${interval.timespan}/${from}/${to}?${query}`;
     // API key in Authorization header, never in URL query string
-    await acquireRequestSlot(massiveBudget, 'Massive');
+    await acquireRequestSlot(massiveBudget, 'Massive', priority);
     const response = await fetchWithTimeout(url, { headers: { Authorization: `Bearer ${apiKey}` } });
     const { payload: body } = await readJsonSafe<{
       status?: string;
@@ -297,7 +304,7 @@ async function fetchFromProvider(instrument: Market, timeframe: Timeframe, reque
     if (!apiKey) throw new Error('TWELVEDATA_API_KEY is not configured on the server.');
     const limit = Math.min(requestedLimit, 1000);
     const query = new URLSearchParams({ symbol: sourceSymbol, interval: TWELVEDATA_TIMEFRAMES[timeframe], outputsize: String(limit), timezone: 'UTC', apikey: apiKey });
-    await acquireRequestSlot(twelveDataBudget, 'Twelve Data');
+    await acquireRequestSlot(twelveDataBudget, 'Twelve Data', priority);
     const response = await fetchWithTimeout(`${TWELVEDATA_REST}/time_series?${query}`);
     const { payload: body } = await readJsonSafe<{ status?: string; message?: string; values?: Array<{ datetime: string; open: string; high: string; low: string; close: string; volume?: string }> }>(response);
     if (!response.ok) {
@@ -317,9 +324,9 @@ async function fetchFromProvider(instrument: Market, timeframe: Timeframe, reque
   throw new Error(`Unsupported provider for ${instrument.canonicalSymbol}.`);
 }
 
-async function acquireRequestSlot(budget: ProviderBudget, provider: string): Promise<void> {
+async function acquireRequestSlot(budget: ProviderBudget, provider: string, priority: boolean): Promise<void> {
   try {
-    await budget.acquire();
+    await budget.acquire(priority);
   } catch (error) {
     if (error instanceof ProviderBudgetExhaustedError) throw new MarketDataProviderError(provider, 429, String(error.retryAfterSeconds));
     throw error;

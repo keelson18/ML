@@ -9,6 +9,12 @@ export function isAggregatableTimeframe(timeframe: Timeframe): boolean {
   return FIXED_TIMEFRAME_SECONDS[timeframe] !== undefined;
 }
 
+export function isCurrentBucket(candle: { time: number }, timeframe: Timeframe, nowMs: number): boolean {
+  const seconds = FIXED_TIMEFRAME_SECONDS[timeframe];
+  if (seconds === undefined) return false;
+  return candle.time === Math.floor(nowMs / 1000 / seconds) * seconds;
+}
+
 export class CandleAggregator {
   private readonly forming = new Map<string, { symbol: string; timeframe: Timeframe; candle: FormingCandle }>();
 
@@ -50,6 +56,12 @@ export class CandleAggregator {
   formingCandle(symbol: string, timeframe: Timeframe): FormingCandle | undefined {
     const entry = this.forming.get(`${symbol}|${timeframe}`);
     return entry ? { ...entry.candle } : undefined;
+  }
+
+  forget(symbol: string): void {
+    for (const key of [...this.forming.keys()]) {
+      if (key.startsWith(`${symbol}|`)) this.forming.delete(key);
+    }
   }
 
   // A closed REST candle at or after the forming bucket supersedes it.

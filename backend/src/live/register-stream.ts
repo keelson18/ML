@@ -23,6 +23,7 @@ export function registerLiveStream(app: FastifyInstance, allowedOrigins: readonl
     maxSubscriptions: live.gateway.maxSubscriptions,
     maxMessageBytes: live.gateway.maxMessageBytes,
     maxBufferedBytes: live.gateway.maxBufferedBytes,
+    maxConnectionMs: live.gateway.maxConnectionMs,
   });
   const ticketLimiter = new WindowLimiter(live.gateway.ticketRateLimitMax, config.rateLimitWindowMs);
 

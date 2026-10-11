@@ -267,7 +267,7 @@ function recordPaperTrade(account: PaperAccountState, trade: PaperTrade, timefra
 }
 
 export async function closeOpenPaperPosition(accountId: string, symbol: string, accessToken?: string): Promise<PaperTrade> {
-  const candles = (await fetchMarketData(symbol, '1m', 1)).candles;
+  const candles = (await fetchMarketData(symbol, '1m', 1, { priority: true })).candles;
   const candle = candles.at(-1);
   const exitPrice = candle?.close;
   if (!exitPrice || !Number.isFinite(exitPrice)) throw new Error('A current market price is unavailable.');
@@ -396,7 +396,7 @@ export async function executeDecision(input: {
   const markPrices: Record<string, number> = { [input.symbol]: requestedPrice };
   if (process.env.NODE_ENV !== 'test') {
     await Promise.all(accountSnapshot.positions.filter((position) => position.status === 'open').map(async (position) => {
-      const candles = (await fetchMarketData(position.symbol, '1m', 2)).candles;
+      const candles = (await fetchMarketData(position.symbol, '1m', 2, { priority: true })).candles;
       const mark = candles.at(-1)?.close;
       if (!mark || !Number.isFinite(mark)) throw new Error('A mark-to-market price is unavailable for an open position.');
       markPrices[position.symbol] = mark;

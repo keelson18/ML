@@ -1,7 +1,9 @@
 import type { Candle, Timeframe } from '../types';
 import { authenticatedBackendRequest } from '../backend-api';
 
-const STREAMABLE_TIMEFRAMES: ReadonlySet<Timeframe> = new Set<Timeframe>(['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d']);
+const STREAM_TIMEFRAME_SECONDS: Partial<Record<Timeframe, number>> = {
+  '1m': 60, '3m': 180, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h': 14_400, '1d': 86_400,
+};
 const BASE_RETRY_MS = 2_000;
 const MAX_RETRY_MS = 60_000;
 
@@ -14,7 +16,7 @@ interface StreamListener {
 }
 
 export function supportsStreamTimeframe(timeframe: Timeframe): boolean {
-  return STREAMABLE_TIMEFRAMES.has(timeframe);
+  return STREAM_TIMEFRAME_SECONDS[timeframe] !== undefined;
 }
 
 class StreamClient {
@@ -123,6 +125,8 @@ class StreamClient {
     if (typeof symbol !== 'string' || typeof timeframe !== 'string' || !isRecord(candle)) return;
     const { time, open, high, low, close } = candle;
     if (![time, open, high, low, close].every((value) => typeof value === 'number' && Number.isFinite(value))) return;
+    const seconds = STREAM_TIMEFRAME_SECONDS[timeframe as Timeframe];
+    if (seconds === undefined || (time as number) + seconds <= Date.now() / 1000) return;
     // Coinbase ticks carry no volume, so the streamed forming bar is zero-volume and must not be drawn as volume.
     const formed: Candle = { time: time as number, open: open as number, high: high as number, low: low as number, close: close as number, volume: 0 };
     for (const listener of this.listeners.get(symbol) ?? []) {

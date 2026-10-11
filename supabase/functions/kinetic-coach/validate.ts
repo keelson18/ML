@@ -10,7 +10,12 @@ export type ValidationResult =
   | { ok: true; messages: CoachMessage[] }
   | { ok: false; error: string };
 
-const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
+function stripDisallowedControlChars(value: string): string {
+  return Array.from(value).filter((char) => {
+    const code = char.charCodeAt(0);
+    return code === 0x09 || code === 0x0a || code === 0x0d || (code >= 0x20 && code !== 0x7f);
+  }).join("");
+}
 
 function fail(error: string): ValidationResult {
   return { ok: false, error };
@@ -31,7 +36,7 @@ export function validateMessages(input: unknown): ValidationResult {
     if (content.length > MAX_MESSAGE_CHARS) {
       return fail(`each message must be at most ${MAX_MESSAGE_CHARS} characters`);
     }
-    const cleaned = content.replace(CONTROL_CHARS, "").trim();
+    const cleaned = stripDisallowedControlChars(content).trim();
     if (cleaned.length === 0) return fail("messages must not be empty");
     messages.push({ role, content: cleaned });
   }

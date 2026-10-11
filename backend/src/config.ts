@@ -20,6 +20,7 @@ const rateLimitSettings = z.object({
   MASSIVE_BUDGET_WINDOW_MS: z.coerce.number().int().positive(),
   MASSIVE_BUDGET_MAX_WAIT_MS: z.coerce.number().int().nonnegative(),
   MASSIVE_BUDGET_MAX_QUEUE: z.coerce.number().int().nonnegative(),
+  MASSIVE_TRADER_RESERVED_REQUESTS: z.coerce.number().int().nonnegative(),
   TWELVEDATA_REQUESTS_PER_WINDOW: z.coerce.number().int().positive(),
   TWELVEDATA_BUDGET_WINDOW_MS: z.coerce.number().int().positive(),
   TWELVEDATA_BUDGET_MAX_WAIT_MS: z.coerce.number().int().nonnegative(),
@@ -36,6 +37,7 @@ const rateLimitSettings = z.object({
   MASSIVE_BUDGET_WINDOW_MS: process.env.MASSIVE_BUDGET_WINDOW_MS ?? 60_000,
   MASSIVE_BUDGET_MAX_WAIT_MS: process.env.MASSIVE_BUDGET_MAX_WAIT_MS ?? 5_000,
   MASSIVE_BUDGET_MAX_QUEUE: process.env.MASSIVE_BUDGET_MAX_QUEUE ?? 10,
+  MASSIVE_TRADER_RESERVED_REQUESTS: process.env.MASSIVE_TRADER_RESERVED_REQUESTS ?? 2,
   TWELVEDATA_REQUESTS_PER_WINDOW: process.env.TWELVEDATA_REQUESTS_PER_WINDOW ?? 8,
   TWELVEDATA_BUDGET_WINDOW_MS: process.env.TWELVEDATA_BUDGET_WINDOW_MS ?? 60_000,
   TWELVEDATA_BUDGET_MAX_WAIT_MS: process.env.TWELVEDATA_BUDGET_MAX_WAIT_MS ?? 5_000,
@@ -85,6 +87,7 @@ const liveFeedSettings = z.object({
   LIVE_FEED_MAX_BUFFERED_BYTES: z.coerce.number().int().positive(),
   LIVE_FEED_TICKET_TTL_MS: z.coerce.number().int().positive(),
   LIVE_FEED_TICKET_RATE_LIMIT_MAX: z.coerce.number().int().positive(),
+  LIVE_FEED_MAX_CONNECTION_MS: z.coerce.number().int().positive(),
 });
 
 function parseSymbolList(value: string): string[] {
@@ -106,6 +109,7 @@ export function parseLiveFeedConfig(env: NodeJS.ProcessEnv) {
     LIVE_FEED_MAX_BUFFERED_BYTES: env.LIVE_FEED_MAX_BUFFERED_BYTES ?? 262_144,
     LIVE_FEED_TICKET_TTL_MS: env.LIVE_FEED_TICKET_TTL_MS ?? 30_000,
     LIVE_FEED_TICKET_RATE_LIMIT_MAX: env.LIVE_FEED_TICKET_RATE_LIMIT_MAX ?? 10,
+    LIVE_FEED_MAX_CONNECTION_MS: env.LIVE_FEED_MAX_CONNECTION_MS ?? 900_000,
   });
   if (!settings.success) {
     const variable = settings.error.issues[0]?.path[0] ?? 'live feed configuration';
@@ -135,6 +139,7 @@ export function parseLiveFeedConfig(env: NodeJS.ProcessEnv) {
       maxBufferedBytes: settings.data.LIVE_FEED_MAX_BUFFERED_BYTES,
       ticketTtlMs: settings.data.LIVE_FEED_TICKET_TTL_MS,
       ticketRateLimitMax: settings.data.LIVE_FEED_TICKET_RATE_LIMIT_MAX,
+      maxConnectionMs: settings.data.LIVE_FEED_MAX_CONNECTION_MS,
     },
   };
 }
@@ -160,6 +165,7 @@ export const config = {
   massiveBudgetWindowMs: rateLimitSettings.data.MASSIVE_BUDGET_WINDOW_MS,
   massiveBudgetMaxWaitMs: rateLimitSettings.data.MASSIVE_BUDGET_MAX_WAIT_MS,
   massiveBudgetMaxQueue: rateLimitSettings.data.MASSIVE_BUDGET_MAX_QUEUE,
+  massiveTraderReservedRequests: rateLimitSettings.data.MASSIVE_TRADER_RESERVED_REQUESTS,
   twelveDataRequestsPerWindow: rateLimitSettings.data.TWELVEDATA_REQUESTS_PER_WINDOW,
   twelveDataBudgetWindowMs: rateLimitSettings.data.TWELVEDATA_BUDGET_WINDOW_MS,
   twelveDataBudgetMaxWaitMs: rateLimitSettings.data.TWELVEDATA_BUDGET_MAX_WAIT_MS,

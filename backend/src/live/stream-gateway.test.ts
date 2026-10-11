@@ -16,6 +16,7 @@ class FakeFeed implements LiveFeed {
   readonly id: FeedId = 'coinbase';
   readonly subscribed: string[] = [];
   readonly unsubscribed: string[] = [];
+  refuse = false;
   private current: FeedStatus = 'connected';
   private readonly tickListeners = new Set<(tick: Tick) => void>();
 
@@ -23,6 +24,7 @@ class FakeFeed implements LiveFeed {
     return SUPPORTED.includes(symbol);
   }
   subscribe(symbols: readonly string[]): void {
+    if (this.refuse) throw new Error('Coinbase subscriptions are limited to 20 symbols.');
     this.subscribed.push(...symbols);
   }
   unsubscribe(symbols: readonly string[]): void {
@@ -84,6 +86,7 @@ describe('stream gateway', () => {
       maxSubscriptions: 2,
       maxMessageBytes: 4_096,
       maxBufferedBytes: 262_144,
+      maxConnectionMs: 60_000,
     });
     server = createServer();
     gateway.attach(server);
@@ -203,5 +206,52 @@ describe('stream gateway', () => {
     const closed = new Promise<number>((resolve) => session.socket.once('close', (code) => resolve(code)));
     send(session, 'x'.repeat(5_000));
     await expect(closed).resolves.toBe(1009);
+  });
+
+  it('answers a feed refusal with an error and keeps the connection open', async () => {
+    feed.refuse = true;
+    const session = await connect(issue('user-k'));
+    send(session, { type: 'subscribe', symbols: ['BTCUSD'] });
+    await messageOfType(session, 'error', (message) => message.code === 'feed_limit');
+    expect(session.socket.readyState).toBe(WebSocket.OPEN);
+    session.socket.close();
+  });
+
+  it('drops a forming candle from an earlier bucket on resync', async () => {
+    const session = await connect(issue('user-l'));
+    send(session, { type: 'subscribe', symbols: ['ETHUSD'], timeframes: ['1m'] });
+    await messageOfType(session, 'status');
+    feed.emit({ symbol: 'ETHUSD', price: 3_000, volume: null, timestamp: 60_000 });
+    await messageOfType(session, 'tick');
+
+    send(session, { type: 'resync', symbol: 'ETHUSD' });
+    const snapshot = await messageOfType(session, 'snapshot');
+    expect(snapshot).toMatchObject({ symbol: 'ETHUSD', forming: [] });
+    session.socket.close();
+  });
+
+  it('closes a connection when its lifetime ends so the client must request a new ticket', async () => {
+    const shortTickets = new TicketStore(30_000);
+    const shortGateway = new StreamGateway({
+      feeds: [feed],
+      router: createFeedRouter([feed]),
+      tickets: shortTickets,
+      allowedOrigins: [ORIGIN],
+      maxClients: 5,
+      maxConnectionsPerUser: 1,
+      maxSubscriptions: 2,
+      maxMessageBytes: 4_096,
+      maxBufferedBytes: 262_144,
+      maxConnectionMs: 100,
+    });
+    const shortServer = createServer();
+    shortGateway.attach(shortServer);
+    await new Promise<void>((resolve) => shortServer.listen(0, '127.0.0.1', () => resolve()));
+    const shortUrl = `ws://127.0.0.1:${(shortServer.address() as AddressInfo).port}${STREAM_PATH}`;
+    const socket = new WebSocket(`${shortUrl}?ticket=${encodeURIComponent(shortTickets.issue('user-m').ticket)}`, { headers: { Origin: ORIGIN } });
+    const closed = new Promise<number>((resolve) => socket.once('close', (code) => resolve(code)));
+    await expect(closed).resolves.toBe(4001);
+    await shortGateway.close();
+    await new Promise<void>((resolve) => shortServer.close(() => resolve()));
   });
 });

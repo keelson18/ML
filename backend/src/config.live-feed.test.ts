@@ -16,6 +16,7 @@ describe('live feed configuration', () => {
         maxBufferedBytes: 262_144,
         ticketTtlMs: 30_000,
         ticketRateLimitMax: 10,
+        maxConnectionMs: 900_000,
       },
     });
   });

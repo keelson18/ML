@@ -5,6 +5,7 @@ const root = resolve(import.meta.dirname, '..');
 const sourceDirectories = ['src', 'backend/src', 'scripts', 'supabase/functions'];
 const rootFiles = ['vite.config.ts'];
 const reads = new Map();
+const builtInEnv = new Set(['DEV', 'PROD', 'MODE', 'SSR']);
 
 async function scan(path) {
   for (const entry of await readdir(path, { withFileTypes: true })) {
@@ -37,7 +38,7 @@ for (const file of rootFiles) {
 const example = await readFile(resolve(root, '.env.example'), 'utf8');
 const lines = example.split(/\r?\n/);
 const documented = new Set(lines.map((line) => line.match(/^\s*([A-Z][A-Z0-9_]*)=/)?.[1]).filter(Boolean));
-const missing = [...reads].filter(([name]) => !documented.has(name));
+const missing = [...reads].filter(([name]) => !builtInEnv.has(name) && !documented.has(name));
 const uncommented = lines.flatMap((line, index) => {
   const name = line.match(/^\s*([A-Z][A-Z0-9_]*)=/)?.[1];
   return name && !lines[index - 1]?.trim().startsWith('#') ? [name] : [];
