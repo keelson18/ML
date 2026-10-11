@@ -18,6 +18,7 @@ import { eventRoutes } from './routes/events';
 import { newsRoutes } from './routes/news';
 import { personalDataRoutes } from './routes/personal-data';
 import { coachContextRoutes } from './routes/coach-context';
+import { registerLiveStream } from './live/register-stream';
 import { probeAllMarkets } from './services/marketAvailability';
 import { readJsonSafe } from '../../shared/http';
 
@@ -61,6 +62,7 @@ export function buildServer() {
   void app.register(eventRoutes);
   void app.register(newsRoutes);
   void app.register(personalDataRoutes);
+  if (config.liveFeed.enabled) registerLiveStream(app, allowedOrigins());
   app.get('/health', async () => ({ status: 'ok', service: 'quantum-api', autonomy: pipeline.getSnapshot() }));
   return { app, pipeline };
 }

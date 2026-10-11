@@ -1,3 +1,5 @@
+import WebSocket from 'ws';
+
 export type SocketEvent = 'open' | 'message' | 'close' | 'error';
 
 export interface LiveSocket {
@@ -12,9 +14,7 @@ export const createNodeSocket: SocketFactory = (url) => {
   const socket = new WebSocket(url);
   return {
     on(event, listener) {
-      socket.addEventListener(event, (domEvent: Event) => {
-        listener(event === 'message' ? (domEvent as MessageEvent).data : undefined);
-      });
+      socket.on(event, (data: unknown) => listener(event === 'message' ? String(data) : undefined));
     },
     send: (data) => socket.send(data),
     close: () => socket.close(),

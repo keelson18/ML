@@ -131,6 +131,30 @@ describe('Coinbase live feed', () => {
     expect(feed.diagnostics().duplicates).toBe(2);
   });
 
+  it('counts a sequence gap and keeps the message after it', () => {
+    const ticks: Tick[] = [];
+    feed.onTick((tick) => ticks.push(tick));
+    feed.subscribe(['BTCUSD']);
+    const socket = openSocket();
+    socket.emit('message', tickerMessage(5, [['BTC-USD', '100']]));
+    socket.emit('message', tickerMessage(8, [['BTC-USD', '103']]));
+    expect(ticks.map((tick) => tick.price)).toEqual([100, 103]);
+    expect(feed.diagnostics().gaps).toBe(1);
+  });
+
+  it('tracks sequences per product so interleaved products are not dropped', () => {
+    const ticks: Tick[] = [];
+    feed.onTick((tick) => ticks.push(tick));
+    feed.subscribe(['BTCUSD', 'ETHUSD']);
+    const socket = openSocket();
+    socket.emit('message', tickerMessage(10, [['BTC-USD', '100']]));
+    socket.emit('message', tickerMessage(3, [['ETH-USD', '3000']]));
+    socket.emit('message', tickerMessage(11, [['BTC-USD', '101']]));
+    socket.emit('message', tickerMessage(4, [['ETH-USD', '3001']]));
+    expect(ticks.map((tick) => tick.price)).toEqual([100, 3000, 101, 3001]);
+    expect(feed.diagnostics()).toMatchObject({ duplicates: 0, gaps: 0 });
+  });
+
   it('enforces the subscription cap', () => {
     const capped = build({ maxSymbols: 2 });
     expect(() => capped.subscribe(['BTCUSD', 'ETHUSD', 'SOLUSD'])).toThrow('Coinbase subscriptions are limited to 2 symbols.');

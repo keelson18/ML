@@ -1,6 +1,7 @@
 import type { Candle, MarketDataProvider, Timeframe } from '../types';
 import { fetchCanonicalMarketData } from '../backend-api';
 import { getNewlyClosedCandles } from './polling';
+import { subscribeStreamCandles, supportsStreamTimeframe } from './stream-client';
 import type { DataProvider } from './types';
 
 const POLL_INTERVALS: Record<MarketDataProvider, number> = {
@@ -31,11 +32,20 @@ export function createDataProvider(provider: MarketDataProvider | null): DataPro
       let stopped = false;
       let timer: ReturnType<typeof setTimeout> | undefined;
       let lastSeenTime: number | undefined;
+      let streamLive = false;
       const interval = provider ? POLL_INTERVALS[provider] : 30_000;
+      const unsubscribeStream = supportsStreamTimeframe(timeframe)
+        ? subscribeStreamCandles(symbol, timeframe, (candle) => {
+          if (!stopped) onCandle(candle, false);
+        }, (mode) => {
+          streamLive = mode === 'stream';
+          if (!stopped) onStatus?.(streamLive ? 'open' : 'polling', streamLive ? 'live stream' : undefined);
+        })
+        : () => {};
 
       const poll = async () => {
         if (stopped) return;
-        onStatus?.('connecting');
+        if (!streamLive) onStatus?.('connecting');
         try {
           const candles = await fetchCanonicalMarketData(symbol, timeframe, 5).then((series) => series.candles);
           if (stopped) return;
@@ -45,7 +55,7 @@ export function createDataProvider(provider: MarketDataProvider | null): DataPro
           for (const candle of getNewlyClosedCandles(candles, lastSeenTime)) onCandle(candle, true);
           if (shouldEmitLatestCandle(lastSeenTime, latest.time)) onCandle(latest, false);
           lastSeenTime = latest.time;
-          onStatus?.('open', `${provider ?? 'market'} data via backend polling`);
+          onStatus?.(streamLive ? 'open' : 'polling', `${provider ?? 'market'} data via backend polling`);
         } catch (error) {
           if (!stopped) onStatus?.('reconnecting', error instanceof Error ? error.message : 'Market data polling failed.');
         } finally {
@@ -58,6 +68,7 @@ export function createDataProvider(provider: MarketDataProvider | null): DataPro
       return () => {
         stopped = true;
         if (timer) clearTimeout(timer);
+        unsubscribeStream();
         onStatus?.('closed');
       };
     },

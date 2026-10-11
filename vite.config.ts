@@ -10,7 +10,7 @@ export default defineConfig(({ mode }) => {
     server: {
       host: '0.0.0.0',
       proxy: {
-        '/api/v1': { target: autonomyTarget, changeOrigin: true },
+        '/api/v1': { target: autonomyTarget, changeOrigin: true, ws: true },
       },
     },
     preview: {

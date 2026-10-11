@@ -16,6 +16,14 @@ const rateLimitSettings = z.object({
   MARKET_DATA_MAX_STALE_TTL_MULTIPLIER: z.coerce.number().positive(),
   MARKET_PROBE_INTERVAL_MS: z.coerce.number().int().positive(),
   MARKET_PROBE_RATE_LIMIT_MAX: z.coerce.number().int().positive(),
+  MASSIVE_REQUESTS_PER_WINDOW: z.coerce.number().int().positive(),
+  MASSIVE_BUDGET_WINDOW_MS: z.coerce.number().int().positive(),
+  MASSIVE_BUDGET_MAX_WAIT_MS: z.coerce.number().int().nonnegative(),
+  MASSIVE_BUDGET_MAX_QUEUE: z.coerce.number().int().nonnegative(),
+  TWELVEDATA_REQUESTS_PER_WINDOW: z.coerce.number().int().positive(),
+  TWELVEDATA_BUDGET_WINDOW_MS: z.coerce.number().int().positive(),
+  TWELVEDATA_BUDGET_MAX_WAIT_MS: z.coerce.number().int().nonnegative(),
+  TWELVEDATA_BUDGET_MAX_QUEUE: z.coerce.number().int().nonnegative(),
 }).safeParse({
   RATE_LIMIT_WINDOW_MS: process.env.RATE_LIMIT_WINDOW_MS ?? 60_000,
   MARKET_RATE_LIMIT_MAX: process.env.MARKET_RATE_LIMIT_MAX ?? 60,
@@ -24,6 +32,14 @@ const rateLimitSettings = z.object({
   MARKET_DATA_MAX_STALE_TTL_MULTIPLIER: process.env.MARKET_DATA_MAX_STALE_TTL_MULTIPLIER ?? 3,
   MARKET_PROBE_INTERVAL_MS: process.env.MARKET_PROBE_INTERVAL_MS ?? 1_000,
   MARKET_PROBE_RATE_LIMIT_MAX: process.env.MARKET_PROBE_RATE_LIMIT_MAX ?? 1,
+  MASSIVE_REQUESTS_PER_WINDOW: process.env.MASSIVE_REQUESTS_PER_WINDOW ?? 5,
+  MASSIVE_BUDGET_WINDOW_MS: process.env.MASSIVE_BUDGET_WINDOW_MS ?? 60_000,
+  MASSIVE_BUDGET_MAX_WAIT_MS: process.env.MASSIVE_BUDGET_MAX_WAIT_MS ?? 5_000,
+  MASSIVE_BUDGET_MAX_QUEUE: process.env.MASSIVE_BUDGET_MAX_QUEUE ?? 10,
+  TWELVEDATA_REQUESTS_PER_WINDOW: process.env.TWELVEDATA_REQUESTS_PER_WINDOW ?? 8,
+  TWELVEDATA_BUDGET_WINDOW_MS: process.env.TWELVEDATA_BUDGET_WINDOW_MS ?? 60_000,
+  TWELVEDATA_BUDGET_MAX_WAIT_MS: process.env.TWELVEDATA_BUDGET_MAX_WAIT_MS ?? 5_000,
+  TWELVEDATA_BUDGET_MAX_QUEUE: process.env.TWELVEDATA_BUDGET_MAX_QUEUE ?? 10,
 });
 
 const sessionCalendarEntry = z.object({
@@ -63,6 +79,12 @@ const liveFeedSettings = z.object({
   LIVE_FEED_MAX_SYMBOLS: z.coerce.number().int().positive(),
   LIVE_FEED_MAX_CLIENTS: z.coerce.number().int().positive(),
   LIVE_FEED_STALE_MS: z.coerce.number().int().positive(),
+  LIVE_FEED_MAX_CONNECTIONS_PER_USER: z.coerce.number().int().positive(),
+  LIVE_FEED_MAX_SUBSCRIPTIONS: z.coerce.number().int().positive(),
+  LIVE_FEED_MAX_MESSAGE_BYTES: z.coerce.number().int().positive(),
+  LIVE_FEED_MAX_BUFFERED_BYTES: z.coerce.number().int().positive(),
+  LIVE_FEED_TICKET_TTL_MS: z.coerce.number().int().positive(),
+  LIVE_FEED_TICKET_RATE_LIMIT_MAX: z.coerce.number().int().positive(),
 });
 
 function parseSymbolList(value: string): string[] {
@@ -78,6 +100,12 @@ export function parseLiveFeedConfig(env: NodeJS.ProcessEnv) {
     LIVE_FEED_MAX_SYMBOLS: env.LIVE_FEED_MAX_SYMBOLS ?? 20,
     LIVE_FEED_MAX_CLIENTS: env.LIVE_FEED_MAX_CLIENTS ?? 100,
     LIVE_FEED_STALE_MS: env.LIVE_FEED_STALE_MS ?? 10_000,
+    LIVE_FEED_MAX_CONNECTIONS_PER_USER: env.LIVE_FEED_MAX_CONNECTIONS_PER_USER ?? 2,
+    LIVE_FEED_MAX_SUBSCRIPTIONS: env.LIVE_FEED_MAX_SUBSCRIPTIONS ?? 20,
+    LIVE_FEED_MAX_MESSAGE_BYTES: env.LIVE_FEED_MAX_MESSAGE_BYTES ?? 4_096,
+    LIVE_FEED_MAX_BUFFERED_BYTES: env.LIVE_FEED_MAX_BUFFERED_BYTES ?? 262_144,
+    LIVE_FEED_TICKET_TTL_MS: env.LIVE_FEED_TICKET_TTL_MS ?? 30_000,
+    LIVE_FEED_TICKET_RATE_LIMIT_MAX: env.LIVE_FEED_TICKET_RATE_LIMIT_MAX ?? 10,
   });
   if (!settings.success) {
     const variable = settings.error.issues[0]?.path[0] ?? 'live feed configuration';
@@ -100,6 +128,14 @@ export function parseLiveFeedConfig(env: NodeJS.ProcessEnv) {
     twelveData: { enabled: settings.data.LIVE_FEED_TWELVEDATA_ENABLED, symbols: twelveDataSymbols, maxSymbols: twelveDataCap },
     maxClients: settings.data.LIVE_FEED_MAX_CLIENTS,
     staleMs: settings.data.LIVE_FEED_STALE_MS,
+    gateway: {
+      maxConnectionsPerUser: settings.data.LIVE_FEED_MAX_CONNECTIONS_PER_USER,
+      maxSubscriptions: settings.data.LIVE_FEED_MAX_SUBSCRIPTIONS,
+      maxMessageBytes: settings.data.LIVE_FEED_MAX_MESSAGE_BYTES,
+      maxBufferedBytes: settings.data.LIVE_FEED_MAX_BUFFERED_BYTES,
+      ticketTtlMs: settings.data.LIVE_FEED_TICKET_TTL_MS,
+      ticketRateLimitMax: settings.data.LIVE_FEED_TICKET_RATE_LIMIT_MAX,
+    },
   };
 }
 
@@ -120,6 +156,14 @@ export const config = {
   marketDataMaxStaleTtlMultiplier: rateLimitSettings.data.MARKET_DATA_MAX_STALE_TTL_MULTIPLIER,
   marketProbeIntervalMs: rateLimitSettings.data.MARKET_PROBE_INTERVAL_MS,
   marketProbeRateLimitMax: rateLimitSettings.data.MARKET_PROBE_RATE_LIMIT_MAX,
+  massiveRequestsPerWindow: rateLimitSettings.data.MASSIVE_REQUESTS_PER_WINDOW,
+  massiveBudgetWindowMs: rateLimitSettings.data.MASSIVE_BUDGET_WINDOW_MS,
+  massiveBudgetMaxWaitMs: rateLimitSettings.data.MASSIVE_BUDGET_MAX_WAIT_MS,
+  massiveBudgetMaxQueue: rateLimitSettings.data.MASSIVE_BUDGET_MAX_QUEUE,
+  twelveDataRequestsPerWindow: rateLimitSettings.data.TWELVEDATA_REQUESTS_PER_WINDOW,
+  twelveDataBudgetWindowMs: rateLimitSettings.data.TWELVEDATA_BUDGET_WINDOW_MS,
+  twelveDataBudgetMaxWaitMs: rateLimitSettings.data.TWELVEDATA_BUDGET_MAX_WAIT_MS,
+  twelveDataBudgetMaxQueue: rateLimitSettings.data.TWELVEDATA_BUDGET_MAX_QUEUE,
   marketSessionCalendar: parsedSessionCalendar,
   liveFeed: parseLiveFeedConfig(process.env),
 };

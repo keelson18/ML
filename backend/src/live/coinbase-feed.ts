@@ -31,6 +31,7 @@ export interface CoinbaseFeedOptions {
 export interface CoinbaseFeedStats {
   ticks: number;
   duplicates: number;
+  gaps: number;
   malformed: number;
   reconnects: number;
 }
@@ -51,7 +52,7 @@ export class CoinbaseFeed implements LiveFeed {
   private readonly tickListeners = new Set<TickListener>();
   private readonly statusListeners = new Set<StatusListener>();
   private readonly lastSequence = new Map<string, number>();
-  private readonly stats: CoinbaseFeedStats = { ticks: 0, duplicates: 0, malformed: 0, reconnects: 0 };
+  private readonly stats: CoinbaseFeedStats = { ticks: 0, duplicates: 0, gaps: 0, malformed: 0, reconnects: 0 };
   private readonly createSocket: SocketFactory;
   private readonly now: () => number;
   private readonly random: () => number;
@@ -155,12 +156,6 @@ export class CoinbaseFeed implements LiveFeed {
       this.stats.malformed += 1;
       return;
     }
-    const previous = this.lastSequence.get(envelope.channel);
-    if (previous !== undefined && envelope.sequence_num <= previous) {
-      this.stats.duplicates += 1;
-      return;
-    }
-    this.lastSequence.set(envelope.channel, envelope.sequence_num);
     if (envelope.channel !== 'ticker') return;
 
     const timestamp = Date.parse(envelope.timestamp);
@@ -177,11 +172,26 @@ export class CoinbaseFeed implements LiveFeed {
       for (const ticker of event.data.tickers ?? []) {
         const symbol = internalSymbolFromCoinbaseProduct(ticker.product_id);
         if (!symbol || !this.desired.has(symbol)) continue;
+        if (!this.acceptSequence(ticker.product_id, envelope.sequence_num)) continue;
         this.stats.ticks += 1;
         const tick: Tick = { symbol, price: ticker.price, volume: null, timestamp };
         for (const listener of this.tickListeners) listener(tick);
       }
     }
+  }
+
+  private acceptSequence(productId: string, sequence: number): boolean {
+    const previous = this.lastSequence.get(productId);
+    if (previous !== undefined && sequence <= previous) {
+      this.stats.duplicates += 1;
+      return false;
+    }
+    if (previous !== undefined && sequence > previous + 1) {
+      this.stats.gaps += 1;
+      console.warn(`[live] coinbase ${productId} sequence gap: ${sequence - previous - 1} message(s) missed`);
+    }
+    this.lastSequence.set(productId, sequence);
+    return true;
   }
 
   private handleDisconnect(socket: LiveSocket): void {

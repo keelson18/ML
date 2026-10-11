@@ -9,6 +9,14 @@ describe('live feed configuration', () => {
       twelveData: { enabled: true, symbols: ['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD'], maxSymbols: 8 },
       maxClients: 100,
       staleMs: 10_000,
+      gateway: {
+        maxConnectionsPerUser: 2,
+        maxSubscriptions: 20,
+        maxMessageBytes: 4_096,
+        maxBufferedBytes: 262_144,
+        ticketTtlMs: 30_000,
+        ticketRateLimitMax: 10,
+      },
     });
   });
 

@@ -2,18 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { CandleAggregator } from './candle-aggregator';
 import type { Tick } from './types';
 
-function tick(seconds: number, price: number, volume: number | null = null): Tick {
-  return { symbol: 'BTCUSD', price, volume, timestamp: seconds * 1000 };
+function tick(seconds: number, price: number): Tick {
+  return { symbol: 'BTCUSD', price, volume: null, timestamp: seconds * 1000 };
 }
 
 describe('candle aggregator', () => {
   it('builds OHLC for the current 1m bucket from ticks', () => {
     const aggregator = new CandleAggregator(['1m']);
-    aggregator.applyTick(tick(60, 100, 1));
-    aggregator.applyTick(tick(75, 120, 2));
-    aggregator.applyTick(tick(88, 90, null));
-    aggregator.applyTick(tick(119, 110, 0.5));
-    expect(aggregator.formingCandle('BTCUSD', '1m')).toEqual({ time: 60, open: 100, high: 120, low: 90, close: 110, volume: 3.5, forming: true });
+    aggregator.applyTick(tick(60, 100));
+    aggregator.applyTick(tick(75, 120));
+    aggregator.applyTick(tick(88, 90));
+    aggregator.applyTick(tick(119, 110));
+    expect(aggregator.formingCandle('BTCUSD', '1m')).toEqual({ time: 60, open: 100, high: 120, low: 90, close: 110, volume: null, forming: true });
   });
 
   it('starts a new candle at the bucket boundary without carrying the old range', () => {

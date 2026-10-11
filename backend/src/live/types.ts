@@ -10,7 +10,8 @@ export interface Tick {
   timestamp: number;
 }
 
-export interface FormingCandle extends Candle {
+export interface FormingCandle extends Omit<Candle, 'volume'> {
+  volume: null;
   forming: true;
 }
 

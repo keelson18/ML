@@ -2,7 +2,7 @@ import { supabase } from './supabase';
 import { readJsonSafe } from '../../shared/http';
 import type { Candle, Timeframe } from './types';
 
-async function authenticatedBackendRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function authenticatedBackendRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('Authentication required.');
   const headers = new Headers(init.headers);

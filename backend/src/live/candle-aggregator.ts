@@ -20,7 +20,6 @@ export class CandleAggregator {
 
   applyTick(tick: Tick): void {
     const timestampSeconds = tick.timestamp / 1000;
-    const volume = tick.volume ?? 0;
     for (const timeframe of this.timeframes) {
       const seconds = FIXED_TIMEFRAME_SECONDS[timeframe] as number;
       const bucket = Math.floor(timestampSeconds / seconds) * seconds;
@@ -31,7 +30,7 @@ export class CandleAggregator {
         this.forming.set(key, {
           symbol: tick.symbol,
           timeframe,
-          candle: { time: bucket, open: tick.price, high: tick.price, low: tick.price, close: tick.price, volume, forming: true },
+          candle: { time: bucket, open: tick.price, high: tick.price, low: tick.price, close: tick.price, volume: null, forming: true },
         });
         continue;
       }
@@ -43,7 +42,6 @@ export class CandleAggregator {
           high: Math.max(candle.high, tick.price),
           low: Math.min(candle.low, tick.price),
           close: tick.price,
-          volume: candle.volume + volume,
         },
       });
     }

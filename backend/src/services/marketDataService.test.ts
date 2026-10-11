@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { config } from '../config';
-import { fetchMarketData, clearMarketDataCache } from './marketDataService';
+import { fetchMarketData, clearMarketDataCache, resetMassiveBudgetForTests } from './marketDataService';
 
 const originalMassiveKey = config.massiveApiKey;
 const originalTwelveDataKey = config.twelveDataApiKey;
 const originalMaxCacheEntries = config.marketDataCacheMaxEntries;
 const originalMaxStaleMultiplier = config.marketDataMaxStaleTtlMultiplier;
+config.massiveRequestsPerWindow = 1_000;
+resetMassiveBudgetForTests();
 
 // Build a valid one-candle Massive response with a caller-selected timestamp.
 function massiveResponse(time = 1_700_000_000_000, status = 200): Response {
@@ -23,6 +25,7 @@ afterEach(() => {
   config.marketDataMaxStaleTtlMultiplier = originalMaxStaleMultiplier;
   vi.useRealTimers();
   clearMarketDataCache();
+  resetMassiveBudgetForTests();
 });
 
 describe('market data instrument mapping', () => {

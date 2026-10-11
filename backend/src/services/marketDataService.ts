@@ -3,6 +3,7 @@ import { getMarket } from '../../../src/lib/markets';
 import { config } from '../config';
 import { fetchWithTimeout } from '../../../src/lib/providers/request';
 import { readJsonSafe } from '../../../shared/http';
+import { ProviderBudget, ProviderBudgetExhaustedError, type ProviderBudgetSnapshot } from './providerBudget';
 
 // Provider base URLs — configurable via env for testing overrides
 const MASSIVE_REST = process.env.MASSIVE_REST_URL ?? 'https://api.massive.com';
@@ -44,6 +45,39 @@ export class MarketDataProviderError extends Error {
 }
 
 const inFlightMarketRequests = new Map<string, Map<number, Promise<MarketDataSeries>>>();
+
+function createMassiveBudget(): ProviderBudget {
+  return new ProviderBudget({
+    requestsPerWindow: config.massiveRequestsPerWindow,
+    windowMs: config.massiveBudgetWindowMs,
+    maxWaitMs: config.massiveBudgetMaxWaitMs,
+    maxQueue: config.massiveBudgetMaxQueue,
+  });
+}
+let massiveBudget = createMassiveBudget();
+
+function createTwelveDataBudget(): ProviderBudget {
+  return new ProviderBudget({
+    requestsPerWindow: config.twelveDataRequestsPerWindow,
+    windowMs: config.twelveDataBudgetWindowMs,
+    maxWaitMs: config.twelveDataBudgetMaxWaitMs,
+    maxQueue: config.twelveDataBudgetMaxQueue,
+  });
+}
+let twelveDataBudget = createTwelveDataBudget();
+
+export function getMassiveBudgetSnapshot(): ProviderBudgetSnapshot {
+  return massiveBudget.snapshot();
+}
+
+export function getTwelveDataBudgetSnapshot(): ProviderBudgetSnapshot {
+  return twelveDataBudget.snapshot();
+}
+
+export function resetMassiveBudgetForTests(): void {
+  massiveBudget = createMassiveBudget();
+  twelveDataBudget = createTwelveDataBudget();
+}
 
 export function clearMarketDataCache(): void {
   marketDataCache.clear();
@@ -238,6 +272,7 @@ async function fetchFromProvider(instrument: Market, timeframe: Timeframe, reque
     const query = new URLSearchParams({ adjusted: 'true', sort: 'asc', limit: String(limit) });
     const url = `${MASSIVE_REST}/v2/aggs/ticker/${encodeURIComponent(sourceSymbol)}/range/${interval.multiplier}/${interval.timespan}/${from}/${to}?${query}`;
     // API key in Authorization header, never in URL query string
+    await acquireRequestSlot(massiveBudget, 'Massive');
     const response = await fetchWithTimeout(url, { headers: { Authorization: `Bearer ${apiKey}` } });
     const { payload: body } = await readJsonSafe<{
       status?: string;
@@ -245,7 +280,11 @@ async function fetchFromProvider(instrument: Market, timeframe: Timeframe, reque
       message?: string;
       results?: Array<{ o: number; h: number; l: number; c: number; v?: number; t: number }>;
     }>(response);
-    if (!response.ok) throw new MarketDataProviderError('Massive', response.status, response.headers.get('retry-after'));
+    if (!response.ok) {
+      const retryAfter = response.headers.get('retry-after');
+      if (response.status === 429) massiveBudget.backoff(retryAfterMs(retryAfter, config.massiveBudgetWindowMs));
+      throw new MarketDataProviderError('Massive', response.status, retryAfter);
+    }
     if (!body) throw new Error('Massive returned an empty or invalid response.');
     if (body.status === 'ERROR') throw new Error(`Massive market data failed: ${body.error ?? body.message ?? 'provider error'}.`);
     return (body.results ?? []).map((bar) => ({
@@ -258,9 +297,14 @@ async function fetchFromProvider(instrument: Market, timeframe: Timeframe, reque
     if (!apiKey) throw new Error('TWELVEDATA_API_KEY is not configured on the server.');
     const limit = Math.min(requestedLimit, 1000);
     const query = new URLSearchParams({ symbol: sourceSymbol, interval: TWELVEDATA_TIMEFRAMES[timeframe], outputsize: String(limit), timezone: 'UTC', apikey: apiKey });
+    await acquireRequestSlot(twelveDataBudget, 'Twelve Data');
     const response = await fetchWithTimeout(`${TWELVEDATA_REST}/time_series?${query}`);
     const { payload: body } = await readJsonSafe<{ status?: string; message?: string; values?: Array<{ datetime: string; open: string; high: string; low: string; close: string; volume?: string }> }>(response);
-    if (!response.ok) throw new MarketDataProviderError('Twelve Data', response.status, response.headers.get('retry-after'));
+    if (!response.ok) {
+      const retryAfter = response.headers.get('retry-after');
+      if (response.status === 429) twelveDataBudget.backoff(retryAfterMs(retryAfter, config.twelveDataBudgetWindowMs));
+      throw new MarketDataProviderError('Twelve Data', response.status, retryAfter);
+    }
     if (!body) throw new Error('Twelve Data returned an empty or invalid response.');
     if (body.status === 'error') throw new Error(`Twelve Data market data failed: ${body.message ?? 'provider error'}.`);
     if (!body.values) throw new Error('Twelve Data returned no candle series.');
@@ -271,6 +315,20 @@ async function fetchFromProvider(instrument: Market, timeframe: Timeframe, reque
   }
 
   throw new Error(`Unsupported provider for ${instrument.canonicalSymbol}.`);
+}
+
+async function acquireRequestSlot(budget: ProviderBudget, provider: string): Promise<void> {
+  try {
+    await budget.acquire();
+  } catch (error) {
+    if (error instanceof ProviderBudgetExhaustedError) throw new MarketDataProviderError(provider, 429, String(error.retryAfterSeconds));
+    throw error;
+  }
+}
+
+function retryAfterMs(header: string | null, windowMs: number): number {
+  const seconds = Number(header);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : windowMs;
 }
 
 function limitMarketDataSeries(series: MarketDataSeries, limit: number): MarketDataSeries {

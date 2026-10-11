@@ -9,7 +9,7 @@ export interface DataProvider {
     symbol: string,
     timeframe: Timeframe,
     onCandle: (candle: Candle, closed: boolean) => void,
-    onStatus?: (status: 'connecting' | 'open' | 'closed' | 'reconnecting', detail?: string) => void,
+    onStatus?: (status: 'connecting' | 'open' | 'polling' | 'closed' | 'reconnecting', detail?: string) => void,
   ): () => void;
 }
 

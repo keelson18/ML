@@ -39,7 +39,7 @@ import { fetchMarketAvailability, requestBackendDecision, type BackendDecision }
 import { resolveAvatarUrl } from '../lib/avatar';
 import { fetchNotifications, markNotificationRead, type InAppNotification } from '../api/notifications';
 
-type WsStatus = 'connecting' | 'open' | 'closed' | 'reconnecting';
+type WsStatus = 'connecting' | 'open' | 'polling' | 'closed' | 'reconnecting';
 
 export default function Dashboard() {
   const { user, profile, signOut } = useAuth();
@@ -439,6 +439,7 @@ export default function Dashboard() {
 function WsIndicator({ status }: { status: WsStatus }) {
   const map: Record<WsStatus, { color: string; dot: string; icon: typeof Wifi; label: string }> = {
     open: { color: 'text-success', dot: 'bg-success', icon: Wifi, label: 'Live' },
+    polling: { color: 'text-muted', dot: 'bg-muted', icon: WifiOff, label: 'Polling' },
     connecting: { color: 'text-warning', dot: 'bg-warning', icon: Wifi, label: 'Connecting' },
     reconnecting: { color: 'text-warning', dot: 'bg-warning', icon: WifiOff, label: 'Reconnecting' },
     closed: { color: 'text-danger', dot: 'bg-danger', icon: WifiOff, label: 'Disconnected' },
