@@ -269,7 +269,7 @@ export interface TraderAutopilotSettings {
 
 export interface BackendHealth { schema: { ok: boolean; missing: string[] } }
 export async function fetchBackendHealth(): Promise<BackendHealth> {
-  return authenticatedBackendRequest<BackendHealth>('/api/v1/system/health');
+  return authenticatedBackendRequest<BackendHealth>('/api/v1/me/health');
 }
 
 export interface TraderAutopilotRunResult {

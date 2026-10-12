@@ -106,8 +106,7 @@ export function setMarketAvailability(records: MarketAvailabilityRecord[]): void
 }
 
 export function getMarketAvailability(symbol: string): MarketAvailabilityRecord {
-  const canonicalSymbol = resolveLegacySymbol(symbol);
-  return marketAvailability.get(canonicalSymbol) ?? { symbol: canonicalSymbol, status: 'unverified', checkedAt: null };
+  return marketAvailability.get(symbol) ?? { symbol, status: 'unverified', checkedAt: null };
 }
 
 export function getMarketAvailabilityRevision(): number {
@@ -122,26 +121,6 @@ export function getTrackedMarkets(): Market[] {
   return getMarketsByType('crypto');
 }
 
-// Legacy USDT symbol → canonical USD symbol mapping for backward compatibility
-const LEGACY_SYMBOL_MAP: Record<string, string> = {
-  BTCUSDT: 'BTCUSD', ETHUSDT: 'ETHUSD', SOLUSDT: 'SOLUSD', XRPUSDT: 'XRPUSD',
-  ADAUSDT: 'ADAUSD', DOGEUSDT: 'DOGEUSD', AVAXUSDT: 'AVAXUSD',
-  LINKUSDT: 'LINKUSD', DOTUSDT: 'DOTUSD', MATICUSDT: 'POLUSD', LTCUSDT: 'LTCUSD',
-  BCHUSDT: 'BCHUSD', XLMUSDT: 'XLMUSD', UNIUSDT: 'UNIUSD', ATOMUSDT: 'ATOMUSD',
-  ETCUSDT: 'ETCUSD', FILUSDT: 'FILUSD', NEARUSDT: 'NEARUSD', APTUSDT: 'APTUSD',
-};
-
-const legacyUsageLog = new Set<string>();
-
-export function resolveLegacySymbol(symbol: string): string {
-  const canonical = LEGACY_SYMBOL_MAP[symbol];
-  if (canonical && !legacyUsageLog.has(symbol)) {
-    legacyUsageLog.add(symbol);
-    console.warn(`[markets] Resolved legacy symbol "${symbol}" → "${canonical}". Update references to use the canonical USD symbol.`);
-  }
-  return canonical ?? symbol;
-}
-
 // Lookup helpers
 export function getMarketsByType(type: MarketType): Market[] {
   return MARKET_UNIVERSE.filter((market) => market.marketType === type && market.isActive
@@ -149,14 +128,12 @@ export function getMarketsByType(type: MarketType): Market[] {
 }
 
 export function getMarket(symbol: string): Market | undefined {
-  const resolved = resolveLegacySymbol(symbol);
-  return MARKET_UNIVERSE.find((m) => m.symbol === resolved);
+  return MARKET_UNIVERSE.find((m) => m.symbol === symbol);
 }
 
 export function formatMarketPrice(symbol: string, price: number | null | undefined, maximumFractionDigits = 2): string {
   if (price == null) return '--';
-  const resolved = resolveLegacySymbol(symbol);
-  const currency = getMarket(resolved)?.priceCurrency ?? getMarket(resolved)?.quoteAsset;
+  const currency = getMarket(symbol)?.priceCurrency ?? getMarket(symbol)?.quoteAsset;
   const formattedPrice = price.toLocaleString(undefined, { maximumFractionDigits });
   return currency === 'USD' ? `$${formattedPrice}` : `${formattedPrice} ${currency ?? ''}`.trim();
 }

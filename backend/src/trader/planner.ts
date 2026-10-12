@@ -1,5 +1,5 @@
 // Plans only when the existing analysis engines agree on a closed higher-timeframe trend.
-import { randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import type { Candle, Timeframe } from '../../../src/lib/types';
 import { analyzeMarketIntelligence } from '../engines/orchestrator';
 import type { TradeDecision } from '../engines/decision-engine';
@@ -16,6 +16,10 @@ export interface PlannerResult {
   keyLevels: number[];
   qualityScore: number;
   reason: string;
+}
+
+export function stablePlanId(accountId: string, symbol: string, triggerTimeframe: Timeframe, triggerBar: number): string {
+  return `plan-${createHash('sha256').update([accountId, symbol, triggerTimeframe, triggerBar, 'trend-pullback-v1'].join(':')).digest('hex').slice(0, 32)}`;
 }
 
 function biasFor(candles: Candle[], symbol: string, timeframe: Timeframe, id: string): HtfBias {
@@ -57,6 +61,7 @@ export function createTradePlan(input: PlannerInput): PlannerResult {
   const currentPrice = current as number;
   const triggerTimeframe = input.triggerTimeframe ?? traderConfig.TRIGGER_TIMEFRAMES[0] as Timeframe;
   const lastTriggerBar = candleIndex(triggerTimeframe, input.triggerCandles.at(-1)?.time ?? latest.time);
+  const planId = stablePlanId(input.accountId, input.symbol, triggerTimeframe, lastTriggerBar);
 
   const analysis = analyzeMarketIntelligence({ inputContextId: `${input.datasetId}:4h`, symbol: input.symbol, timeframe: '4h', candles: fourHour });
   const atr = analysis.indicators.result.latest.atr;
@@ -95,7 +100,7 @@ export function createTradePlan(input: PlannerInput): PlannerResult {
     ['strategy-intelligence', analysis.strategy.engineVersion],
   ]);
   const plan: TradePlan = {
-    id: randomUUID(), accountId: input.accountId, symbol: input.symbol, side: 'long', setupType: 'trend-pullback', htfBias: bias,
+    id: planId, accountId: input.accountId, symbol: input.symbol, side: 'long', setupType: 'trend-pullback', htfBias: bias,
     zone: entryZone, trigger: { kind: 'close_above_level', level: entryZone.high }, triggerTimeframe,
     invalidation, targets: [{ price: targetPrice, fractionOfPosition: 1 }],
     minRR: traderConfig.MIN_RR, createdAtBar: lastTriggerBar, expiresAtBar: lastTriggerBar + traderConfig.PLAN_EXPIRY_BARS,

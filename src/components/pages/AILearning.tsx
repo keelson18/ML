@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Brain, Database, FlaskConical, RefreshCw, ShieldCheck } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 
@@ -34,26 +34,38 @@ export default function AILearning() {
   const [experiments, setExperiments] = useState<ResearchExperiment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const requestId = useRef(0);
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    const currentRequest = ++requestId.current;
     setLoading(true);
     setError(false);
-    const results = await Promise.all([
-      supabase.from('model_versions').select('id,version,algorithm,status,metrics,created_at').order('created_at', { ascending: false }).limit(20),
-      supabase.from('learning_events').select('id,source_type,hypothesis,status,created_at').order('created_at', { ascending: false }).limit(20),
-      supabase.from('research_experiments').select('id,name,hypothesis,dataset_id,status,created_at').order('created_at', { ascending: false }).limit(20),
-    ]);
-    const failed = results.some((result) => result.error);
-    if (!failed) {
-      setVersions((results[0].data ?? []) as ModelVersion[]);
-      setEvents((results[1].data ?? []) as LearningEvent[]);
-      setExperiments((results[2].data ?? []) as ResearchExperiment[]);
+    try {
+      const results = await Promise.allSettled([
+        supabase.from('model_versions').select('id,version,algorithm,status,metrics,created_at').order('created_at', { ascending: false }).limit(20),
+        supabase.from('learning_events').select('id,source_type,hypothesis,status,created_at').order('created_at', { ascending: false }).limit(20),
+        supabase.from('research_experiments').select('id,name,hypothesis,dataset_id,status,created_at').order('created_at', { ascending: false }).limit(20),
+      ]);
+      if (requestId.current !== currentRequest) return;
+      const [versionsResult, eventsResult, experimentsResult] = results;
+      const versionsFailed = versionsResult.status === 'rejected' || versionsResult.value.error;
+      const eventsFailed = eventsResult.status === 'rejected' || eventsResult.value.error;
+      const experimentsFailed = experimentsResult.status === 'rejected' || experimentsResult.value.error;
+      if (!versionsFailed && versionsResult.status === 'fulfilled') setVersions((versionsResult.value.data ?? []) as ModelVersion[]);
+      if (!eventsFailed && eventsResult.status === 'fulfilled') setEvents((eventsResult.value.data ?? []) as LearningEvent[]);
+      if (!experimentsFailed && experimentsResult.status === 'fulfilled') setExperiments((experimentsResult.value.data ?? []) as ResearchExperiment[]);
+      setError(Boolean(versionsFailed || eventsFailed || experimentsFailed));
+    } catch {
+      if (requestId.current === currentRequest) setError(true);
+    } finally {
+      if (requestId.current === currentRequest) setLoading(false);
     }
-    setError(failed);
-    setLoading(false);
-  };
+  }, []);
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    void load();
+    return () => { requestId.current += 1; };
+  }, [load]);
 
   const latest = versions[0];
   const accuracies = versions.map((version) => Number(version.metrics.accuracy)).filter(Number.isFinite);

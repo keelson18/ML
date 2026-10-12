@@ -11,6 +11,7 @@ import { BoundedMap, WindowLimiter } from '../utils/limits';
 const VALID_TIMEFRAMES = new Set<string>(TIMEFRAMES.map((t) => t.value));
 const SYMBOL_PATTERN = /^[A-Z0-9._-]{1,20}$/;
 const ANALYSIS_CANDLES = 1000;
+const MIN_ANALYSIS_CANDLES = 60;
 const MAX_CACHED_DECISIONS = 200;
 
 interface DecisionRequest {
@@ -57,7 +58,7 @@ export async function decisionRoutes(app: FastifyInstance, pipeline: AutonomousP
       request.log.error({ userId, symbol, timeframe, err: error instanceof Error ? error.message : 'unknown' }, 'decision candle fetch failed');
       return reply.code(502).send({ error: 'Market data unavailable.' });
     }
-    if (candles.length < MIN_CANDLES) return reply.code(400).send({ error: 'Not enough closed candles for analysis.' });
+    if (candles.length < MIN_ANALYSIS_CANDLES) return reply.code(400).send({ error: 'Not enough closed candles for analysis.' });
 
     const lastClosedTime = candles[candles.length - 1].time;
     const cacheKey = `${userId}:${symbol}:${timeframe}:${lastClosedTime}`;

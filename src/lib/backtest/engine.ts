@@ -23,7 +23,6 @@ export interface BacktestResult {
   metrics: {
     totalReturn: number;
     maxDrawdown: number;
-    sharpe: number;
     winRate: number;
     totalTrades: number;
   };
@@ -44,7 +43,7 @@ export function runBacktest(
     throw new Error('Initial capital and holding period must be positive values.');
   }
   if (candles.length < minCandles + holdBars + 2) {
-    return { trades, equity, metrics: { totalReturn: 0, maxDrawdown: 0, sharpe: 0, winRate: 0, totalTrades: 0 } };
+    return { trades, equity, metrics: { totalReturn: 0, maxDrawdown: 0, winRate: 0, totalTrades: 0 } };
   }
 
   for (let i = minCandles; i < candles.length - holdBars - 1; i++) {
@@ -98,21 +97,12 @@ export function runBacktest(
     maxDrawdown = Math.max(maxDrawdown, (peak - value) / peak);
   }
 
-  // Sharpe (simplified)
-  const returns = trades.map((t) => t.pnlPct);
-  const avgReturn = returns.length > 0 ? returns.reduce((s, r) => s + r, 0) / returns.length : 0;
-  const variance = returns.length > 0
-    ? returns.reduce((s, r) => s + (r - avgReturn) ** 2, 0) / returns.length
-    : 0;
-  const sharpe = variance > 0 ? avgReturn / Math.sqrt(variance) * Math.sqrt(252) : 0;
-
   return {
     trades,
     equity,
     metrics: {
       totalReturn,
       maxDrawdown,
-      sharpe,
       winRate,
       totalTrades: trades.length,
     },

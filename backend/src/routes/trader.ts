@@ -21,7 +21,7 @@ const listQuery = z.object({ status: z.enum(['WATCHING', 'ARMED', 'PENDING_ORDER
 const historyQuery = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) }).strict();
 const autopilotSymbols = z.array(z.string().regex(/^[A-Z0-9]{3,12}$/)).min(1).max(MARKET_UNIVERSE.length);
 const autopilotUpdate = z.object({ enabled: z.boolean(), symbols: autopilotSymbols }).strict();
-const defaultAutopilotSymbols = ['BTCUSD', 'ETHUSD', 'SOLUSD'].filter((symbol) => MARKET_UNIVERSE.some((market) => market.symbol === symbol && market.isActive));
+const defaultAutopilotSymbols = MARKET_UNIVERSE.filter((market) => market.isActive).slice(0, 3).map((market) => market.symbol);
 const ledgerVerificationCache = new Map<string, { checkedAt: number; status: 'verified' | 'broken' | 'unavailable' }>();
 
 async function accountLedgerStatus(accountId: string): Promise<'verified' | 'broken' | 'unavailable'> {

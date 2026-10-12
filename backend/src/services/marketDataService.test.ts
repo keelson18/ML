@@ -13,6 +13,7 @@ resetMassiveBudgetForTests();
 function massiveResponse(time = 1_700_000_000_000, status = 200): Response {
   return new Response(JSON.stringify({
     status: status === 200 ? 'OK' : 'ERROR',
+    ticker: 'X:BTCUSD',
     results: status === 200 ? [{ t: time, o: 100, h: 102, l: 99, c: 101, v: 50 }] : undefined,
   }), { status });
 }
@@ -33,6 +34,7 @@ describe('market data instrument mapping', () => {
     config.massiveApiKey = 'test-key';
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       status: 'OK',
+      ticker: 'X:BTCUSD',
       results: [{ t: 1_700_000_000_000, o: 100, h: 102, l: 99, c: 101, v: 50 }],
     }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
@@ -50,6 +52,7 @@ describe('market data instrument mapping', () => {
     config.massiveApiKey = 'server-test-key';
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       status: 'OK',
+      ticker: 'X:BTCUSD',
       results: [{ t: 1_700_000_000_000, o: 100, h: 102, l: 99, c: 101, v: 50 }],
     }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
@@ -63,10 +66,14 @@ describe('market data instrument mapping', () => {
 
   it('uses Twelve Data source symbols for EURUSD and XAUUSD', async () => {
     config.twelveDataApiKey = 'server-twelve-key';
-    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({
-      status: 'ok',
-      values: [{ datetime: '2026-10-03 12:00:00', open: '100', high: '102', low: '99', close: '101', volume: '50' }],
-    }), { status: 200 })));
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const requestedSymbol = new URL(String(input)).searchParams.get('symbol');
+      return Promise.resolve(new Response(JSON.stringify({
+        status: 'ok',
+        meta: { symbol: requestedSymbol },
+        values: [{ datetime: '2026-10-03 12:00:00', open: '100', high: '102', low: '99', close: '101', volume: '50' }],
+      }), { status: 200 }));
+    });
     vi.stubGlobal('fetch', fetchMock);
 
     const eurUsd = await fetchMarketData('EURUSD', '1h', 100);
@@ -76,12 +83,32 @@ describe('market data instrument mapping', () => {
     expect(String(fetchMock.mock.calls[1][0])).toContain('symbol=XAU%2FUSD');
     expect(eurUsd.dataset).toMatchObject({ provider: 'twelvedata', sourceInstrument: 'EUR/USD', quoteCurrency: 'USD' });
     expect(xauUsd.dataset).toMatchObject({ provider: 'twelvedata', sourceInstrument: 'XAU/USD', quoteCurrency: 'USD' });
+    expect(eurUsd.candles[0]?.time).toBe(Date.parse('2026-10-03T12:00:00Z') / 1000);
+  });
+
+  it('rejects provider candles when response metadata names another instrument', async () => {
+    config.twelveDataApiKey = 'server-twelve-key';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      status: 'ok',
+      meta: { symbol: 'EUR/GBP' },
+      values: [{ datetime: '2026-10-03 12:00:00', open: '100', high: '102', low: '99', close: '101', volume: '50' }],
+    }), { status: 200 })));
+
+    await expect(fetchMarketData('EURUSD', '1h', 100)).rejects.toThrow('mismatched instrument metadata');
+  });
+
+  it('rejects an empty successful Massive response instead of treating it as valid market data', async () => {
+    config.massiveApiKey = 'test-key';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: 'OK', ticker: 'X:BTCUSD', results: [] }), { status: 200 })));
+
+    await expect(fetchMarketData('BTCUSD', '1h', 100)).rejects.toThrow('Massive returned no candles');
   });
 
   it('uses the Massive stock source symbol for AAPL', async () => {
     config.massiveApiKey = 'server-massive-key';
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       status: 'OK',
+      ticker: 'AAPL',
       results: [{ t: 1_700_000_000_000, o: 100, h: 102, l: 99, c: 101, v: 50 }],
     }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
@@ -93,20 +120,15 @@ describe('market data instrument mapping', () => {
     expect(result.dataset).toMatchObject({ provider: 'massive', sourceInstrument: 'AAPL', quoteCurrency: 'USD' });
   });
 
-  it('resolves legacy USDT symbols to canonical USD symbols via Massive', async () => {
-    config.massiveApiKey = 'test-key';
+  it('rejects a USDT symbol instead of fetching a different USD instrument', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       status: 'OK',
       results: [{ t: 1_700_000_000_000, o: 100, h: 102, l: 99, c: 101, v: 50 }],
     }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await fetchMarketData('BTCUSDT', '1h', 100);
-    const requestUrl = String(fetchMock.mock.calls[0][0]);
-
-    expect(requestUrl).toContain('/ticker/X%3ABTCUSD/');
-    expect(result.instrument).toMatchObject({ canonicalSymbol: 'BTCUSD', quoteAsset: 'USD' });
-    expect(result.dataset).toMatchObject({ provider: 'massive', quoteCurrency: 'USD' });
+    await expect(fetchMarketData('BTCUSDT', '1h', 100)).rejects.toThrow('Unknown canonical instrument: BTCUSDT');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('rejects a target instrument with no verified provider mapping', async () => {
@@ -121,7 +143,10 @@ describe('market data instrument mapping', () => {
 describe('market data cache freshness and bounds', () => {
   it('returns an unexpired cached result without another provider request', async () => {
     config.massiveApiKey = 'test-key';
-    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(massiveResponse()));
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const symbol = decodeURIComponent(new URL(String(input)).pathname.match(/\/ticker\/([^/]+)\//)?.[1] ?? '');
+      return Promise.resolve(new Response(JSON.stringify({ status: 'OK', ticker: symbol, results: [{ t: 1_700_000_000_000, o: 100, h: 102, l: 99, c: 101, v: 50 }] }), { status: 200 }));
+    });
     vi.stubGlobal('fetch', fetchMock);
 
     const first = await fetchMarketData('BTCUSD', '1h', 100);
@@ -186,7 +211,10 @@ describe('market data cache freshness and bounds', () => {
   it('evicts least-recently-used entries when the configured bound is reached', async () => {
     config.massiveApiKey = 'test-key';
     config.marketDataCacheMaxEntries = 1;
-    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(massiveResponse()));
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const symbol = decodeURIComponent(new URL(String(input)).pathname.match(/\/ticker\/([^/]+)\//)?.[1] ?? '');
+      return Promise.resolve(new Response(JSON.stringify({ status: 'OK', ticker: symbol, results: [{ t: 1_700_000_000_000, o: 100, h: 102, l: 99, c: 101, v: 50 }] }), { status: 200 }));
+    });
     vi.stubGlobal('fetch', fetchMock);
 
     await fetchMarketData('BTCUSD', '1h', 100);

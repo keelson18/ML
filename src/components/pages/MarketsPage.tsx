@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BarChart3, RefreshCw } from 'lucide-react';
 import type { MarketType } from '../../lib/types';
 import { MARKET_TYPES } from '../../lib/types';
@@ -13,6 +13,7 @@ export default function MarketsPage() {
   const [quotes, setQuotes] = useState<Record<string, Quote>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const quoteRequestId = useRef(0);
   const availabilityRevision = getMarketAvailabilityRevision();
   const markets = useMemo(() => {
     void availabilityRevision;
@@ -23,7 +24,7 @@ export default function MarketsPage() {
   const visibleMarkets = useMemo(() => markets.slice(page * pageSize, (page + 1) * pageSize), [markets, page]);
   const marketTypeMeta = MARKET_TYPES.find((mt) => mt.value === selectedType);
   const loadQuotes = useCallback(() => {
-    let cancelled = false;
+    const requestId = ++quoteRequestId.current;
     setLoading(true);
     setQuotes({});
     setError(null);
@@ -38,17 +39,19 @@ export default function MarketsPage() {
         return { symbol: market.symbol, quote: null };
       }
     })).then((results) => {
-      if (!cancelled) {
+      if (quoteRequestId.current === requestId) {
         const usableEntries = results.filter((result): result is typeof result & { quote: Quote } => result.quote !== null);
         setQuotes(Object.fromEntries(usableEntries.map(({ symbol, quote }) => [symbol, quote])));
         const failures = results.length - usableEntries.length;
         if (failures) setError(`${failures} of ${results.length} displayed quotes are unavailable from their configured providers. Check provider access or rate limits.`);
       }
-    }).finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+    }).finally(() => { if (quoteRequestId.current === requestId) setLoading(false); });
   }, [visibleMarkets]);
 
-  useEffect(() => loadQuotes(), [loadQuotes]);
+  useEffect(() => {
+    void loadQuotes();
+    return () => { quoteRequestId.current += 1; };
+  }, [loadQuotes]);
 
   const quoteEntries = Object.entries(quotes);
   const topGainer = quoteEntries.slice().sort((a, b) => b[1].change - a[1].change)[0];
@@ -56,7 +59,7 @@ export default function MarketsPage() {
 
   return (
     <div className="page-frame space-y-6">
-      <div className="page-heading"><div className="page-heading-copy"><div className="page-eyebrow"><BarChart3 className="w-3.5 h-3.5" /> Market overview</div><h1>Markets</h1><p>Browse supported instruments and the latest provider-backed daily quote where a data source is configured.</p></div><button onClick={loadQuotes} className="p-2 rounded-lg hover:bg-surface text-muted" title="Refresh quotes" aria-label="Refresh market quotes"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /></button></div>
+      <div className="page-heading"><div className="page-heading-copy"><div className="page-eyebrow"><BarChart3 className="w-3.5 h-3.5" /> Market overview</div><h1>Markets</h1><p>Browse supported instruments and the latest provider-backed daily quote where a data source is configured.</p></div><button type="button" onClick={() => void loadQuotes()} disabled={loading} className="p-2 rounded-lg hover:bg-surface text-muted disabled:opacity-50" title="Refresh quotes" aria-label="Refresh market quotes"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /></button></div>
       <div className="flex gap-1 p-1 rounded-lg bg-surface border border-border w-fit max-w-full overflow-x-auto">{MARKET_TYPES.map((marketType) => <button key={marketType.value} onClick={() => { setSelectedType(marketType.value); setPage(0); }} className={`whitespace-nowrap px-3 py-1.5 rounded text-xs font-medium transition-colors ${selectedType === marketType.value ? 'bg-primary text-black' : 'text-muted hover:text-text'}`}>{marketType.icon} {marketType.label}</button>)}</div>
       {error && <div role="alert" className="text-xs text-warning bg-warning/10 border border-warning/20 rounded-lg p-3">{error}</div>}
 

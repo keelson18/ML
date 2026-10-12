@@ -31,7 +31,7 @@ describe('Fastify security headers', () => {
     const response = await app.inject('/health');
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({ status: 'ok', service: 'quantum-api', paperLedger: { status: 'unavailable' } });
+    expect(response.json()).toEqual({ status: 'ok', service: 'quantum-api' });
     expect(response.headers['x-content-type-options']).toBe('nosniff');
     expect(response.headers['x-frame-options']).toBe('SAMEORIGIN');
     await app.close();
@@ -74,6 +74,8 @@ describe('Fastify security headers', () => {
     const plans = await app.inject('/api/v1/trader/plans');
     expect(overview.statusCode).toBe(401);
     expect(plans.statusCode).toBe(401);
+    expect((await app.inject('/api/v1/me/health')).statusCode).toBe(401);
+    expect((await app.inject('/api/v1/system/health')).statusCode).toBe(401);
     await app.close();
   });
 

@@ -285,6 +285,7 @@ async function fetchFromProvider(instrument: Market, timeframe: Timeframe, reque
       status?: string;
       error?: string;
       message?: string;
+      ticker?: string;
       results?: Array<{ o: number; h: number; l: number; c: number; v?: number; t: number }>;
     }>(response);
     if (!response.ok) {
@@ -294,9 +295,12 @@ async function fetchFromProvider(instrument: Market, timeframe: Timeframe, reque
     }
     if (!body) throw new Error('Massive returned an empty or invalid response.');
     if (body.status === 'ERROR') throw new Error(`Massive market data failed: ${body.error ?? body.message ?? 'provider error'}.`);
-    return (body.results ?? []).map((bar) => ({
+    if (body.ticker !== sourceSymbol) throw new Error(`Massive returned mismatched instrument metadata for ${instrument.canonicalSymbol}.`);
+    const candles = (body.results ?? []).map((bar) => ({
       time: Math.floor(bar.t / 1000), open: Number(bar.o), high: Number(bar.h), low: Number(bar.l), close: Number(bar.c), volume: Number(bar.v ?? 0),
     }));
+    if (candles.length === 0) throw new Error(`Massive returned no candles for ${instrument.canonicalSymbol}.`);
+    return candles;
   }
 
   if (instrument.provider === 'twelvedata') {
@@ -306,7 +310,12 @@ async function fetchFromProvider(instrument: Market, timeframe: Timeframe, reque
     const query = new URLSearchParams({ symbol: sourceSymbol, interval: TWELVEDATA_TIMEFRAMES[timeframe], outputsize: String(limit), timezone: 'UTC', apikey: apiKey });
     await acquireRequestSlot(twelveDataBudget, 'Twelve Data', priority);
     const response = await fetchWithTimeout(`${TWELVEDATA_REST}/time_series?${query}`);
-    const { payload: body } = await readJsonSafe<{ status?: string; message?: string; values?: Array<{ datetime: string; open: string; high: string; low: string; close: string; volume?: string }> }>(response);
+    const { payload: body } = await readJsonSafe<{
+      status?: string;
+      message?: string;
+      meta?: { symbol?: string };
+      values?: Array<{ datetime: string; open: string; high: string; low: string; close: string; volume?: string }>;
+    }>(response);
     if (!response.ok) {
       const retryAfter = response.headers.get('retry-after');
       if (response.status === 429) twelveDataBudget.backoff(retryAfterMs(retryAfter, config.twelveDataBudgetWindowMs));
@@ -315,13 +324,23 @@ async function fetchFromProvider(instrument: Market, timeframe: Timeframe, reque
     if (!body) throw new Error('Twelve Data returned an empty or invalid response.');
     if (body.status === 'error') throw new Error(`Twelve Data market data failed: ${body.message ?? 'provider error'}.`);
     if (!body.values) throw new Error('Twelve Data returned no candle series.');
-    return body.values.map((bar) => ({
-      time: Math.floor(Date.parse(bar.datetime) / 1000),
+    if (body.meta?.symbol?.trim().toUpperCase() !== sourceSymbol.trim().toUpperCase()) {
+      throw new Error(`Twelve Data returned mismatched instrument metadata for ${instrument.canonicalSymbol}.`);
+    }
+    const candles = body.values.map((bar) => ({
+      time: Math.floor(parseUtcTimestamp(bar.datetime) / 1000),
       open: Number(bar.open), high: Number(bar.high), low: Number(bar.low), close: Number(bar.close), volume: Number(bar.volume ?? 0),
     })).reverse();
+    if (candles.length === 0) throw new Error(`Twelve Data returned no candles for ${instrument.canonicalSymbol}.`);
+    return candles;
   }
 
   throw new Error(`Unsupported provider for ${instrument.canonicalSymbol}.`);
+}
+
+function parseUtcTimestamp(value: string): number {
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value);
+  return Date.parse(hasTimezone ? value : `${value.replace(' ', 'T')}Z`);
 }
 
 async function acquireRequestSlot(budget: ProviderBudget, provider: string, priority: boolean): Promise<void> {

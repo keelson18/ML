@@ -21,7 +21,7 @@ describe('authenticated backend responses', () => {
   it('requests health through the shared API proxy with authentication', async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ schema: { ok: true, missing: [] } }), { status: 200 }));
     await expect(fetchBackendHealth()).resolves.toEqual({ schema: { ok: true, missing: [] } });
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/system/health');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/me/health');
     expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('Authorization')).toBe('Bearer test-token');
   });
 

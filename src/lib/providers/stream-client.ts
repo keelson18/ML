@@ -23,6 +23,7 @@ class StreamClient {
   private socket: WebSocket | undefined;
   private connecting = false;
   private ready = false;
+  private unavailable = false;
   private attempt = 0;
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly listeners = new Map<string, Set<StreamListener>>();
@@ -34,7 +35,8 @@ class StreamClient {
       this.listeners.set(symbol, set);
     }
     set.add(listener);
-    if (this.ready) this.sendSubscribe(symbol);
+    if (this.unavailable) listener.onMode('polling');
+    else if (this.ready) this.sendSubscribe(symbol);
     else this.ensureConnected();
     return () => this.unsubscribe(symbol, listener);
   }
@@ -48,7 +50,7 @@ class StreamClient {
   }
 
   private ensureConnected(): void {
-    if (this.connecting || this.socket || this.retryTimer) return;
+    if (this.unavailable || this.connecting || this.socket || this.retryTimer) return;
     this.connecting = true;
     void this.connect();
   }
@@ -57,7 +59,15 @@ class StreamClient {
     let ticket: string;
     try {
       ({ ticket } = await authenticatedBackendRequest<{ ticket: string }>('/api/v1/stream/ticket', { method: 'POST' }));
-    } catch {
+    } catch (error) {
+      // A 404 means the backend was built with live streaming disabled. Keep
+      // the candle poller active without retrying a known-missing route.
+      if (error instanceof Error && /\(404\)/.test(error.message)) {
+        this.unavailable = true;
+        this.connecting = false;
+        for (const symbol of this.listeners.keys()) this.emitMode(symbol, 'polling');
+        return;
+      }
       this.scheduleRetry();
       return;
     }

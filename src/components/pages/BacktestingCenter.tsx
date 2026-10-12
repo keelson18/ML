@@ -76,14 +76,12 @@ export default function BacktestingCenter({ candles, timeframe, symbol, theme, m
     { label: 'Win Rate', value: `${(result.metrics.winRate * 100).toFixed(1)}%`, color: 'text-success' },
     { label: 'Net Profit', value: `${result.metrics.totalReturn >= 0 ? '+' : ''}$${(lastRun.capital * result.metrics.totalReturn).toFixed(2)}`, color: result.metrics.totalReturn >= 0 ? 'text-success' : 'text-danger' },
     { label: 'Max Drawdown', value: `${(result.metrics.maxDrawdown * 100).toFixed(1)}%`, color: 'text-danger' },
-    { label: 'Sharpe', value: result.metrics.totalTrades >= 2 ? result.metrics.sharpe.toFixed(2) : '--', color: result.metrics.totalTrades >= 2 ? 'text-primary' : 'text-muted' },
     { label: 'Total Trades', value: String(result.metrics.totalTrades), color: 'text-text' },
     { label: 'Timeframe', value: timeframe, color: 'text-primary' },
   ] : [
     { label: 'Win Rate', value: '--', color: 'text-muted' },
     { label: 'Net Profit', value: '--', color: 'text-muted' },
     { label: 'Max Drawdown', value: '--', color: 'text-muted' },
-    { label: 'Sharpe', value: '--', color: 'text-muted' },
     { label: 'Total Trades', value: '--', color: 'text-muted' },
     { label: 'Timeframe', value: timeframe, color: 'text-primary' },
   ];
@@ -97,6 +95,7 @@ export default function BacktestingCenter({ candles, timeframe, symbol, theme, m
           <p>Backtest one versioned strategy against the selected historical {symbol} candles using next-bar entries and a fixed holding period.</p>
         </div>
       </div>
+      <div role="note" className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-warning">Exploratory results only: this browser backtest does not model fees, spread, slippage, stop-based sizing, or a market benchmark. Risk-adjusted statistics are omitted until returns can be calculated at a validated time cadence.</div>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
         <Field id="backtest-strategy" label="Strategy">

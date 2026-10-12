@@ -10,7 +10,7 @@ This file reports evidence observed in the repository and this workspace session
 | Stale fallback has a bounded age | PASS | Same test file — `serves an expired result as stale only while within the configured age bound` and `throws when provider failure occurs after the stale age bound`. |
 | Stale market data cannot open entries | PASS | `backend/src/services/paperTradingService.test.ts` — `rejects new positions when market data is stale`; planner/scheduler entry paths also test stale flags in `backend/src/autonomy/pipeline.ts` and `backend/src/routes/trader.ts`. |
 | Helmet and rate limiting are registered once; health and 429 behavior | PASS | `backend/src/server.ts` registers each plugin once. `backend/src/server.test.ts` — `builds and serves health with standard security headers` (200), `rate limits authenticated market requests using configured quota` (429). Route-level 429 behavior is also covered in `backend/src/routes/market.test.ts`. |
-| No production Binance provider calls or USDT market decisions | FAIL | No Binance implementation/provider call was found in current source, but `src/lib/markets.ts` still has a production legacy `USDT → USD` alias map. `src/lib/market-hardcode-guard.test.ts` passes, but explicitly excludes `markets.ts`; that test alone does not prove the requested no-USDT claim. |
+| No runtime USDT-to-USD symbol substitution | NOT-VERIFIED (source correction made) | Runtime legacy aliases have been removed from `src/lib/markets.ts`; `getMarket('BTCUSDT')` is now an unknown symbol, and focused tests assert rejection. The latest test suite could not run because dependencies are incomplete. Generic engine fixtures still use BTCUSDT as an unregistered test label; no production provider mapping was found. |
 | Market availability is shown per symbol; unavailable symbols are hidden/rejected | PASS (implementation only) | `src/lib/markets.ts` filters `unavailable` symbols from selectors; `backend/src/services/paperTradingService.ts` rejects unverified/unavailable markets. `AdminPanel` shows `available` / `unavailable` / `unverified`. |
 | Which Massive markets were actually verified in this session | NOT-VERIFIED | No authenticated provider probe was run and no live provider key/result was available. **Verified by this session: none.** Prior rate-limit evidence exists for multiple candle endpoints; it is not proof of ticker availability. |
 | A plan cannot fill on its creation candle | PASS | `backend/src/trader/executor.test.ts` — `creates a pending order after a trigger and cannot fill it on that candle`; the new `rejects a pending fill when the current entry gate blocks it` test covers the later-fill gate. |
@@ -123,6 +123,17 @@ A PostgreSQL/Supabase RLS integration test was not run, so owner/admin/anon beha
 
 ## Quantum Phases 2–3
 
+### Full audit update — 2026-10-12
+
+- Current source findings and remediation priorities are in [ARCHITECTURE_AUDIT.md](ARCHITECTURE_AUDIT.md). This report supersedes older audit grades and architecture claims where they describe removed paths or claim unverified production readiness.
+- `node scripts/check-migration-versions.mjs`: **PASS** (39 migration files, unique numeric versions).
+- `node scripts/check-env-docs.mjs`: **PASS** (47 application environment reads documented in `.env.example`).
+- `git diff --check`: **PASS**.
+- Supabase CLI read-only check against the currently linked project: migration `20261015000000` is recorded as applied, and `select public.verify_paper_schema()` returned `{"ok":true,"missing":[]}`. This proves the linked project’s required schema is present; it does not prove the running backend uses that same project or service-role key.
+- For the reported backend RPC failure, sent `NOTIFY pgrst, 'reload schema'` to the linked project (non-destructive). Rechecked: `verify_paper_schema()` returned `ok: true`, `missing: []`, and `service_role_can_execute: true`. The backend process must be restarted and its authenticated health rechecked; if it still reports the RPC missing, its configured Supabase project differs from this linked project or has a different REST endpoint configuration.
+- Current `npm ci`: **FAIL** — `EPERM` on unlink of `node_modules/@esbuild/win32-x64/esbuild.exe`. Elevated retry produced the same error. The prior four requested checks could not start: frontend/backend typecheck report `tsc` not recognized; lint reports `eslint` not recognized; tests report `vitest` not recognized.
+- Provider identity/timezone behavior, public health access control, UI/research alignment, database state, live provider availability, RLS behavior, and browser/scheduler behavior: **NOT-VERIFIED** beyond the source findings in the audit.
+
 - The append-only event ledger, deterministic hash-chain RPCs, atomic versioned account update, relational fill/shadow projections, scheduled snapshots and schema check are in `supabase/migrations/20261015000000_quantum_paper_core.sql`. It is not applied remotely; PostgreSQL execution, RLS, concurrency and backfill remain **NOT-VERIFIED**. It includes a statement-level BEFORE TRUNCATE guard. The chain detects tampering by actors unable to rewrite all rows, not a database owner who can rebuild the chain.
 - Shared paper fill/exit accounting and calendar-aware candle math have unit tests. Tests for hash tampering, 1,000 simulated trades, fetch-once deduplication, chronological bounded replay, stale-entry age, and quota-derived request spacing are present. The requested unit suite is **NOT-VERIFIED** because `npm ci` fails and `vitest` is unavailable.
 - The per-user scheduler, opt-in enrollment, authenticated rate-limited Run now route, paused-reason path, 5-minute management replay, selected-symbol refresh, and process-local shared fetch/cache path are implemented. Browser behavior and a deployed scheduled run are **NOT-VERIFIED**. Run one scheduler worker per project; multi-replica coordination is not implemented.
@@ -133,3 +144,22 @@ A PostgreSQL/Supabase RLS integration test was not run, so owner/admin/anon beha
 - `node scripts/measure-paper-ledger.mjs` reports a scripted 3-symbol, 1-position, 24-hour estimate of 864 rows / 341,187 JSON payload bytes for checkpoint snapshots versus 865 rows / 167,919 bytes for an initial snapshot plus 864 decision events. These are model payload bytes, excluding PostgreSQL overhead. See `docs/AUTOPILOT_BUDGET.md`.
 - `npm run check:migration-versions`: **PASS** (39 files, unique numeric prefixes). `npm run check:env`: **PASS** (47 environment variables documented). `node scripts/measure-paper-ledger.mjs`: **PASS** (reproduces the figures above).
 - Requested local checks: `npm ci` **FAIL** (`EPERM` unlink of `node_modules/@rollup/rollup-win32-x64-msvc/rollup.win32-x64-msvc.node`); `npm run typecheck` **FAIL** (`tsc` not recognized); `npm run backend:typecheck` **FAIL** (`tsc` not recognized); `npm run lint` **FAIL** (`eslint` not recognized); `npm test` **FAIL** (`vitest` not recognized). The four project checks could not execute until `npm ci` can replace the locked Rollup binary. These results do not establish that source checks pass.
+
+### Current workspace follow-up — 2026-10-12
+
+- `npm ci`: **FAIL** — `EPERM` unlinking `node_modules/@esbuild/.win32-x64-WRe5TuS/esbuild.exe` (`errno -4048`). An elevated retry in this session previously produced the same class of lock error. Stopping the development process started in this session did not release it.
+- Dependency recovery with `npm install --ignore-scripts`: **FAIL** — `EBUSY` copying `node_modules/@esbuild/win32-x64/esbuild.exe` to the temporary install directory. `node_modules` is incomplete after the failed clean install; do not treat global tools or this partial tree as a reproducible dependency install.
+- `npm run typecheck`, `npm run backend:typecheck`, and `npm run lint`: **PASS** before the later failed `npm ci`; the backend compile issue (`MIN_CANDLES` undefined) was fixed by declaring the 60 closed-candle minimum. These checks must be rerun after dependencies are restored.
+- `npm run build`: **PASS** before the later failed `npm ci`, with the existing large-chunk warning. Must be rerun after restoring dependencies.
+- `npm test`: **NOT-VERIFIED** — Vitest was absent after the failed install, so the command could not start (`'vitest' is not recognized`).
+- Database readiness, live provider candles, stream availability, and authenticated page workflows: **NOT-VERIFIED** against the owner’s deployed Supabase/provider accounts. `/health` previously reported missing `verify_paper_schema`; a candle probe returned an empty series on one request and provider rate limiting on later requests.
+
+### Final local follow-up — 2026-10-12
+
+- `npm ci`: initial sandbox run **FAIL** (`EPERM`, `spawn` while rebuilding packages, with cleanup `EPERM` under `node_modules`). After the owner stopped the pre-existing esbuild process, elevated `npm ci` **PASS** (370 packages installed). It reported 8 dependency vulnerabilities (2 moderate, 6 high); no automatic audit fix was applied.
+- `npm run typecheck`: **PASS**.
+- `npm run backend:typecheck`: **PASS**.
+- `npm run lint`: **PASS**.
+- `npm test`: **PASS**, 51 test files and 280 tests. The sandbox invocation initially failed to spawn esbuild (`EPERM`); the elevated run succeeded. Test fixtures now return provider instrument metadata matching the requested source ticker, and autopilot defaults are derived from the active registry.
+- `git diff --check`: **PASS**.
+- Live API/provider/Supabase access and browser page workflows remain **NOT-VERIFIED** in this local run. The local automated checks do not prove that the owner’s backend is running or that its database migrations and provider credentials are ready.

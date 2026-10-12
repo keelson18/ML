@@ -6,6 +6,7 @@ import { traderConfig } from '../trader/config';
 import { markToMarket, calculatePositionSize } from '../trader/risk';
 import { getAccount } from './paperTradingService';
 import { fetchMarketData } from './marketDataService';
+import { getMarket } from '../../../src/lib/markets';
 
 export interface AnalyzeInput {
   symbol: string;
@@ -16,6 +17,8 @@ export interface AnalyzeInput {
 }
 
 async function buildContext(input: AnalyzeInput, accountId: string): Promise<DecisionEngineContext> {
+  const inputMarket = getMarket(input.symbol);
+  if (!inputMarket) throw new Error(`Unsupported canonical market symbol: ${input.symbol}.`);
   const latest = input.candles[input.candles.length - 1];
   const entry = latest?.close ?? 0;
   const account = await getAccount(accountId);
@@ -88,7 +91,7 @@ async function buildContext(input: AnalyzeInput, accountId: string): Promise<Dec
       value: portfolioValue,
       positions: marked.positions.map(({ position, currentPrice, pnl, pnlPct, weight }) => ({
         symbol: position.symbol,
-        marketType: 'crypto',
+        marketType: getMarket(position.symbol)?.marketType ?? 'unknown',
         size: position.quantity,
         entryPrice: position.entryPrice,
         currentPrice,
@@ -96,7 +99,7 @@ async function buildContext(input: AnalyzeInput, accountId: string): Promise<Dec
         pnlPct,
         weight,
       })),
-      proposedTrade: { symbol: input.symbol, marketType: 'crypto', size: sizing.quantity, entryPrice: input.plan ? input.plan.zone.high : entry },
+      proposedTrade: { symbol: input.symbol, marketType: inputMarket.marketType, size: sizing.quantity, entryPrice: input.plan ? input.plan.zone.high : entry },
       limits: {
         maxExposureRatio: traderConfig.MAX_GROSS_EXPOSURE_PCT / 100,
         maxConcentrationRisk: traderConfig.MAX_SYMBOL_EXPOSURE_PCT / 100,

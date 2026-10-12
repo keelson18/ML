@@ -94,7 +94,7 @@ export class PaperAutopilotScheduler {
       .catch(async (error: unknown) => {
         const reason = error instanceof Error ? error.message : 'Paper autopilot run failed.';
         try { await getSupabaseClient().rpc('pause_paper_autopilot', { p_account_id: accountId, p_reason: reason }); }
-        catch { }
+        catch { /* Keep the original run failure if the safety pause cannot be persisted. */ }
       })
       .finally(() => this.manualRuns.delete(accountId));
     return { queued: true };
@@ -143,7 +143,7 @@ export class PaperAutopilotScheduler {
         const reason = error instanceof Error ? error.message : 'Paper account schema is unavailable.';
         pausedReason ??= reason;
         try { await getSupabaseClient().rpc('pause_paper_autopilot', { p_account_id: row.account_id, p_reason: reason }); }
-        catch { }
+        catch { /* Keep the original account-load failure if the safety pause cannot be persisted. */ }
       }
     }
     const availableRows = rows.filter((row) => snapshots.has(row.account_id));
@@ -258,7 +258,7 @@ export class PaperAutopilotScheduler {
         const reason = error instanceof Error ? error.message : 'Paper autopilot account processing failed.';
         pausedReason ??= reason;
         try { await getSupabaseClient().rpc('pause_paper_autopilot', { p_account_id: row.account_id, p_reason: reason }); }
-        catch { }
+        catch { /* Keep the original processing failure if the safety pause cannot be persisted. */ }
       });
     }
     return { pausedReason, processed };

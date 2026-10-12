@@ -1,13 +1,21 @@
 // Confirms the planner defaults to no plan when timeframe evidence is incomplete.
 import { describe, expect, it } from 'vitest';
 import type { Candle } from '../../../src/lib/types';
-import { createTradePlan, rankPlannerResults } from './planner';
+import { createTradePlan, rankPlannerResults, stablePlanId } from './planner';
 
 const candleSeries: Candle[] = Array.from({ length: 10 }, (_, index) => ({
   time: index * 60, open: 100, high: 102, low: 98, close: 100 + index / 10, volume: 1_000,
 }));
 
 describe('Trader Desk planner', () => {
+  it('uses a stable account, instrument, and trigger-candle identity for plan deduplication', () => {
+    const id = stablePlanId('account-1', 'BTCUSD', '15m', 12_345);
+    expect(stablePlanId('account-1', 'BTCUSD', '15m', 12_345)).toBe(id);
+    expect(stablePlanId('account-2', 'BTCUSD', '15m', 12_345)).not.toBe(id);
+    expect(stablePlanId('account-1', 'BTCUSDT', '15m', 12_345)).not.toBe(id);
+    expect(stablePlanId('account-1', 'BTCUSD', '15m', 12_346)).not.toBe(id);
+  });
+
   it('returns no plan when higher-timeframe history is insufficient', () => {
     const result = createTradePlan({
       accountId: 'account-1', symbol: 'BTCUSD', htfCandles: { '1d': candleSeries, '4h': candleSeries },

@@ -76,6 +76,40 @@ async function readPaperLedgerHealth() {
   finally { paperLedgerHealthCheck = undefined; }
 }
 
+async function readAccountPaperLedgerHealth(accountId: string): Promise<PaperHealth> {
+  const unavailable: PaperHealth = {
+    status: 'unavailable', checkedAccounts: 0, brokenAccounts: 0, hashChainVerified: false,
+    accounting: { checked: 0, failures: 0, accounts: [] },
+  };
+  try {
+    const client = getSupabaseClient();
+    const [{ data: ledgerData, error: ledgerError }, { data: account, error: accountError }] = await Promise.all([
+      client.rpc('verify_decision_ledger', { p_account_id: accountId }),
+      client.from('paper_sim_accounts').select('state').eq('account_id', accountId).maybeSingle(),
+    ]);
+    if (ledgerError || accountError || !account?.state) return unavailable;
+    const ledger = Array.isArray(ledgerData) ? ledgerData[0] : ledgerData;
+    if (!ledger || typeof ledger !== 'object') return unavailable;
+    const state = account.state as import('./engines/paper-execution').PaperAccountState;
+    const reconciliation = (await import('./trader/decision-ledger')).reconcilePaperAccount(state);
+    const hashChainVerified = Boolean((ledger as { ok?: boolean }).ok);
+    const ok = hashChainVerified && reconciliation.ok;
+    return {
+      status: ok ? 'verified' : 'broken',
+      checkedAccounts: 1,
+      brokenAccounts: ok ? 0 : 1,
+      hashChainVerified,
+      accounting: {
+        checked: 1,
+        failures: reconciliation.ok ? 0 : 1,
+        accounts: [{ accountRef: createHash('sha256').update(accountId).digest('hex').slice(0, 12), ok: reconciliation.ok, difference: reconciliation.difference }],
+      },
+    };
+  } catch {
+    return unavailable;
+  }
+}
+
 export function buildServer() {
   const app = Fastify({ logger: true });
   void app.register(helmet, {
@@ -117,8 +151,12 @@ export function buildServer() {
   const healthResponse = async () => ({
     status: 'ok', service: 'quantum-api', autonomy: pipeline.getSnapshot(), schema: await readSchemaHealth(), paperLedger: await readPaperLedgerHealth(),
   });
-  app.get('/health', healthResponse);
-  app.get('/api/v1/system/health', { preHandler: app.requireAuth }, healthResponse);
+  app.get('/health', async () => ({ status: 'ok', service: 'quantum-api' }));
+  app.get('/api/v1/me/health', { preHandler: app.requireAuth }, async (request) => ({
+    status: 'ok', service: 'quantum-api', autonomy: pipeline.getSnapshot(), schema: await readSchemaHealth(),
+    paperLedger: await readAccountPaperLedgerHealth(request.authenticatedUserId!),
+  }));
+  app.get('/api/v1/system/health', { preHandler: app.requireAdmin }, healthResponse);
   return { app, pipeline };
 }
 

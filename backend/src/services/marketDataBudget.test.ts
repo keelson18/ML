@@ -15,12 +15,13 @@ const original = {
   twelveDataBudgetMaxQueue: config.twelveDataBudgetMaxQueue,
 };
 
-function twelveDataOk(): Response {
-  return new Response(JSON.stringify({ status: 'ok', values: [{ datetime: '2026-10-03 12:00:00', open: '100', high: '102', low: '99', close: '101', volume: '50' }] }), { status: 200 });
+function twelveDataOk(input: string | URL | Request): Response {
+  const symbol = new URL(String(input)).searchParams.get('symbol');
+  return new Response(JSON.stringify({ status: 'ok', meta: { symbol }, values: [{ datetime: '2026-10-03 12:00:00', open: '100', high: '102', low: '99', close: '101', volume: '50' }] }), { status: 200 });
 }
 
 function massiveOk(): Response {
-  return new Response(JSON.stringify({ status: 'OK', results: [{ t: 1_700_000_000_000, o: 100, h: 102, l: 99, c: 101, v: 50 }] }), { status: 200 });
+  return new Response(JSON.stringify({ status: 'OK', ticker: 'X:BTCUSD', results: [{ t: 1_700_000_000_000, o: 100, h: 102, l: 99, c: 101, v: 50 }] }), { status: 200 });
 }
 
 beforeEach(() => {
@@ -58,7 +59,7 @@ describe('Massive request budget', () => {
   });
 
   it('fails Twelve Data with 429 without calling the provider when its own budget is spent', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(twelveDataOk());
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => Promise.resolve(twelveDataOk(input)));
     vi.stubGlobal('fetch', fetchMock);
 
     await fetchMarketData('EURUSD', '1h', 100);

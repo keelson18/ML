@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatMarketPrice, MARKET_UNIVERSE, getMarket, getMarketsByType, resolveLegacySymbol, setMarketAvailability } from './markets';
+import { formatMarketPrice, MARKET_UNIVERSE, getMarket, getMarketsByType, setMarketAvailability } from './markets';
 
 describe('market price formatting', () => {
   it('formats USD prices with a dollar sign', () => {
@@ -36,21 +36,11 @@ describe('crypto market universe', () => {
   });
 });
 
-describe('legacy symbol resolution', () => {
-  it('resolves BTCUSDT to BTCUSD', () => {
-    expect(resolveLegacySymbol('BTCUSDT')).toBe('BTCUSD');
-  });
-
-  it('resolves MATICUSDT to POLUSD', () => {
-    expect(resolveLegacySymbol('MATICUSDT')).toBe('POLUSD');
-  });
-
-  it('passes through non-legacy symbols unchanged', () => {
-    expect(resolveLegacySymbol('BTCUSD')).toBe('BTCUSD');
-  });
-
-  it('getMarket resolves legacy symbols', () => {
-    const market = getMarket('ETHUSDT');
-    expect(market?.symbol).toBe('ETHUSD');
+describe('canonical symbol lookup', () => {
+  it('does not reinterpret a different quote asset as USD', () => {
+    expect(getMarket('BTCUSDT')).toBeUndefined();
+    expect(getMarket('MATICUSDT')).toBeUndefined();
+    expect(getMarket('ETHUSDT')).toBeUndefined();
+    expect(getMarket('BTCUSD')?.symbol).toBe('BTCUSD');
   });
 });
