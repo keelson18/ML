@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { entryCandleIsFresh, replayCandlesAfter, replaySequentialCandles, uniqueSeriesRequests } from './paper-autopilot';
+import { entryCandleIsFresh, providerRequestSpacingMs, replayCandlesAfter, replaySequentialCandles, uniqueSeriesRequests } from './paper-autopilot';
 import { closePaperPosition, simulatePaperOrder, type PaperAccountState } from '../engines/paper-execution';
 import { traderConfig } from '../trader/config';
 
 describe('paper autopilot scheduling helpers', () => {
+  it('halves request spacing when the reserved quota doubles', () => {
+    expect(providerRequestSpacingMs(5, 60_000, 2)).toBe(30_000);
+    expect(providerRequestSpacingMs(10, 60_000, 4)).toBe(15_000);
+  });
   it('fetches a symbol/timeframe series once for multiple opted-in users', () => {
     expect(uniqueSeriesRequests([
       { symbol: 'BTCUSD', timeframe: '15m' },

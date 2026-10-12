@@ -4,6 +4,7 @@ import { traderConfig } from '../trader/config';
 import type { PipelineRole } from './types';
 import { AutonomousPipeline } from './pipeline';
 import { fetchMarketData } from '../services/marketDataService';
+import { providerRequestSpacingMs } from './paper-autopilot';
 import { selectClosedCandles, nextScheduledRunAt } from './candle-clock';
 
 interface ScheduledJob { role: PipelineRole; timeframe: Timeframe }
@@ -115,8 +116,8 @@ export class AutonomousScheduler {
           break;
         }
       }
-      if (this.active && traderConfig.SCHEDULER_SYMBOL_DELAY_MS > 0) {
-        await new Promise((resolve) => setTimeout(resolve, traderConfig.SCHEDULER_SYMBOL_DELAY_MS));
+      if (this.active) {
+        await new Promise((resolve) => setTimeout(resolve, providerRequestSpacingMs()));
       }
     }
   }

@@ -13,6 +13,7 @@
     "backend:dev": "tsx watch backend/src/server.ts",
     "backend:typecheck": "tsc --noEmit -p backend/tsconfig.json",
     "check:env": "node scripts/check-env-docs.mjs",
+    "check:migration-versions": "node scripts/check-migration-versions.mjs",
     "backend": "tsx backend/src/server.ts",
     "build": "vite build",
     "lint": "eslint .",

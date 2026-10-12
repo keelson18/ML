@@ -29,6 +29,13 @@ create trigger decision_ledger_no_update_delete
   before update or delete on public.decision_ledger
   for each row execute function public.reject_decision_ledger_mutation();
 
+create or replace function public.reject_decision_ledger_truncate()
+returns trigger language plpgsql set search_path = public as $$
+begin raise exception 'decision ledger is append-only'; end; $$;
+drop trigger if exists decision_ledger_no_truncate on public.decision_ledger;
+create trigger decision_ledger_no_truncate before truncate on public.decision_ledger
+  for each statement execute function public.reject_decision_ledger_truncate();
+
 create table if not exists public.paper_fills (
   id uuid primary key default gen_random_uuid(),
   account_id text not null,
@@ -61,13 +68,46 @@ create table if not exists public.shadow_trades (
 create table if not exists public.paper_autopilot (
   account_id uuid primary key references auth.users(id) on delete cascade,
   enabled boolean not null default false,
-  symbols text[] not null default array['BTCUSD', 'ETHUSD', 'SOLUSD'],
+  symbols text[] not null default array[]::text[],
   paused_reason text,
   last_run_at timestamptz,
   updated_at timestamptz not null default now(),
-  check (cardinality(symbols) between 1 and 3),
-  check (symbols <@ array['BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD', 'BNBUSD', 'ADAUSD', 'DOGEUSD', 'AVAXUSD', 'LINKUSD', 'DOTUSD', 'POLUSD', 'LTCUSD', 'BCHUSD', 'XLMUSD', 'UNIUSD', 'ATOMUSD', 'ETCUSD', 'FILUSD', 'NEARUSD', 'APTUSD'])
+  check (cardinality(symbols) >= 1)
 );
+
+create table if not exists public.autopilot_settings (
+  singleton boolean primary key default true check (singleton),
+  max_symbols_per_user integer not null check (max_symbols_per_user > 0),
+  max_symbols_global integer not null check (max_symbols_global > 0),
+  updated_at timestamptz not null default now()
+);
+insert into public.autopilot_settings(singleton, max_symbols_per_user, max_symbols_global)
+values (true, 3, 5) on conflict (singleton) do nothing;
+alter table public.autopilot_settings enable row level security;
+revoke all on public.autopilot_settings from public, anon, authenticated, service_role;
+
+create or replace function public.update_autopilot_settings(p_user integer, p_global integer)
+returns void language plpgsql security definer set search_path = public, auth as $$
+begin
+  if auth.uid() is null or not public.is_current_user_admin()
+    or coalesce(auth.jwt()->'aal', '"aal1"'::jsonb) <> '"aal2"'::jsonb then
+    raise exception 'admin MFA required';
+  end if;
+  if p_user < 1 or p_global < 1 then raise exception 'caps must be positive'; end if;
+  update public.autopilot_settings set max_symbols_per_user = p_user, max_symbols_global = p_global, updated_at = now() where singleton;
+  insert into public.admin_audit_events(actor_id, action, details)
+  values (auth.uid(), 'autopilot.settings.updated', jsonb_build_object('maxSymbolsPerUser', p_user, 'maxSymbolsGlobal', p_global));
+end; $$;
+revoke all on function public.update_autopilot_settings(integer, integer) from public, anon;
+grant execute on function public.update_autopilot_settings(integer, integer) to authenticated;
+
+create or replace function public.get_paper_autopilot_limits()
+returns jsonb language sql security definer set search_path = public as $$
+  select jsonb_build_object('maxSymbolsPerUser', max_symbols_per_user, 'maxSymbolsGlobal', max_symbols_global)
+  from public.autopilot_settings where singleton and auth.uid() is not null
+$$;
+revoke all on function public.get_paper_autopilot_limits() from public, anon;
+grant execute on function public.get_paper_autopilot_limits() to authenticated;
 
 alter table public.decision_ledger enable row level security;
 alter table public.paper_fills enable row level security;
@@ -238,7 +278,11 @@ begin
     perform public.append_decision_ledger_event(p_account_id, v_event->>'idempotencyKey', v_event->>'eventType', v_event->'payload');
     perform public.record_paper_ledger_projection(p_account_id, v_event);
   end loop;
-  perform public.append_decision_ledger_event(p_account_id, 'account-state:' || v_next_version::text, 'account.snapshot', p_state);
+  if (select max(created_at) from public.decision_ledger where account_id = p_account_id and event_type in ('account.snapshot','account.backfill')) is null
+    or (select max(created_at) from public.decision_ledger where account_id = p_account_id and event_type in ('account.snapshot','account.backfill')) < date_trunc('day', now())
+    or exists (select 1 from jsonb_array_elements(p_events) e where e->>'eventType' in ('paper.fill','paper.fill.exit')) then
+    perform public.append_decision_ledger_event(p_account_id, 'account-state:' || v_next_version::text, 'account.snapshot', p_state);
+  end if;
   update public.paper_sim_accounts set state = p_state, version = v_next_version where account_id = p_account_id;
   return v_next_version;
 end;
@@ -287,20 +331,15 @@ declare
   v_ledger_state jsonb;
   v_total bigint := 0;
   v_broken bigint := 0;
-  v_reconciliation_failures bigint := 0;
 begin
   if auth.role() is distinct from 'service_role' then raise exception 'service role required'; end if;
   for v_account_id in select account_id from public.paper_sim_accounts loop
     select * into v_result from public.verify_decision_ledger(v_account_id);
     v_total := v_total + 1;
     if not v_result.ok then v_broken := v_broken + 1; end if;
-    select state into v_state from public.paper_sim_accounts where account_id = v_account_id;
-    select payload into v_ledger_state from public.decision_ledger where account_id = v_account_id
-      and event_type in ('account.snapshot', 'account.backfill') order by sequence desc limit 1;
-    if v_state is distinct from v_ledger_state then v_reconciliation_failures := v_reconciliation_failures + 1; end if;
   end loop;
-  return jsonb_build_object('status', case when v_broken = 0 and v_reconciliation_failures = 0 then 'verified' else 'broken' end,
-    'checkedAccounts', v_total, 'brokenAccounts', v_broken, 'reconciliationFailures', v_reconciliation_failures);
+  return jsonb_build_object('status', case when v_broken = 0 then 'verified' else 'broken' end,
+    'checkedAccounts', v_total, 'brokenAccounts', v_broken);
 end;
 $$;
 
@@ -313,9 +352,11 @@ as $$
 declare
   v_account public.paper_autopilot%rowtype;
 begin
-  if auth.uid() is null or p_enabled is null or coalesce(cardinality(p_symbols), 0) not between 1 and 3
+  if auth.uid() is null or p_enabled is null or coalesce(cardinality(p_symbols), 0) not between 1 and (select max_symbols_per_user from public.autopilot_settings where singleton)
     or cardinality(p_symbols) <> (select count(distinct symbol) from unnest(p_symbols) as symbols(symbol))
-    or not (p_symbols <@ array['BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD', 'BNBUSD', 'ADAUSD', 'DOGEUSD', 'AVAXUSD', 'LINKUSD', 'DOTUSD', 'POLUSD', 'LTCUSD', 'BCHUSD', 'XLMUSD', 'UNIUSD', 'ATOMUSD', 'ETCUSD', 'FILUSD', 'NEARUSD', 'APTUSD']) then
+    or exists (select 1 from unnest(p_symbols) requested(symbol) where not exists
+      (select 1 from public.market_universe m join public.assets a on a.symbol = m.symbol
+       where m.symbol = requested.symbol and m.is_active and a.status = 'active')) then
     raise exception 'invalid autopilot symbols';
   end if;
   perform pg_advisory_xact_lock(hashtext('paper-autopilot-symbol-cap'));
@@ -324,12 +365,14 @@ begin
       union
       select distinct configured.symbol from public.paper_autopilot p cross join lateral unnest(p.symbols) as configured(symbol)
         where p.enabled and p.account_id <> auth.uid()
-    ) as active_symbols) > 5 then
+    ) as active_symbols) > (select max_symbols_global from public.autopilot_settings where singleton) then
     raise exception 'Global autopilot symbol limit of 5 reached.';
   end if;
   insert into public.paper_autopilot(account_id, enabled, symbols, paused_reason, updated_at)
     values (auth.uid(), p_enabled, p_symbols, null, now())
-    on conflict (account_id) do update set enabled = excluded.enabled, symbols = excluded.symbols, paused_reason = null, updated_at = now()
+    on conflict (account_id) do update set enabled = excluded.enabled, symbols = excluded.symbols,
+      paused_reason = public.paper_autopilot.paused_reason,
+      updated_at = now()
     returning * into v_account;
   return v_account;
 end;
@@ -398,3 +441,24 @@ grant execute on function public.list_enabled_paper_autopilots() to service_role
 grant execute on function public.pause_paper_autopilot(uuid, text) to service_role;
 grant execute on function public.touch_paper_autopilot_run(uuid) to service_role;
 grant execute on function public.resume_paper_autopilot(uuid) to service_role;
+
+create or replace function public.verify_paper_schema()
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  required_tables text[] := array['paper_sim_accounts','decision_ledger','paper_fills','shadow_trades','paper_autopilot','autopilot_settings'];
+  required_rpcs text[] := array['record_paper_account_update','set_paper_autopilot','list_enabled_paper_autopilots','pause_paper_autopilot','resume_paper_autopilot','touch_paper_autopilot_run','paper_ledger_health','verify_decision_ledger','get_paper_autopilot_limits','verify_paper_schema'];
+  missing text[] := array[]::text[];
+  item text;
+begin
+  foreach item in array required_tables loop
+    if to_regclass('public.' || item) is null then missing := array_append(missing, 'table:' || item); end if;
+  end loop;
+  foreach item in array required_rpcs loop
+    if not exists (select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname=item) then
+      missing := array_append(missing, 'rpc:' || item);
+    end if;
+  end loop;
+  return jsonb_build_object('ok', cardinality(missing)=0, 'missing', missing);
+end; $$;
+revoke all on function public.verify_paper_schema() from public, anon, authenticated;
+grant execute on function public.verify_paper_schema() to service_role;

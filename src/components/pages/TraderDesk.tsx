@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, ClipboardList, Clock3, RefreshCw, ShieldCheck } from 'lucide-react';
 import PageFrame from '../PageFrame';
-import { fetchActiveEventBlackouts, fetchAutonomyStatus, fetchTraderAutopilot, fetchTraderHistory, fetchTraderOverview, fetchTraderPlans, refreshTraderPlans, runTraderAutopilotNow, updateTraderAutopilot, type AutonomyStatus, type EventBlackout, type TraderAutopilotRunResult, type TraderAutopilotSettings, type TraderOverview, type TraderPlan } from '../../lib/backend-api';
+import { fetchActiveEventBlackouts, fetchAutonomyStatus, fetchBackendHealth, fetchTraderAutopilot, fetchTraderHistory, fetchTraderOverview, fetchTraderPlans, refreshTraderPlans, runTraderAutopilotNow, updateTraderAutopilot, type AutonomyStatus, type BackendHealth, type EventBlackout, type TraderAutopilotRunResult, type TraderAutopilotSettings, type TraderOverview, type TraderPlan } from '../../lib/backend-api';
 import { MARKET_UNIVERSE } from '../../lib/markets';
 
 const AUTOPILOT_MARKETS = MARKET_UNIVERSE.filter((market) => market.isActive && market.provider === 'massive' && market.marketType === 'crypto' && market.priceCurrency === 'USD');
@@ -16,6 +16,7 @@ function sign(value: number) { return value >= 0 ? '+' : ''; }
 export default function TraderDesk() {
   const [plans, setPlans] = useState<TraderPlan[]>([]);
   const [overview, setOverview] = useState<TraderOverview | null>(null);
+  const [backendHealth, setBackendHealth] = useState<BackendHealth | null>(null);
   const [autonomy, setAutonomy] = useState<AutonomyStatus | null>(null);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [journal, setJournal] = useState<Journal[]>([]);
@@ -36,11 +37,12 @@ export default function TraderDesk() {
 
   const load = useCallback(async () => {
     setError(null);
-    const [planResult, overviewResult, autonomyResult, autopilotResult, reviewResult, journalResult, eventsResult] = await Promise.allSettled([
-      fetchTraderPlans(), fetchTraderOverview(), fetchAutonomyStatus(), fetchTraderAutopilot(), fetchTraderHistory<Review>('reviews'), fetchTraderHistory<Journal>('journal'), fetchActiveEventBlackouts(),
+    const [planResult, overviewResult, autonomyResult, autopilotResult, reviewResult, journalResult, eventsResult, healthResult] = await Promise.allSettled([
+      fetchTraderPlans(), fetchTraderOverview(), fetchAutonomyStatus(), fetchTraderAutopilot(), fetchTraderHistory<Review>('reviews'), fetchTraderHistory<Journal>('journal'), fetchActiveEventBlackouts(), fetchBackendHealth(),
     ]);
     if (planResult.status === 'fulfilled') setPlans(planResult.value);
     if (overviewResult.status === 'fulfilled') setOverview(overviewResult.value);
+    if (healthResult.status === 'fulfilled') setBackendHealth(healthResult.value);
     if (autonomyResult.status === 'fulfilled') setAutonomy(autonomyResult.value);
     if (autopilotResult.status === 'fulfilled') {
       setAutopilot(autopilotResult.value);
@@ -114,6 +116,7 @@ export default function TraderDesk() {
       </div>
       {error && <div role="alert" className="mb-5 flex items-center gap-2 rounded-xl border border-danger/30 bg-danger/10 p-3 text-sm text-danger"><AlertTriangle className="h-4 w-4 shrink-0" />{error}</div>}
       {loading && <div className="mb-5 rounded-xl border border-border bg-surface p-4 text-sm text-muted">Loading paper account and plan history…</div>}
+      {backendHealth && !backendHealth.schema.ok && <div role="alert" className="mb-5 rounded-xl border border-danger/30 bg-danger/10 p-3 text-sm text-danger">Database migrations not applied: {backendHealth.schema.missing.join(', ')}</div>}
 
       <section className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Paper account and risk">
         <Metric label="Paper equity" value={overview ? money(overview.equity) : '—'} detail={overview ? `${money(overview.cash)} cash · ${money(overview.unrealizedPnl)} unrealized` : 'Account snapshot unavailable'} />
@@ -125,7 +128,7 @@ export default function TraderDesk() {
       {eventCalendarError && <div role="alert" className="mb-5 rounded-xl border border-danger/30 bg-danger/10 p-3 text-sm text-danger">Event calendar health could not be verified. New entries are blocked until event-risk data is available.</div>}
       {!!eventBlackouts.length && <div role="status" className="mb-5 rounded-xl border border-warning/30 bg-warning/10 p-3 text-sm text-warning"><strong>Event blackout active.</strong> {eventBlackouts.map((event) => `${event.title} (${Math.max(0, Math.ceil((Date.parse(event.ends_at) - Date.now()) / 60_000))} min remaining)`).join(' · ')} New entries matching the configured impact threshold are blocked.</div>}
       {!!overview?.staleSymbols.length && <div role="status" className="mb-5 rounded-xl border border-warning/30 bg-warning/10 p-3 text-sm text-warning">Stale price data: {overview.staleSymbols.join(', ')}. Open position marks use the last stored entry price until fresh data is available.</div>}
-      {overview && <div role="status" className={`mb-5 rounded-xl border p-3 text-sm ${overview.ledgerStatus === 'broken' || !overview.reconciliation.ok ? 'border-danger/30 bg-danger/10 text-danger' : overview.ledgerStatus === 'verified' ? 'border-success/30 bg-success/10 text-success' : 'border-warning/30 bg-warning/10 text-warning'}`}>Ledger: {overview.ledgerStatus} · Account reconciliation: {overview.reconciliation.ok ? 'balanced' : `difference ${money(overview.reconciliation.difference)}`}{overview.ledgerStatus === 'unavailable' ? ' · Apply the paper core migration or verify the database connection.' : ''}</div>}
+      {overview && <div role="status" className={`mb-5 rounded-xl border p-3 text-sm ${overview.ledgerStatus === 'broken' || !overview.reconciliation.ok ? 'border-danger/30 bg-danger/10 text-danger' : overview.ledgerStatus === 'verified' ? 'border-success/30 bg-success/10 text-success' : 'border-warning/30 bg-warning/10 text-warning'}`}>Hash chain: {overview.ledgerStatus === 'verified' ? 'verified (tamper evidence)' : overview.ledgerStatus} · Accounting identity: {overview.reconciliation.ok ? 'balanced' : `difference ${money(overview.reconciliation.difference)}`}{overview.ledgerStatus === 'unavailable' ? ' · Apply the paper core migration or verify the database connection.' : ''}</div>}
       <section className="mb-6 rounded-xl border border-border bg-surface p-4" aria-labelledby="autopilot-title">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div><h2 id="autopilot-title" className="font-semibold text-text">Paper autopilot</h2><p className="mt-1 text-xs text-muted">Server-scheduled, opt-in execution; it runs only for this account and never submits live orders.</p></div>
@@ -135,7 +138,7 @@ export default function TraderDesk() {
           <label className="flex items-center gap-2 text-sm text-text"><input type="checkbox" checked={autopilotEnabled} onChange={(event) => { setAutopilotEnabled(event.target.checked); setAutopilotDirty(true); }} disabled={!autopilot || autopilotBusy} />Enable autopilot for my paper account</label>
           <div className="text-xs text-muted">Last run: {autopilot?.lastRunAt ? new Date(autopilot.lastRunAt).toLocaleString() : 'Not run yet'}</div>
         </div>
-        <fieldset className="mt-3"><legend className="text-xs font-medium text-text">Symbols (maximum 3)</legend><div className="mt-2 flex flex-wrap gap-3">{AUTOPILOT_MARKETS.map((market) => <label key={market.symbol} className="flex items-center gap-1.5 text-xs text-muted"><input type="checkbox" checked={autopilotSymbols.includes(market.symbol)} onChange={(event) => { setAutopilotSymbols((symbols) => event.target.checked ? [...symbols, market.symbol] : symbols.filter((symbol) => symbol !== market.symbol)); setAutopilotDirty(true); }} disabled={!autopilot || autopilotBusy || (!autopilotSymbols.includes(market.symbol) && autopilotSymbols.length >= 3)} />{market.symbol}</label>)}</div></fieldset>
+        <fieldset className="mt-3"><legend className="text-xs font-medium text-text">Symbols (maximum {autopilot?.maxSymbolsPerUser ?? 0})</legend><div className="mt-2 flex flex-wrap gap-3">{AUTOPILOT_MARKETS.filter((market) => autopilot?.availableSymbols?.includes(market.symbol)).map((market) => <label key={market.symbol} className="flex items-center gap-1.5 text-xs text-muted"><input type="checkbox" checked={autopilotSymbols.includes(market.symbol)} onChange={(event) => { setAutopilotSymbols((symbols) => event.target.checked ? [...symbols, market.symbol] : symbols.filter((symbol) => symbol !== market.symbol)); setAutopilotDirty(true); }} disabled={!autopilot || autopilotBusy || (!autopilotSymbols.includes(market.symbol) && autopilotSymbols.length >= (autopilot.maxSymbolsPerUser ?? 0))} />{market.symbol}</label>)}</div></fieldset>
         {autopilot?.pausedReason && <p role="status" className="mt-3 rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-warning">Autopilot paused: {autopilot.pausedReason}. Existing positions remain managed when fresh management data is available.</p>}
         {autopilotRun?.queued && <p role="status" className="mt-3 text-xs text-muted">Run now queued on the server; check the paused status and last-run time after processing.</p>}
         {autopilotError && <p role="alert" className="mt-3 text-xs text-danger">{autopilotError}</p>}

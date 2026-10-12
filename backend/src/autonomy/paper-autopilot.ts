@@ -1,6 +1,7 @@
 import type { Candle, Timeframe } from '../../../src/lib/types';
 import { getMarket } from '../../../src/lib/markets';
 import { getSupabaseClient } from '../db';
+import { config } from '../config';
 import { fetchMarketData, type MarketDataSeries } from '../services/marketDataService';
 import { advanceStoredTradePlans, getAccount, listStoredTradePlans, manageOpenPositions, storeTradePlan } from '../services/paperTradingService';
 import { getMarketAvailability } from '../services/marketAvailability';
@@ -9,7 +10,10 @@ import { traderConfig } from '../trader/config';
 import { candleSeconds, latestClosedCandleTime, selectClosedCandles } from '../trader/candle-math';
 import { nextScheduledRunAt } from './candle-clock';
 
-const PROVIDER_REQUEST_SPACING_MS = 12_500;
+export function providerRequestSpacingMs(requestsPerWindow = config.massiveRequestsPerWindow, windowMs = config.massiveBudgetWindowMs, traderReservedRequests = config.massiveTraderReservedRequests): number {
+  const traderAllocation = Math.max(1, Math.min(requestsPerWindow, traderReservedRequests));
+  return Math.ceil(windowMs / traderAllocation);
+}
 
 export const AUTOPILOT_TIMEFRAMES = [...new Set([
   ...traderConfig.HTF_TIMEFRAMES,
@@ -56,7 +60,8 @@ export function entryCandleIsFresh(candle: Candle, timeframe: Timeframe, now: nu
 
 export function isAutopilotSymbol(symbol: string): boolean {
   const market = getMarket(symbol);
-  return Boolean(market?.isActive && market.provider === 'massive' && market.marketType === 'crypto' && market.priceCurrency === 'USD');
+  const availability = getMarketAvailability().find((item) => item.symbol === symbol)?.status;
+  return Boolean(market?.isActive && market.provider === 'massive' && market.marketType === 'crypto' && market.priceCurrency === 'USD' && availability === 'available');
 }
 
 export class PaperAutopilotScheduler {
@@ -177,10 +182,14 @@ export class PaperAutopilotScheduler {
     const seriesByKey = new Map<string, MarketDataSeries>();
     const failuresByKey = new Map<string, string>();
     const seriesRequests = uniqueSeriesRequests([...requestsBySymbol].flatMap(([symbol, timeframes]) =>
-      [...timeframes].map((timeframe) => ({ symbol, timeframe }))));
+      [...timeframes].map((timeframe) => ({ symbol, timeframe })))).sort((a, b) => {
+        const priority = (timeframe: Timeframe) => timeframe === traderConfig.MGMT_TIMEFRAME ? 0
+          : (traderConfig.TRIGGER_TIMEFRAMES as Timeframe[]).includes(timeframe) ? 1 : 2;
+        return priority(a.timeframe) - priority(b.timeframe);
+      });
     let previousRequestWasFresh = false;
     for (const { symbol, timeframe } of seriesRequests) {
-      if (previousRequestWasFresh) await new Promise((resolve) => setTimeout(resolve, PROVIDER_REQUEST_SPACING_MS));
+      if (previousRequestWasFresh) await new Promise((resolve) => setTimeout(resolve, providerRequestSpacingMs()));
       const key = `${symbol}:${timeframe}`;
       const startedAt = Date.now();
       try {

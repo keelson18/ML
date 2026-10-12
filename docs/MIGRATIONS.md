@@ -1,6 +1,6 @@
 # Migration inventory and duplicate candidates
 
-No migration files were removed or renamed. Production-applied migration IDs were not available in this repository session, so every item below requires comparison with the Supabase migration history before any cleanup.
+Production-applied migration IDs were not available in this repository session. This change renames the pending `restrict_research_result_access` filename from a duplicate numeric version to `20261004000003_restrict_research_result_access.sql`; confirm production history before applying it.
 
 | Earlier file | Duplicate candidate | Provisional canonical source for a clean install | Evidence / caveat |
 | --- | --- | --- | --- |
@@ -10,6 +10,7 @@ No migration files were removed or renamed. Production-applied migration IDs wer
 | `20260928000000_paper_sim_accounts.sql` | `20261001011931_20260928000000_paper_sim_accounts.sql` | `20261001011931_20260928000000_paper_sim_accounts.sql` | The later copy is not byte-equivalent: its trigger function adds `SECURITY DEFINER` and `SET search_path = public`. Preserve that hardening. |
 | `20261003000000_user_owned_paper_sim_accounts.sql` | `20261003030312_20261003000000_user_owned_paper_sim_accounts.sql.sql` | `20261003000000_user_owned_paper_sim_accounts.sql` | Doubled `.sql.sql` suffix on the duplicate candidate. Compare SQL and applied IDs before cleanup. |
 | `20261002000000_user_workspace_and_profile_rls.sql` | `20261003030258_20261002000000_user_workspace_and_profile_rls.sql.sql` | `20261002000000_user_workspace_and_profile_rls.sql` | The duplicate has an unusually named `.sql.sql` path. Compare full content and migration history before cleanup. |
+| `20261004000000_grant_workspace_table_access.sql` | `20261004000000_restrict_research_result_access.sql` | `20261004000000_grant_workspace_table_access.sql`; restrict file renamed to `20261004000003_restrict_research_result_access.sql` | Both files had the same Supabase version. Verify neither version was applied under the old filename before push. |
 
 ## Safe reconciliation procedure
 
@@ -22,4 +23,4 @@ Until that evidence is supplied, duplicates remain in place. Applying files thro
 
 ## Quantum paper core
 
-`supabase/migrations/20261014000000_quantum_paper_core.sql` is a new owner-applied migration. It creates the append-only hash-chained decision ledger, relational paper-fill and shadow-signal projections, per-user autopilot enrollment, service-role-only transactional account updates, and an idempotent backfill of existing `paper_sim_accounts.state` snapshots. Do not enable autopilot until the project owner has applied it and verified the migration against the target project's history; this workspace did not apply it to a remote database.
+`supabase/migrations/20261015000000_quantum_paper_core.sql` is the new owner-applied migration, sequenced after `20261014000000_coach_daily_budget.sql`. It creates the append-only hash-chained decision ledger, event projections, schema check, and autopilot configuration. Do not enable autopilot until the owner has backed up account state, applied it, and verified it against the target project's history; no remote migration was run here. CI runs `npm run check:migration-versions` to reject duplicate numeric prefixes.

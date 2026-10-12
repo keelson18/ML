@@ -19,7 +19,7 @@ import { paperAutopilotScheduler, isAutopilotSymbol, type PaperAutopilotConfig }
 
 const listQuery = z.object({ status: z.enum(['WATCHING', 'ARMED', 'PENDING_ORDER', 'OPEN', 'MANAGING', 'CLOSED']).optional() }).strict();
 const historyQuery = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) }).strict();
-const autopilotSymbols = z.array(z.string().regex(/^[A-Z0-9]{3,12}$/)).min(1).max(traderConfig.AUTOPILOT_MAX_SYMBOLS_PER_USER);
+const autopilotSymbols = z.array(z.string().regex(/^[A-Z0-9]{3,12}$/)).min(1).max(MARKET_UNIVERSE.length);
 const autopilotUpdate = z.object({ enabled: z.boolean(), symbols: autopilotSymbols }).strict();
 const defaultAutopilotSymbols = ['BTCUSD', 'ETHUSD', 'SOLUSD'].filter((symbol) => MARKET_UNIVERSE.some((market) => market.symbol === symbol && market.isActive));
 const ledgerVerificationCache = new Map<string, { checkedAt: number; status: 'verified' | 'broken' | 'unavailable' }>();
@@ -50,8 +50,12 @@ export async function traderRoutes(app: FastifyInstance) {
     const { data, error } = await getSupabaseClientWithToken(request.accessToken).from('paper_autopilot')
       .select('account_id,enabled,symbols,paused_reason,last_run_at').eq('account_id', request.authenticatedUserId).maybeSingle();
     if (error) return reply.code(503).send({ error: 'Autopilot settings are unavailable; apply the paper core migration.' });
-    return { enabled: Boolean(data?.enabled), symbols: data?.symbols ?? defaultAutopilotSymbols,
-      pausedReason: data?.paused_reason ?? null, lastRunAt: data?.last_run_at ?? null };
+    const { data: limits } = await getSupabaseClientWithToken(request.accessToken).rpc('get_paper_autopilot_limits');
+    const availableSymbols = MARKET_UNIVERSE.filter((market) => isAutopilotSymbol(market.symbol)).map((market) => market.symbol);
+    return { enabled: Boolean(data?.enabled), symbols: data?.symbols ?? defaultAutopilotSymbols.filter((symbol) => availableSymbols.includes(symbol)),
+      pausedReason: data?.paused_reason ?? null, lastRunAt: data?.last_run_at ?? null,
+      availableSymbols,
+      maxSymbolsPerUser: Number((limits as { maxSymbolsPerUser?: number } | null)?.maxSymbolsPerUser ?? 0) };
   });
 
   app.put('/api/v1/trader/autopilot', {
@@ -59,7 +63,7 @@ export async function traderRoutes(app: FastifyInstance) {
     config: { rateLimit: { max: 5, timeWindow: config.rateLimitWindowMs } },
   }, async (request, reply) => {
     const parsed = autopilotUpdate.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ error: `Choose between 1 and ${traderConfig.AUTOPILOT_MAX_SYMBOLS_PER_USER} supported symbols.` });
+    if (!parsed.success) return reply.code(400).send({ error: 'Choose one or more supported symbols.' });
     if (!request.accessToken || !request.authenticatedUserId) return reply.code(401).send({ error: 'Authentication required.' });
     if (new Set(parsed.data.symbols).size !== parsed.data.symbols.length) return reply.code(400).send({ error: 'Symbols must be unique.' });
     const unavailable = parsed.data.symbols.filter((symbol) => !isAutopilotSymbol(symbol)

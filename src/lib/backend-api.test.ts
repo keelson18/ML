@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fetchCanonicalMarketData, runTraderAutopilotNow } from './backend-api';
+import { fetchBackendHealth, fetchCanonicalMarketData, runTraderAutopilotNow } from './backend-api';
 import { supabase } from './supabase';
 
 vi.mock('./supabase', () => ({
@@ -18,6 +18,13 @@ beforeEach(() => {
 });
 
 describe('authenticated backend responses', () => {
+  it('requests health through the shared API proxy with authentication', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ schema: { ok: true, missing: [] } }), { status: 200 }));
+    await expect(fetchBackendHealth()).resolves.toEqual({ schema: { ok: true, missing: [] } });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/system/health');
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('Authorization')).toBe('Bearer test-token');
+  });
+
   it('reports an empty successful response clearly', async () => {
     fetchMock.mockResolvedValue(new Response('', { status: 200 }));
     await expect(fetchCanonicalMarketData('BTCUSD', '1h')).rejects.toThrow(

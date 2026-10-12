@@ -10,6 +10,7 @@ const csv = (fallback: string, allowedValues: readonly string[]) => z.string().d
 
 const traderConfigSchema = z.object({
   TRADER_STARTING_EQUITY: z.coerce.number().finite().positive().default(100_000),
+  ACCOUNTING_RECONCILIATION_TOLERANCE: z.coerce.number().finite().nonnegative().default(0.01),
   RISK_PER_TRADE_PCT: z.coerce.number().finite().positive().max(100).default(0.5),
   MAX_PORTFOLIO_HEAT_PCT: z.coerce.number().finite().positive().max(100).default(2),
   MAX_GROSS_EXPOSURE_PCT: z.coerce.number().finite().positive().max(100).default(50),
@@ -33,8 +34,6 @@ const traderConfigSchema = z.object({
   CLOSE_GRACE_MS: z.coerce.number().int().nonnegative().default(7_000),
   MAX_ENTRY_AGE_BARS: z.coerce.number().int().positive().default(2),
   SCHEDULER_MAX_CATCH_UP_BARS: z.coerce.number().int().positive().max(1000).default(100),
-  AUTOPILOT_MAX_SYMBOLS_PER_USER: z.coerce.number().int().positive().max(3).default(3),
-  SCHEDULER_SYMBOL_DELAY_MS: z.coerce.number().int().nonnegative().default(250),
   SCHEDULER_JITTER_MS: z.coerce.number().int().nonnegative().default(1_000),
   MAX_CONSECUTIVE_PROVIDER_FAILURES: z.coerce.number().int().positive().default(3),
   MIN_TRADES_FOR_STATS: z.coerce.number().int().positive().default(30),

@@ -263,6 +263,13 @@ export interface TraderAutopilotSettings {
   symbols: string[];
   pausedReason: string | null;
   lastRunAt: string | null;
+  availableSymbols?: string[];
+  maxSymbolsPerUser?: number;
+}
+
+export interface BackendHealth { schema: { ok: boolean; missing: string[] } }
+export async function fetchBackendHealth(): Promise<BackendHealth> {
+  return authenticatedBackendRequest<BackendHealth>('/api/v1/system/health');
 }
 
 export interface TraderAutopilotRunResult {

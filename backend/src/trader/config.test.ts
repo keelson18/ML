@@ -20,6 +20,11 @@ describe('trader configuration', () => {
     });
   });
 
+  it('keeps autopilot symbol caps out of environment config so the database is the single cap source', () => {
+    const parsed = parseTraderConfig({ AUTOPILOT_MAX_SYMBOLS_PER_USER: '99' });
+    expect(parsed).not.toHaveProperty('AUTOPILOT_MAX_SYMBOLS_PER_USER');
+  });
+
   it('only accepts promoted setup names from the configured setup registry', () => {
     expect(parseTraderConfig({ PROMOTED_SETUP_TYPES: 'trend-pullback' }).PROMOTED_SETUP_TYPES).toEqual(['trend-pullback']);
     expect(() => parseTraderConfig({ PROMOTED_SETUP_TYPES: 'unregistered-setup' })).toThrow('PROMOTED_SETUP_TYPES has an invalid trader configuration value.');

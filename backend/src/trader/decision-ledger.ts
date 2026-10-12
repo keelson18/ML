@@ -35,7 +35,7 @@ export function verifyLedgerRows(rows: LedgerHashRow[]): { ok: boolean; checked:
   return { ok: true, checked: rows.length, lastHash: previous };
 }
 
-export function reconcilePaperAccount(account: PaperAccountState, tolerance = 0.01) {
+export function reconcilePaperAccount(account: PaperAccountState, tolerance = traderConfig.ACCOUNTING_RECONCILIATION_TOLERANCE) {
   const openPositions = account.positions.filter((position) => position.status === 'open');
   const actualEquity = account.cash + openPositions.reduce((sum, position) => sum + position.entryPrice * position.quantity, 0);
   const realizedPnl = account.trades.reduce((sum, trade) => sum + trade.realizedPnl, 0);

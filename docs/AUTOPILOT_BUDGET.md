@@ -1,38 +1,32 @@
-# Autopilot request budget
+# Autopilot request and ledger budget
 
-Budget inputs from the current backend defaults:
+The defaults are `MASSIVE_REQUESTS_PER_WINDOW=5` per `MASSIVE_BUDGET_WINDOW_MS=60000`, with `MASSIVE_TRADER_RESERVED_REQUESTS=2` reserved for trader work. The request spacing is derived as `ceil(windowMs / min(requestsPerWindow, reservedRequests))`; with defaults this is 30,000 ms. Doubling the quota and reserved share halves spacing. Configure paid provider plans through these environment values; there is no hard-coded scheduler spacing constant.
 
-- Massive: `MASSIVE_REQUESTS_PER_WINDOW=5` requests per `MASSIVE_BUDGET_WINDOW_MS=60000`.
-- Trader priority reserve: `MASSIVE_TRADER_RESERVED_REQUESTS=2` requests per window.
-- Twelve Data: `TWELVEDATA_REQUESTS_PER_WINDOW=8` per minute; the selected default autopilot symbols are Massive crypto markets, so Twelve Data is not used by these cycles.
-- HTF timeframes: `4h,1d`; trigger timeframes: `15m,1h`; management timeframe: `5m`.
-- Scheduler fetches up to 1,000 candles per symbol/timeframe. Identical symbol/timeframe/limit requests share the process-local TTL cache and in-flight request.
+The default frames are planner `1d,4h`, triggers `15m,1h`, and management `5m`. A cold midnight UTC cycle for three distinct symbols can request all five frames per symbol: 15 fetches and 14 inter-request waits, or **7 minutes** of spacing at defaults, plus provider latency. The scheduler fetches management series first, trigger series second, and planner series last so stop checks get the earliest data. Warm process-local cache hits do not cause provider fetches or spacing. This is an upper bound for a cold cycle; other users sharing those same symbols can share each fetch in one process. Multiple replicas do not share the cache or request budget.
 
-Each scheduled close requires one provider request per unique symbol/timeframe series. Per symbol:
+## Ledger measurement
 
-| Series | Closes/hour | Requests/hour |
+Run `node scripts/measure-paper-ledger.mjs` to reproduce the scripted workload: three symbols, one open position, 288 closed 5-minute candles per symbol (24 hours). The script measures UTF-8 JSON payload bytes, excluding PostgreSQL row, index, and WAL overhead.
+
+| Model | Ledger rows | JSON payload bytes written |
 | --- | ---: | ---: |
-| 1d planner | 1/24 | 0.0417 |
-| 4h planner | 1/4 | 0.25 |
-| 15m trigger | 4 | 4 |
-| 1h trigger | 1 | 1 |
-| 5m management | 12 | 12 |
-| **Total** |  | **17.2917** |
+| Full account snapshot on each of 864 candle checkpoints | 864 | 341,187 |
+| One initial snapshot plus one `NO_TRADE` decision event per candle | 865 | 167,919 |
 
-`N` distinct symbols therefore cost approximately `17.2917 × N` requests/hour when shared cache entries are warm and the scheduler does not refetch a series during local replay. Two users enrolled on the same symbol share that fetch on one backend process; a second user adds zero provider requests for that already-fetched series. Cache sharing is process-local, not cross-replica.
+The event model keeps the hash chain and avoids copying the evolving account state on checkpoint-only updates. A daily snapshot and snapshots when a trade opens or closes add rows when those conditions occur; the measurement’s baseline and event payload fixtures are deliberately explicit and repeatable.
 
-The two-request priority reserve yields a conservative trader allocation of `2 × 60 = 120` requests/hour. `floor(120 / 17.2917) = 6` symbols would fit by average rate, before other priority work; the enforced product limit is lower: five distinct symbols globally (at most 86.46 requests/hour), enforced transactionally by the autopilot enrollment RPC. The per-user cap is `AUTOPILOT_MAX_SYMBOLS_PER_USER=3`. This is an average-rate budget, not a guarantee that other priority consumers cannot exhaust a rolling window. On exhaustion, entries pause with a visible reason; management resumes from fresh data and replays available closed bars in order, with stop-first candle rules.
+Ledger events represent plan events, orders, fills, exits, journal entries, reviews, and meaningful gate decisions. Checkpoint-only state changes write no event. Repetitive `NO_TRADE` rows older than **30 days** should be compacted into a summary row; preserve detailed reasons for traded and blocked decisions. The current append-only ledger migration does not yet implement that compaction, so storage growth still needs monitoring before long-running broad enrollment.
 
-The scheduler requests each series once with the common 1,000-bar limit, then filters and replays local closed-candle prefixes. It never makes a request per missed candle. New provider fetches are spaced by 12.5 seconds by default, while cache hits do not incur the delay. The manual Refresh plans action is limited to the account's selected symbols (at most three) and is rate-limited to once per minute; a cold scan can require up to three series per symbol. The market-data cache is keyed by symbol, timeframe, and limit, so keeping that common limit is important for reuse. Multiple backend replicas do not share cache or budget counters; deploy one scheduler worker per Supabase project until shared coordination exists.
+Snapshots are written at account creation, at most daily, and when trades open or close. The SQL transaction keeps account state and event writes atomic. The hash chain detects tampering by parties who cannot rewrite the whole chain; a database owner able to rewrite all rows can rebuild it. Optionally export or audit-log the latest account hash daily outside the database.
 
-Automatic scheduler startup is disabled unless `AUTONOMOUS_TRADING=true`; each account must also explicitly opt in. Authenticated Run now remains available for an opted-in account when scheduled processing is disabled.
+`MGMT_TIMEFRAME` is `z.literal('5m')`: stop and target management uses completed five-minute candles, avoiding lookahead and the much larger provider load of one-minute per-position checks. It blocks configuring a different management timeframe until candle ordering, stop-first behavior, and the request budget are revalidated.
 
-The owner must apply `supabase/migrations/20261014000000_quantum_paper_core.sql` before enabling accounts. The migration backfills existing account snapshots idempotently and introduces the service-role-only account/ledger transaction RPC; no remote migration was run by the application.
+The owner must first export `paper_sim_accounts` as a backup, then apply `supabase/migrations/20261015000000_quantum_paper_core.sql` and follow [DB_APPLY.md](DB_APPLY.md). The migration was not applied to a remote project by this application.
 
 ## Priority 1m fetch audit
 
-- `backend/src/routes/trader.ts`: the `/overview` endpoint fetches 1m bars only to mark open positions for display; it does not evaluate stops or mutate a position.
-- `backend/src/services/decisionService.ts`: 1m bars are used for a decision-analysis mark-to-market snapshot, not position management or order execution.
-- `backend/src/services/paperTradingService.ts`: manual close obtains the latest available quote; this is a user-initiated close, not the unattended stop-check path.
+- `backend/src/routes/trader.ts`: `/overview` fetches 1m bars only to mark open positions for display; it does not evaluate stops or mutate a position.
+- `backend/src/services/decisionService.ts`: 1m bars are used for a decision-analysis mark-to-market snapshot.
+- `backend/src/services/paperTradingService.ts`: manual close obtains the latest quote; this is user-initiated.
 
-Scheduled and automated stop/target management uses only closed 5m bars. It does not fetch 1m bars per open position.
+Scheduled unattended stop/target management uses closed 5m bars, not 1m requests per position.

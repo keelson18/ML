@@ -247,8 +247,6 @@ function ledgerEvents(previous: PaperAccountState, next: PaperAccountState) {
   const previousPositions = new Map(previous.positions.map((position) => [position.id, position]));
   for (const position of next.positions) {
     if (JSON.stringify(previousPositions.get(position.id)) !== JSON.stringify(position)) {
-      const digest = createHash('sha256').update(JSON.stringify(position)).digest('hex');
-      add('paper.position', `position:${position.id}:${digest}`, position);
       if (position.status === 'open' && previousPositions.get(position.id)?.status !== 'open') {
         add('paper.fill', `fill:${position.id}`, { position, orderId: position.orderId ?? position.id, candleTime: Date.parse(position.openedAt) / 1000 });
       }

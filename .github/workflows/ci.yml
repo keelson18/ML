@@ -17,6 +17,7 @@ jobs:
           node-version: 20.19
           cache: npm
       - run: npm ci
+      - run: npm run check:migration-versions
       - run: npm run check:env
       - run: npm run typecheck
       - run: npm run backend:typecheck
