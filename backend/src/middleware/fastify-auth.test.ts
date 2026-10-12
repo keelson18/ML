@@ -2,20 +2,28 @@ import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { registerAuthGuards } from './fastify-auth';
 
-const authState = vi.hoisted(() => ({ role: 'admin', aal: 'aal2', factorStatus: 'verified' as string | null }));
+const authState = vi.hoisted(() => ({
+  role: 'admin', aal: 'aal2', factorStatus: 'verified' as string | null,
+  authenticated: true, unavailable: false,
+}));
 
 vi.mock('../db.js', () => ({
-  getSupabaseClientWithToken: vi.fn(() => ({
-    auth: {
-      getUser: vi.fn(async () => ({ data: { user: { id: 'user-a', factors: authState.factorStatus ? [{ status: authState.factorStatus }] : [] } }, error: null })),
-      getClaims: vi.fn(async () => ({ data: { claims: { aal: authState.aal } }, error: null })),
-    },
-    from: vi.fn(() => ({
-      select: vi.fn(() => ({
-        eq: vi.fn(() => ({ maybeSingle: vi.fn(async () => ({ data: { role: authState.role }, error: null })) })),
+  getSupabaseClientWithToken: vi.fn(() => {
+    if (authState.unavailable) throw new Error('test-only auth outage');
+    return {
+      auth: {
+        getUser: vi.fn(async () => authState.authenticated
+          ? { data: { user: { id: 'user-a', factors: authState.factorStatus ? [{ status: authState.factorStatus }] : [] } }, error: null }
+          : { data: { user: null }, error: { message: 'test-only invalid token' } }),
+        getClaims: vi.fn(async () => ({ data: { claims: { aal: authState.aal } }, error: null })),
+      },
+      from: vi.fn(() => ({
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({ maybeSingle: vi.fn(async () => ({ data: { role: authState.role }, error: null })) })),
+        })),
       })),
-    })),
-  })),
+    };
+  }),
 }));
 
 let originalRequireAdminMfa: string | undefined;
@@ -24,6 +32,8 @@ beforeEach(() => {
   authState.role = 'admin';
   authState.aal = 'aal2';
   authState.factorStatus = 'verified';
+  authState.authenticated = true;
+  authState.unavailable = false;
   originalRequireAdminMfa = process.env.REQUIRE_ADMIN_MFA;
 });
 
@@ -45,6 +55,24 @@ describe('admin authentication assurance', () => {
     const app = await createApp();
     const response = await app.inject('/admin');
     expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it('rejects invalid sessions without leaking the provider error', async () => {
+    authState.authenticated = false;
+    const app = await createApp();
+    const response = await app.inject({ url: '/admin', headers: { authorization: 'Bearer invalid-token' } });
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toEqual({ error: 'Invalid or expired session' });
+    await app.close();
+  });
+
+  it('fails closed with a sanitized response when auth is unavailable', async () => {
+    authState.unavailable = true;
+    const app = await createApp();
+    const response = await app.inject({ url: '/admin', headers: { authorization: 'Bearer test-token' } });
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ error: 'Authentication service unavailable' });
     await app.close();
   });
 

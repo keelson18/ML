@@ -149,7 +149,9 @@ export const config = {
   corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
   supabaseUrl: process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL ?? '',
   supabaseAnonKey: process.env.SUPABASE_ANON_KEY ?? process.env.VITE_SUPABASE_ANON_KEY ?? '',
-  supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? '',
+  supabaseServiceRoleKey: process.env.SUPABASE_SECRET_KEY?.trim()
+    || process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
+    || '',
   geminiApiKey: process.env.GEMINI_API_KEY ?? '',
   mlServiceApiKey: process.env.ML_SERVICE_API_KEY ?? '',
   massiveApiKey: process.env.MASSIVE_API_KEY ?? '',

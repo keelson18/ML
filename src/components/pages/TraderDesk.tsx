@@ -116,7 +116,7 @@ export default function TraderDesk() {
       </div>
       {error && <div role="alert" className="mb-5 flex items-center gap-2 rounded-xl border border-danger/30 bg-danger/10 p-3 text-sm text-danger"><AlertTriangle className="h-4 w-4 shrink-0" />{error}</div>}
       {loading && <div className="mb-5 rounded-xl border border-border bg-surface p-4 text-sm text-muted">Loading paper account and plan history…</div>}
-      {backendHealth && !backendHealth.schema.ok && <div role="alert" className="mb-5 rounded-xl border border-danger/30 bg-danger/10 p-3 text-sm text-danger">Database migrations not applied: {backendHealth.schema.missing.join(', ')}</div>}
+      {backendHealth && !backendHealth.schema.ok && <div role="alert" className="mb-5 rounded-xl border border-danger/30 bg-danger/10 p-3 text-sm text-danger">{backendHealth.schema.failure === 'schema' ? 'Database migrations not applied' : `Database readiness blocked (${backendHealth.schema.failure ?? 'unknown'})`}: {backendHealth.schema.missing.join(', ')}</div>}
 
       <section className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Paper account and risk">
         <Metric label="Paper equity" value={overview ? money(overview.equity) : '—'} detail={overview ? `${money(overview.cash)} cash · ${money(overview.unrealizedPnl)} unrealized` : 'Account snapshot unavailable'} />

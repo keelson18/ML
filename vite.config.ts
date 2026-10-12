@@ -1,8 +1,10 @@
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
+import { assertSafeViteEnvironment } from './scripts/vite-env-safety';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
+  assertSafeViteEnvironment(env);
   const autonomyTarget = [env.AUTONOMY_PROXY_TARGET, env.VITE_BACKEND_URL]
     .map((target) => target?.trim())
     .find((target) => Boolean(target)) ?? `http://127.0.0.1:${env.AUTONOMY_PORT ?? '8787'}`;

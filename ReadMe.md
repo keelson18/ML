@@ -83,7 +83,8 @@ Fill in `.env`:
 | --- | --- |
 | `VITE_SUPABASE_URL` | Supabase Project Settings → API |
 | `VITE_SUPABASE_ANON_KEY` | Supabase Project Settings → API |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase Project Settings → API (server-only) |
+| `SUPABASE_SECRET_KEY` | Supabase Project Settings → API Keys (preferred, server-only) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Legacy service-role JWT fallback (server-only) |
 | `MASSIVE_API_KEY` | Market-data provider account (server-only) |
 | `TWELVEDATA_API_KEY` | Optional market-data provider account (server-only) |
 | `ML_SERVICE_API_KEY` | Generate a random secret string |

@@ -22,6 +22,7 @@ import { registerLiveStream } from './live/register-stream';
 import { probeAllMarkets } from './services/marketAvailability';
 import { readJsonSafe } from '../../shared/http';
 import { createHash } from 'node:crypto';
+import { isSupabaseServerKey } from './utils/supabase-server-key';
 
 // Allowed CORS origins from env, defaults to local dev
 function allowedOrigins(): string[] {
@@ -34,13 +35,46 @@ type PaperHealth = { status: 'verified' | 'broken' | 'unavailable'; checkedAccou
 let paperLedgerHealthCache: { checkedAt: number; value: PaperHealth } | undefined;
 let paperLedgerHealthCheck: Promise<PaperHealth> | undefined;
 
-async function readSchemaHealth(): Promise<{ ok: boolean; missing: string[] }> {
+export type SchemaHealth = {
+  ok: boolean;
+  missing: string[];
+  failure?: 'configuration' | 'access' | 'schema' | 'connection';
+};
+
+export async function readSchemaHealth(): Promise<SchemaHealth> {
+  const missingConfig = [
+    ...(!config.supabaseUrl ? ['SUPABASE_URL'] : []),
+    ...(!config.supabaseServiceRoleKey ? ['SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY'] : []),
+    ...(config.supabaseServiceRoleKey && !isSupabaseServerKey(config.supabaseServiceRoleKey)
+      ? ['Supabase server key must be an sb_secret_ key or a service_role JWT']
+      : []),
+  ];
+  if (missingConfig.length > 0) return { ok: false, missing: missingConfig, failure: 'configuration' };
   try {
     const { data, error } = await getSupabaseClient().rpc('verify_paper_schema');
-    if (error || !data || typeof data !== 'object') return { ok: false, missing: ['verify_paper_schema'] };
+    if (error) {
+      const failure = error.code === '42501' ? 'access'
+        : error.code === 'PGRST202' || error.code === '42883' ? 'schema'
+          : 'connection';
+      return {
+        ok: false,
+        missing: [error.code === '42501'
+          ? 'database role cannot execute verify_paper_schema (check server key and RPC grants)'
+          : error.code === 'PGRST202' || error.code === '42883'
+            ? 'verify_paper_schema'
+            : 'database access to verify_paper_schema'],
+        failure,
+      };
+    }
+    if (!data || typeof data !== 'object') return { ok: false, missing: ['verify_paper_schema response'], failure: 'schema' };
     const result = data as { ok?: boolean; missing?: string[] };
-    return { ok: Boolean(result.ok), missing: result.missing ?? [] };
-  } catch { return { ok: false, missing: ['database connection or verify_paper_schema'] }; }
+    return { ok: Boolean(result.ok), missing: result.missing ?? [], ...(result.ok ? {} : { failure: 'schema' as const }) };
+  } catch { return { ok: false, missing: ['database connection or verify_paper_schema'], failure: 'connection' }; }
+}
+
+function schemaFailureMessage(schema: SchemaHealth): string {
+  if (schema.failure === 'schema') return `Database migrations not applied: ${schema.missing.join(', ')}`;
+  return `Database readiness blocked (${schema.failure ?? 'unknown'}): ${schema.missing.join(', ')}`;
 }
 
 async function readPaperLedgerHealth() {
@@ -130,7 +164,7 @@ export function buildServer() {
   app.addHook('preHandler', async (request, reply) => {
     if (process.env.NODE_ENV !== 'test' && (request.url.startsWith('/api/v1/trader') || request.url.startsWith('/api/v1/paper'))) {
       const schema = await readSchemaHealth();
-      if (!schema.ok) return reply.code(503).send({ error: `Database migrations not applied: ${schema.missing.join(', ')}` });
+      if (!schema.ok) return reply.code(503).send({ error: schemaFailureMessage(schema) });
     }
   });
   const pipeline = new AutonomousPipeline({ enableExecution: false });
@@ -164,7 +198,7 @@ export async function startServer() {
   const { app, pipeline } = buildServer();
   const scheduler = paperAutopilotScheduler;
   const schema = await readSchemaHealth();
-  if (!schema.ok) app.log.error({ missing: schema.missing }, 'Database migrations are incomplete; trading routes and scheduler are fail-closed');
+  if (!schema.ok) app.log.error({ missing: schema.missing, failure: schema.failure }, 'Database readiness failed; trading routes and scheduler are fail-closed');
   const port = Number(process.env.AUTONOMY_PORT ?? process.env.PORT ?? 8787);
   try {
     await app.listen({ port, host: '0.0.0.0' });

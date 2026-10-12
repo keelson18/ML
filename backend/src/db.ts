@@ -1,15 +1,18 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { config } from './config.js';
+import { isSupabaseServerKey } from './utils/supabase-server-key.js';
 
 let serviceClient: SupabaseClient | null = null;
 let anonClient: SupabaseClient | null = null;
-const tokenClientCache = new Map<string, SupabaseClient>();
 
 // Service-role client — bypasses RLS. Use only for trusted admin/system operations.
 export function getSupabaseClient(): SupabaseClient {
   if (!serviceClient) {
     if (!config.supabaseUrl || !config.supabaseServiceRoleKey) {
-      throw new Error('Supabase service role key not configured. Set SUPABASE_SERVICE_ROLE_KEY in .env');
+      throw new Error('Supabase server key not configured. Set SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY in .env');
+    }
+    if (!isSupabaseServerKey(config.supabaseServiceRoleKey)) {
+      throw new Error('Supabase server key must be an sb_secret_ key or a service_role JWT.');
     }
     serviceClient = createClient(config.supabaseUrl, config.supabaseServiceRoleKey, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -33,14 +36,12 @@ export function getSupabaseAnonClient(): SupabaseClient {
 
 // User-scoped client — uses the user's access token so RLS sees their identity.
 export function getSupabaseClientWithToken(accessToken: string): SupabaseClient {
-  let client = tokenClientCache.get(accessToken);
-  if (!client) {
-    client = createClient(config.supabaseUrl, config.supabaseAnonKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-      global: { headers: { Authorization: `Bearer ${accessToken}` } },
-    });
-    tokenClientCache.set(accessToken, client);
-    setTimeout(() => tokenClientCache.delete(accessToken), 5 * 60 * 1000);
+  if (!config.supabaseUrl || !config.supabaseAnonKey) {
+    throw new Error('Supabase user-scoped access requires SUPABASE_URL and SUPABASE_ANON_KEY.');
   }
-  return client;
+  // Keep bearer tokens request-scoped instead of retaining them in a process-wide cache.
+  return createClient(config.supabaseUrl, config.supabaseAnonKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { headers: { Authorization: `Bearer ${accessToken}` } },
+  });
 }

@@ -267,7 +267,9 @@ export interface TraderAutopilotSettings {
   maxSymbolsPerUser?: number;
 }
 
-export interface BackendHealth { schema: { ok: boolean; missing: string[] } }
+export interface BackendHealth {
+  schema: { ok: boolean; missing: string[]; failure?: 'configuration' | 'access' | 'schema' | 'connection' };
+}
 export async function fetchBackendHealth(): Promise<BackendHealth> {
   return authenticatedBackendRequest<BackendHealth>('/api/v1/me/health');
 }

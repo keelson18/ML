@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildServer } from './server';
+import { buildServer, readSchemaHealth } from './server';
 import { config } from './config';
+import { getSupabaseClient } from './db';
 
 // Provide a deterministic authenticated user for route-security tests.
 vi.mock('./db.js', () => ({
@@ -14,6 +15,8 @@ vi.mock('./db.js', () => ({
 const originalNodeEnv = process.env.NODE_ENV;
 const originalCorsOrigin = process.env.CORS_ORIGIN;
 const originalMarketRateLimitMax = config.marketRateLimitMax;
+const originalSupabaseUrl = config.supabaseUrl;
+const originalServiceRoleKey = config.supabaseServiceRoleKey;
 
 afterEach(() => {
   if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
@@ -21,6 +24,61 @@ afterEach(() => {
   if (originalCorsOrigin === undefined) delete process.env.CORS_ORIGIN;
   else process.env.CORS_ORIGIN = originalCorsOrigin;
   config.marketRateLimitMax = originalMarketRateLimitMax;
+  config.supabaseUrl = originalSupabaseUrl;
+  config.supabaseServiceRoleKey = originalServiceRoleKey;
+  vi.mocked(getSupabaseClient).mockReset();
+});
+
+describe('database schema readiness', () => {
+  it('reports missing server configuration instead of mislabeling it as an unapplied migration', async () => {
+    config.supabaseUrl = '';
+    config.supabaseServiceRoleKey = '';
+
+    await expect(readSchemaHealth()).resolves.toEqual({
+      ok: false,
+      missing: ['SUPABASE_URL', 'SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY'],
+      failure: 'configuration',
+    });
+  });
+
+  it('distinguishes missing RPC permission from a missing migration', async () => {
+    config.supabaseUrl = 'https://project.example.test';
+    config.supabaseServiceRoleKey = `header.${Buffer.from(JSON.stringify({ role: 'service_role' })).toString('base64url')}.signature`;
+    vi.mocked(getSupabaseClient).mockReturnValue({
+      rpc: vi.fn().mockResolvedValue({ data: null, error: { code: '42501' } }),
+    } as never);
+
+    await expect(readSchemaHealth()).resolves.toEqual({
+      ok: false,
+      missing: ['database role cannot execute verify_paper_schema (check server key and RPC grants)'],
+      failure: 'access',
+    });
+  });
+
+  it('fails readiness when the server key is actually an anon JWT', async () => {
+    config.supabaseUrl = 'https://project.example.test';
+    config.supabaseServiceRoleKey = `header.${Buffer.from(JSON.stringify({ role: 'anon' })).toString('base64url')}.signature`;
+
+    await expect(readSchemaHealth()).resolves.toEqual({
+      ok: false,
+      missing: ['Supabase server key must be an sb_secret_ key or a service_role JWT'],
+      failure: 'configuration',
+    });
+  });
+
+  it('labels a missing schema RPC as a schema failure', async () => {
+    config.supabaseUrl = 'https://project.example.test';
+    config.supabaseServiceRoleKey = `header.${Buffer.from(JSON.stringify({ role: 'service_role' })).toString('base64url')}.signature`;
+    vi.mocked(getSupabaseClient).mockReturnValue({
+      rpc: vi.fn().mockResolvedValue({ data: null, error: { code: 'PGRST202' } }),
+    } as never);
+
+    await expect(readSchemaHealth()).resolves.toEqual({
+      ok: false,
+      missing: ['verify_paper_schema'],
+      failure: 'schema',
+    });
+  });
 });
 
 describe('Fastify security headers', () => {
@@ -34,6 +92,23 @@ describe('Fastify security headers', () => {
     expect(response.json()).toEqual({ status: 'ok', service: 'quantum-api' });
     expect(response.headers['x-content-type-options']).toBe('nosniff');
     expect(response.headers['x-frame-options']).toBe('SAMEORIGIN');
+    await app.close();
+  });
+
+  it('allows only configured CORS origins', async () => {
+    process.env.NODE_ENV = 'test';
+    process.env.CORS_ORIGIN = 'https://app.example.test';
+    const { app } = buildServer();
+    const preflight = (origin: string) => app.inject({
+      method: 'OPTIONS',
+      url: '/health',
+      headers: { origin, 'access-control-request-method': 'GET' },
+    });
+
+    const allowed = await preflight('https://app.example.test');
+    const denied = await preflight('https://untrusted.example.test');
+    expect(allowed.headers['access-control-allow-origin']).toBe('https://app.example.test');
+    expect(denied.headers['access-control-allow-origin']).toBeUndefined();
     await app.close();
   });
 
