@@ -115,7 +115,7 @@ A PostgreSQL/Supabase RLS integration test was not run, so owner/admin/anon beha
 
 ## Phase E and CI
 
-- `npm run check:env` passes in this workspace: all 35 detected environment variable reads are listed and commented in `.env.example`.
+- `npm run check:env` passes in this workspace: all 47 detected environment variable reads are listed and commented in `.env.example`.
 - CI workflow is present at `.github/workflows/ci.yml` and declares install, environment check, typechecks, lint, tests, build, and a non-blocking production dependency audit artifact. GitHub Actions has not run for this worktree (NOT-VERIFIED green CI).
 - Final local verification (before chart work): `npm test` passed 150 tests in 31 files; after chart Phases 1–2, `npm test` passed 165 tests with 0 failures; frontend and backend typechecks passed; `npm run check:env` passed; lint exited successfully with three existing Fast Refresh warnings; production build passed with a chunk-size warning.
 - `npm audit --omit=dev --json` reported 0 info/low/moderate/high/critical vulnerabilities across 88 production dependencies. CI uploads the machine-readable report without failing the job for advisory findings.
@@ -127,4 +127,4 @@ A PostgreSQL/Supabase RLS integration test was not run, so owner/admin/anon beha
 - Shared paper fill/exit accounting and calendar-aware candle math have unit tests. Tests for hash tampering, 1,000 simulated trades, fetch-once deduplication, chronological bounded replay, and stale-entry age are present. They were **not executed** because `vitest` and required dependencies are absent from this workspace.
 - The per-user scheduler, opt-in enrollment, authenticated rate-limited Run now route, paused-reason path, 5-minute management replay, selected-symbol refresh, and process-local shared fetch/cache path are implemented. Browser behavior and a deployed scheduled run are **NOT-VERIFIED**. Run one scheduler worker per project; multi-replica coordination is not implemented.
 - `/health` and Trader Desk expose ledger/reconciliation status. They were not checked against a live Supabase project.
-- Current verification attempts: `npm test` failed because Vitest is unavailable; frontend/backend typechecks and lint are blocked by missing Node typings and dependencies (`zod`, `fastify`, ESLint, and others). No phase commit was created because checks could not be completed. The pre-existing staged `.env.example` change was left untouched.
+- Current verification attempts: `npm test` failed because Vitest is unavailable; frontend/backend typechecks and lint are blocked by missing Node typings and dependencies (`zod`, `fastify`, ESLint, and others). The current HEAD (`9af84f7`) contains the main Phase 2/3 implementation in one commit, not one commit per phase; these remaining review corrections are uncommitted. The prior `.env.example` change is already part of that existing commit.

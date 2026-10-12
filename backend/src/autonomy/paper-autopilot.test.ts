@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { entryCandleIsFresh, replayCandlesAfter, replaySequentialCandles, uniqueSeriesRequests } from './paper-autopilot';
 import { closePaperPosition, simulatePaperOrder, type PaperAccountState } from '../engines/paper-execution';
+import { traderConfig } from '../trader/config';
 
 describe('paper autopilot scheduling helpers', () => {
   it('fetches a symbol/timeframe series once for multiple opted-in users', () => {
@@ -41,7 +42,8 @@ describe('paper autopilot scheduling helpers', () => {
 
   it('rejects entry triggers that exceed the configured candle-age limit', () => {
     const candle = { time: 0, open: 1, high: 1, low: 1, close: 1, volume: 1 };
-    expect(entryCandleIsFresh(candle, '15m', 2_700_000)).toBe(true);
-    expect(entryCandleIsFresh(candle, '15m', 2_701_000)).toBe(false);
+    const maximumAge = traderConfig.MAX_ENTRY_AGE_BARS * 900_000;
+    expect(entryCandleIsFresh(candle, '15m', 900_000 + maximumAge)).toBe(true);
+    expect(entryCandleIsFresh(candle, '15m', 900_001 + maximumAge)).toBe(false);
   });
 });

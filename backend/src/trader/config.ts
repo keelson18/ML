@@ -34,7 +34,7 @@ const traderConfigSchema = z.object({
   MAX_ENTRY_AGE_BARS: z.coerce.number().int().positive().default(2),
   SCHEDULER_MAX_CATCH_UP_BARS: z.coerce.number().int().positive().max(1000).default(100),
   AUTOPILOT_MAX_SYMBOLS_PER_USER: z.coerce.number().int().positive().max(3).default(3),
-  SCHEDULER_SYMBOL_DELAY_MS: z.coerce.number().int().nonnegative().default(12_500),
+  SCHEDULER_SYMBOL_DELAY_MS: z.coerce.number().int().nonnegative().default(250),
   SCHEDULER_JITTER_MS: z.coerce.number().int().nonnegative().default(1_000),
   MAX_CONSECUTIVE_PROVIDER_FAILURES: z.coerce.number().int().positive().default(3),
   MIN_TRADES_FOR_STATS: z.coerce.number().int().positive().default(30),

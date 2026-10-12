@@ -107,7 +107,7 @@ Apply migrations with the Supabase CLI and compare the resulting migration histo
 npm run dev
 ```
 
-This starts the Fastify API on `AUTONOMY_PORT` (default 8787), waits for `/health`, then starts Vite on port 5173. For split processes, use `npm run backend:dev` and `npm run dev:web`; do not run the combined command and a second backend on the same port. `npm run dev:web` alone requires a reachable backend configured through `VITE_BACKEND_URL` or `AUTONOMY_PROXY_TARGET`.
+Both `npm run dev` and `npm run dev:web` start the Fastify API on `AUTONOMY_PORT` (default 8787), wait for `/health`, then start Vite on port 5173. For split processes, use `npm run backend:dev` and `npm run vite:only`; do not run a combined command and a second backend on the same port.
 
 ### 6. Deploy edge functions (optional)
 
@@ -126,7 +126,8 @@ supabase functions deploy decision-analyze
 | Command | Purpose |
 | --- | --- |
 | `npm run dev` | Start Fastify backend and Vite frontend |
-| `npm run dev:web` | Start Vite only |
+| `npm run dev:web` | Start Fastify backend and Vite frontend |
+| `npm run vite:only` | Start Vite only (requires a reachable backend) |
 | `npm run backend:dev` | Start backend dev server (watch mode) |
 | `npm run backend` | Start backend once |
 | `npm run backend:typecheck` | Type-check backend only |

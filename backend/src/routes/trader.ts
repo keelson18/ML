@@ -81,7 +81,7 @@ export async function traderRoutes(app: FastifyInstance) {
   }, async (request, reply) => {
     if (!z.object({}).strict().safeParse(request.body ?? {}).success) return reply.code(400).send({ error: 'Run now does not accept request parameters.' });
     if (!request.authenticatedUserId) return reply.code(401).send({ error: 'Authentication required.' });
-    try { return await paperAutopilotScheduler.runAccountNow(request.authenticatedUserId); }
+    try { return await paperAutopilotScheduler.queueAccountRun(request.authenticatedUserId); }
     catch (error) {
       const message = error instanceof Error ? error.message : 'Autopilot run failed.';
       return reply.code(message.startsWith('Enable paper autopilot') ? 409 : 503).send({ error: message });

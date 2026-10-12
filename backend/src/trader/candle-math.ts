@@ -12,7 +12,7 @@ export function candleSeconds(timeframe: Timeframe, startSeconds = Date.now() / 
 }
 
 export function candleIndex(timeframe: Timeframe, timeSeconds: number): number {
-  if (timeframe === '1w') return Math.floor((timeSeconds - 4 * 86_400) / 604_800);
+  if (timeframe === '1w') return Math.floor((timeSeconds + 3 * 86_400) / 604_800);
   if (timeframe === '1M') {
     const date = new Date(timeSeconds * 1000);
     return date.getUTCFullYear() * 12 + date.getUTCMonth();

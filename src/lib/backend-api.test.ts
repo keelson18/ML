@@ -61,7 +61,7 @@ describe('authenticated backend responses', () => {
   });
 
   it('sends Run now as an authenticated bodyless POST', async () => {
-    fetchMock.mockResolvedValue(new Response(JSON.stringify({ processed: 0 }), { status: 200 }));
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ queued: true }), { status: 200 }));
     await runTraderAutopilotNow();
     const init = fetchMock.mock.calls[0]?.[1];
     expect(init?.method).toBe('POST');

@@ -30,7 +30,7 @@ create trigger decision_ledger_no_update_delete
   for each row execute function public.reject_decision_ledger_mutation();
 
 create table if not exists public.paper_fills (
-  id text primary key,
+  id uuid primary key default gen_random_uuid(),
   account_id text not null,
   order_id text not null,
   position_id text,
@@ -47,7 +47,7 @@ create table if not exists public.paper_fills (
 );
 
 create table if not exists public.shadow_trades (
-  id text primary key,
+  id uuid primary key default gen_random_uuid(),
   account_id text not null,
   plan_id text not null,
   symbol text not null,
@@ -168,8 +168,8 @@ as $$
 begin
   if auth.role() is distinct from 'service_role' then raise exception 'service role required'; end if;
   if p_event->>'eventType' = 'paper.fill' then
-    insert into public.paper_fills(id, account_id, order_id, position_id, symbol, side, quantity, price, fee, slippage, filled_at, candle_time, idempotency_key)
-    values(p_event->>'idempotencyKey', p_account_id, p_event->'payload'->>'orderId', p_event->'payload'->'position'->>'id',
+    insert into public.paper_fills(account_id, order_id, position_id, symbol, side, quantity, price, fee, slippage, filled_at, candle_time, idempotency_key)
+    values(p_account_id, p_event->'payload'->>'orderId', p_event->'payload'->'position'->>'id',
       p_event->'payload'->'position'->>'symbol', p_event->'payload'->'position'->>'side',
       (p_event->'payload'->'position'->>'quantity')::numeric, (p_event->'payload'->'position'->>'entryPrice')::numeric,
       coalesce((p_event->'payload'->'position'->>'entryFee')::numeric, 0),
@@ -178,8 +178,8 @@ begin
       p_event->>'idempotencyKey')
     on conflict (account_id, idempotency_key) do nothing;
   elsif p_event->>'eventType' = 'paper.fill.exit' then
-    insert into public.paper_fills(id, account_id, order_id, position_id, symbol, side, quantity, price, fee, slippage, filled_at, candle_time, idempotency_key)
-    values(p_event->>'idempotencyKey', p_account_id, p_event->'payload'->>'positionId', p_event->'payload'->>'positionId',
+    insert into public.paper_fills(account_id, order_id, position_id, symbol, side, quantity, price, fee, slippage, filled_at, candle_time, idempotency_key)
+    values(p_account_id, p_event->'payload'->>'positionId', p_event->'payload'->>'positionId',
       p_event->'payload'->>'symbol', case when p_event->'payload'->>'side' = 'buy' then 'sell' else 'buy' end,
       (p_event->'payload'->>'quantity')::numeric, (p_event->'payload'->>'exitPrice')::numeric,
       coalesce((p_event->'payload'->>'exitFee')::numeric, 0), coalesce((p_event->'payload'->>'exitSlippage')::numeric, 0),
@@ -187,8 +187,8 @@ begin
       p_event->>'idempotencyKey')
     on conflict (account_id, idempotency_key) do nothing;
   elsif p_event->>'eventType' = 'shadow.signal' then
-    insert into public.shadow_trades(id, account_id, plan_id, symbol, candle_time, reason, idempotency_key)
-    values(p_event->>'idempotencyKey', p_account_id, p_event->'payload'->>'planId', p_event->'payload'->>'symbol',
+    insert into public.shadow_trades(account_id, plan_id, symbol, candle_time, reason, idempotency_key)
+    values(p_account_id, p_event->'payload'->>'planId', p_event->'payload'->>'symbol',
       (p_event->'payload'->>'candleTime')::bigint, p_event->'payload'->>'reason', p_event->>'idempotencyKey')
     on conflict (account_id, idempotency_key) do nothing;
   end if;

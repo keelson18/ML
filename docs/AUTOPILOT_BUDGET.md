@@ -25,6 +25,8 @@ The two-request priority reserve yields a conservative trader allocation of `2 Ã
 
 The scheduler requests each series once with the common 1,000-bar limit, then filters and replays local closed-candle prefixes. It never makes a request per missed candle. New provider fetches are spaced by 12.5 seconds by default, while cache hits do not incur the delay. The manual Refresh plans action is limited to the account's selected symbols (at most three) and is rate-limited to once per minute; a cold scan can require up to three series per symbol. The market-data cache is keyed by symbol, timeframe, and limit, so keeping that common limit is important for reuse. Multiple backend replicas do not share cache or budget counters; deploy one scheduler worker per Supabase project until shared coordination exists.
 
+Automatic scheduler startup is disabled unless `AUTONOMOUS_TRADING=true`; each account must also explicitly opt in. Authenticated Run now remains available for an opted-in account when scheduled processing is disabled.
+
 The owner must apply `supabase/migrations/20261014000000_quantum_paper_core.sql` before enabling accounts. The migration backfills existing account snapshots idempotently and introduces the service-role-only account/ledger transaction RPC; no remote migration was run by the application.
 
 ## Priority 1m fetch audit

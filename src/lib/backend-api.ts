@@ -266,8 +266,7 @@ export interface TraderAutopilotSettings {
 }
 
 export interface TraderAutopilotRunResult {
-  processed: number;
-  pausedReason?: string;
+  queued: true;
 }
 
 export async function fetchTraderAutopilot(): Promise<TraderAutopilotSettings> {

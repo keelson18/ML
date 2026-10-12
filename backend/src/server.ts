@@ -110,7 +110,7 @@ export async function startServer() {
     }
     throw error;
   }
-  scheduler.start();
+  if (process.env.AUTONOMOUS_TRADING === 'true') scheduler.start();
   if (config.massiveApiKey) void probeAllMarkets().catch(() => app.log.warn('market availability probe failed'));
   const shutdown = async () => { scheduler.stop(); await app.close(); };
   process.once('SIGINT', shutdown);

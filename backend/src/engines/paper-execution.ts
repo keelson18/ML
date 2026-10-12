@@ -14,6 +14,7 @@ export type PaperPositionStatus = 'open' | 'closed';
 
 export interface PaperPosition {
   id: string;
+  orderId?: string;
   symbol: string;
   assetId: string;
   side: PaperOrderSide;
@@ -156,6 +157,7 @@ export function simulatePaperOrder(
   const timestamp = request.timestamp ?? new Date().toISOString();
   const position: PaperPosition = {
     id: request.positionId,
+    orderId: request.orderId,
     symbol: request.symbol,
     assetId: request.assetId,
     side,

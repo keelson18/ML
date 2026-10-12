@@ -9,6 +9,8 @@ import { traderConfig } from '../trader/config';
 import { candleSeconds, latestClosedCandleTime, selectClosedCandles } from '../trader/candle-math';
 import { nextScheduledRunAt } from './candle-clock';
 
+const PROVIDER_REQUEST_SPACING_MS = 12_500;
+
 export const AUTOPILOT_TIMEFRAMES = [...new Set([
   ...traderConfig.HTF_TIMEFRAMES,
   ...traderConfig.TRIGGER_TIMEFRAMES,
@@ -63,6 +65,7 @@ export class PaperAutopilotScheduler {
   private running?: Promise<void>;
   private readonly lastBoundaries = new Map<Timeframe, number>();
   private readonly accountQueues = new Map<string, Promise<void>>();
+  private readonly manualRuns = new Set<string>();
 
   start(): void {
     if (this.active) return;
@@ -76,11 +79,20 @@ export class PaperAutopilotScheduler {
     this.timer = undefined;
   }
 
-  async runAccountNow(accountId: string): Promise<{ pausedReason?: string; processed: number }> {
+  async queueAccountRun(accountId: string): Promise<{ queued: true }> {
     const { data, error } = await getSupabaseClient().from('paper_autopilot').select('*').eq('account_id', accountId).maybeSingle();
     if (error) throw new Error('Autopilot settings are unavailable.');
     if (!data?.enabled) throw new Error(data?.paused_reason ?? 'Enable paper autopilot before running it.');
-    return this.runAccounts([data as PaperAutopilotConfig], new Set(AUTOPILOT_TIMEFRAMES), Date.now());
+    if (this.manualRuns.has(accountId)) return { queued: true };
+    this.manualRuns.add(accountId);
+    void this.runAccounts([data as PaperAutopilotConfig], new Set(AUTOPILOT_TIMEFRAMES), Date.now())
+      .catch(async (error: unknown) => {
+        const reason = error instanceof Error ? error.message : 'Paper autopilot run failed.';
+        try { await getSupabaseClient().rpc('pause_paper_autopilot', { p_account_id: accountId, p_reason: reason }); }
+        catch { }
+      })
+      .finally(() => this.manualRuns.delete(accountId));
+    return { queued: true };
   }
 
   private scheduleNext(): void {
@@ -133,27 +145,33 @@ export class PaperAutopilotScheduler {
     if (availableRows.length === 0) return { pausedReason, processed: 0 };
 
     const requestsBySymbol = new Map<string, Set<Timeframe>>();
+    const requestsByAccount = new Map<string, Map<string, Set<Timeframe>>>();
     const managedSymbolsByAccount = new Map<string, Set<string>>();
     for (const row of availableRows) {
       const account = snapshots.get(row.account_id)!;
       const activePlans = (account.tradePlans ?? []).filter((plan) => ['WATCHING', 'ARMED', 'PENDING_ORDER'].includes(plan.status));
       const openSymbols = new Set(account.positions.filter((position) => position.status === 'open').map((position) => position.symbol));
       const managedSymbols = new Set([...row.symbols, ...openSymbols]);
+      const accountRequests = new Map<string, Set<Timeframe>>();
       managedSymbolsByAccount.set(row.account_id, managedSymbols);
       for (const symbol of managedSymbols) {
-        const requested = requestsBySymbol.get(symbol) ?? new Set<Timeframe>();
+        const required = new Set<Timeframe>();
+        const combined = requestsBySymbol.get(symbol) ?? new Set<Timeframe>();
         const isConfigured = row.symbols.includes(symbol);
-        if (due.has(traderConfig.MGMT_TIMEFRAME as Timeframe) && openSymbols.has(symbol)) requested.add(traderConfig.MGMT_TIMEFRAME as Timeframe);
+        if (due.has(traderConfig.MGMT_TIMEFRAME as Timeframe) && openSymbols.has(symbol)) required.add(traderConfig.MGMT_TIMEFRAME as Timeframe);
         if (isConfigured) {
-          for (const timeframe of traderConfig.TRIGGER_TIMEFRAMES) {
-            if (due.has(timeframe as Timeframe) && activePlans.some((plan) => plan.symbol === symbol && (plan.triggerTimeframe ?? traderConfig.TRIGGER_TIMEFRAMES[0]) === timeframe)) requested.add(timeframe as Timeframe);
+          for (const timeframe of traderConfig.TRIGGER_TIMEFRAMES as Timeframe[]) {
+            if (due.has(timeframe as Timeframe) && activePlans.some((plan) => plan.symbol === symbol && (plan.triggerTimeframe ?? traderConfig.TRIGGER_TIMEFRAMES[0]) === timeframe)) required.add(timeframe as Timeframe);
           }
-          if (traderConfig.HTF_TIMEFRAMES.some((timeframe) => due.has(timeframe as Timeframe))) {
-            for (const timeframe of [...traderConfig.HTF_TIMEFRAMES, ...traderConfig.TRIGGER_TIMEFRAMES]) requested.add(timeframe as Timeframe);
+          if ((traderConfig.HTF_TIMEFRAMES as Timeframe[]).some((timeframe) => due.has(timeframe))) {
+            for (const timeframe of [...(traderConfig.HTF_TIMEFRAMES as Timeframe[]), ...(traderConfig.TRIGGER_TIMEFRAMES as Timeframe[])]) required.add(timeframe as Timeframe);
           }
         }
-        requestsBySymbol.set(symbol, requested);
+        for (const timeframe of required) combined.add(timeframe);
+        accountRequests.set(symbol, required);
+        requestsBySymbol.set(symbol, combined);
       }
+      requestsByAccount.set(row.account_id, accountRequests);
     }
 
     const seriesByKey = new Map<string, MarketDataSeries>();
@@ -162,7 +180,7 @@ export class PaperAutopilotScheduler {
       [...timeframes].map((timeframe) => ({ symbol, timeframe }))));
     let previousRequestWasFresh = false;
     for (const { symbol, timeframe } of seriesRequests) {
-      if (previousRequestWasFresh && traderConfig.SCHEDULER_SYMBOL_DELAY_MS > 0) await new Promise((resolve) => setTimeout(resolve, traderConfig.SCHEDULER_SYMBOL_DELAY_MS));
+      if (previousRequestWasFresh) await new Promise((resolve) => setTimeout(resolve, PROVIDER_REQUEST_SPACING_MS));
       const key = `${symbol}:${timeframe}`;
       const startedAt = Date.now();
       try {
@@ -181,14 +199,16 @@ export class PaperAutopilotScheduler {
       const account = snapshots.get(row.account_id)!;
       await this.withAccountLock(row.account_id, async () => {
         const managedSymbols = managedSymbolsByAccount.get(row.account_id)!;
-        const missing = [...requestsBySymbol.entries()].flatMap(([symbol, timeframes]) => managedSymbols.has(symbol)
-          ? [...timeframes].map((timeframe) => failuresByKey.get(`${symbol}:${timeframe}`)).filter((reason): reason is string => Boolean(reason))
-          : []);
+        const accountRequests = requestsByAccount.get(row.account_id)!;
+        const missing = [...accountRequests.entries()].flatMap(([symbol, timeframes]) =>
+          [...timeframes].map((timeframe) => failuresByKey.get(`${symbol}:${timeframe}`)).filter((reason): reason is string => Boolean(reason)));
         const accountEntryPause = missing[0];
+        const entryDataRequested = [...accountRequests.values()].some((timeframes) =>
+          [...timeframes].some((timeframe) => timeframe !== traderConfig.MGMT_TIMEFRAME));
         if (accountEntryPause) {
           pausedReason = accountEntryPause;
           await getSupabaseClient().rpc('pause_paper_autopilot', { p_account_id: row.account_id, p_reason: accountEntryPause });
-        } else if (row.paused_reason) {
+        } else if (row.paused_reason && entryDataRequested) {
           await getSupabaseClient().rpc('resume_paper_autopilot', { p_account_id: row.account_id });
         }
         for (const symbol of managedSymbols) {
@@ -199,7 +219,7 @@ export class PaperAutopilotScheduler {
           }
         }
         for (const symbol of row.symbols) {
-          const plannerDue = traderConfig.HTF_TIMEFRAMES.some((timeframe) => due.has(timeframe as Timeframe));
+          const plannerDue = (traderConfig.HTF_TIMEFRAMES as Timeframe[]).some((timeframe) => due.has(timeframe));
           if (plannerDue) {
             const daily = seriesByKey.get(`${symbol}:1d`);
             const fourHour = seriesByKey.get(`${symbol}:4h`);

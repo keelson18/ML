@@ -250,7 +250,7 @@ function ledgerEvents(previous: PaperAccountState, next: PaperAccountState) {
       const digest = createHash('sha256').update(JSON.stringify(position)).digest('hex');
       add('paper.position', `position:${position.id}:${digest}`, position);
       if (position.status === 'open' && previousPositions.get(position.id)?.status !== 'open') {
-        add('paper.fill', `fill:${position.id}`, { position, orderId: position.id, candleTime: Date.parse(position.openedAt) / 1000 });
+        add('paper.fill', `fill:${position.id}`, { position, orderId: position.orderId ?? position.id, candleTime: Date.parse(position.openedAt) / 1000 });
       }
     }
   }
