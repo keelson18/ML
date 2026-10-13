@@ -1,15 +1,14 @@
 # High-priority reliability remediation report
 
 **Date:** 2026-10-13  
-**Status:** Source-level remediation and automated checks are complete for the changes below. Live provider, database, migration, RLS and deployment verification are not complete.  
-**Conclusion:** **Not ready for further autonomous paper-trading validation against a real Supabase account.** It is ready for local deterministic paper-flow testing. Do not enable autopilot against a live project until the owner verifies the schema/migrations, provider availability and database concurrency behavior.
+**Status:** This report covers the committed remediation at `33cdfdf` and the current uncommitted follow-up work. Local code checks pass as recorded below; database/provider/deployment verification remains incomplete.
+**Conclusion:** **Not ready for paper-trading validation against a real Supabase account.** The new research workflow is locally testable, but the migration has not been run against a disposable database and there is no evidence that promotion criteria or table ACLs work in PostgreSQL. Do not enable autopilot until DB and provider verification are complete.
 
 ## Repository state
 
-- Start: branch `main`, commit `0dd94aa` (`feat: Enhance decision-making process and candle boundary logic`), clean tracked and untracked worktree.
-- End: same commit/branch; implementation changes remain uncommitted.
-- `package.json` is also modified in the final worktree, changing the package name from `vite-react-typescript-starter` to `Quantum Intelligence`. I did not make that edit, so its cause is unattributed; it was left untouched.
-- During the work, three prompt files appeared as untracked under `docs/`: `ML_Decision_Learning_Fix_Master_Prompt.md`, `ML_High_Priority_Reliability_Remediation_Master_Prompt.md`, and `ML_Trading_Intelligence_Roadmap_Master_Prompt.md`. They were not edited. The requested high-priority prompt was read from the Downloads attachment because its `docs/` copy was absent at initial inspection.
+- Previous remediation started at `0dd94aa` and was committed as `33cdfdf` (`feat: Add high-priority reliability remediation report and update package name`). This follow-up started at `33cdfdf` with a clean worktree.
+- The package name change and three prompt documents are part of `33cdfdf`; they are not uncommitted or unattributed changes.
+- At the end of this follow-up, `HEAD` remains `33cdfdf`; the files listed by `git status --short` are uncommitted implementation and report updates. No commit was created in this task.
 - The complete Stage 0 system map, risk register, ordered plan and baseline results are in [reliability-remediation-audit.md](reliability-remediation-audit.md).
 
 ## Findings and remediation
@@ -22,13 +21,35 @@
 | P1 | Uncalibrated model probability influenced confidence despite the explanation saying it was neutralized. | Uncalibrated model factor is now neutral; hard risk failure still forces confidence to zero. Added regression tests. |
 | P1 | Corrected provider OHLCV at the same timestamps retained the same dataset identity. | Normalized-candle SHA-256 content digest now participates in the `dataVersion` and dataset ID, including limited slices. Added correction regression. |
 | P1 | Risk Management duplicated server risk limits and computed cost-basis metrics; Portfolio substituted entry prices and showed zero unrealized P&L when marks were absent. | Risk page now uses authenticated server overview and configured thresholds. Portfolio consumes canonical backend candles, surfaces stale marks, and hides equity/P&L when a mark is absent. |
-| P1 | Research is not an executable, reproducible promotion pipeline. Stored experiments are drafts; replay and promotion evaluation are not connected to immutable persisted run evidence. | Preserved the fail-closed defaults and documented that promotion/effectiveness is NOT-VERIFIED. No fabricated run was created. A durable experiment manifest, untouched chronological holdout and server-owned evidence-bound promotion workflow remain required. |
+| P1 | Research records were drafts and supplied evidence was not bound to a reproducible replay. | Added a server-fetched chronological replay workflow with provider candle snapshots, code/config/engine versions, transaction costs, a later holdout, seeded random and buy/hold baselines, append-only run evidence, single-use holdout claims and admin-only DB promotion gate. Promotion still requires future post-registration evidence meeting configured trade and duration minima. SQL execution and actual promotion remain NOT-VERIFIED. |
 | P1 | No database-wide scheduler lease was found; locks are process-local. | Documented as a deployment risk. Same-process request ordering, account queues, CAS and candle checkpoints exist; multi-replica behavior was not verified. No migration was added without evidence of the deployment topology. |
 | P2 | Paper fill assumptions were not fully described where results are presented. | `docs/RESEARCH.md` now documents spot-long, next-candle all-or-none entries, gaps, fees/slippage, stop-first bar ordering and proportional fee allocation. |
 
 The scheduler already fetched/processed management before triggers and planner work. I extracted its provider ordering into a testable helper and added an explicit regression (`management → triggers → planner`). No change claims measured production cycle time.
 
 ## Files changed
+
+The committed remediation file inventory remains in the original section below. This follow-up's uncommitted changed files are:
+
+- `.env.example`
+- `backend/src/routes/learning-research.test.ts`
+- `backend/src/routes/learning-research.ts`
+- `backend/src/services/paperTradingService.test.ts`
+- `backend/src/services/paperTradingService.ts`
+- `backend/src/trader/replay.test.ts`
+- `backend/src/trader/replay.ts`
+- `backend/src/trader/research-run.test.ts`
+- `backend/src/trader/research-run.ts`
+- `docs/DB_APPLY.md`
+- `docs/DB_MAP.md`
+- `docs/MIGRATIONS.md`
+- `docs/RESEARCH.md`
+- `docs/VERIFICATION.md`
+- `docs/decision-learning-audit.md`
+- `docs/reliability-remediation-report.md`
+- `scripts/verify-schema.sql`
+- `supabase/migrations/20261018000000_immutable_research_runs.sql`
+- `supabase/tests/research_governance.test.sql`
 
 - `backend/src/trader/risk.ts` — expose incomplete mark coverage and validate sizing inputs/direction.
 - `backend/src/trader/risk.test.ts` — malformed sizing and missing mark regressions.
@@ -60,10 +81,10 @@ Final checks, run in this workspace:
 | `npm run typecheck` | PASS, exit 0 |
 | `npm run backend:typecheck` | PASS, exit 0 |
 | `npm run lint` | PASS, exit 0 |
-| `npm test` | PASS: 59 test files, 330 tests |
+| `npm test` | PASS: 60 test files, 339 tests |
 | `npm run build` | PASS: Vite transformed 1,615 modules and built successfully. Warning: one JS chunk is 922.48 kB uncompressed (186.42 kB gzip). Sandbox run first failed with esbuild `spawn EPERM`; elevated rerun passed. |
-| `npm run check:env` | PASS: 52 application environment reads documented |
-| `npm run check:migration-versions` | PASS: 41 migration files, unique versions |
+| `npm run check:env` | PASS: 53 application environment reads documented |
+| `npm run check:migration-versions` | PASS: 42 migration files, unique versions |
 | `npx vitest run scripts/vite-env-safety.test.ts` | PASS: 1 file, 4 tests (elevated rerun required after sandbox startup `spawn EPERM`) |
 | `git diff --check` | PASS after removing extra trailing blank lines; Git reports only line-ending normalization warnings for three files. |
 
@@ -73,7 +94,7 @@ Baseline `npm test` had 320/321 tests pass; the import-boundary test timed out a
 
 - `supabase`, `psql` and `docker` were unavailable. `supabase test db`, ledger SQL triggers, deployed migration history, grants/RLS, two-session concurrent updates and backup/restore were not verified.
 - No Supabase project, provider credentials or authenticated browser session were used. Live provider entitlements, delayed/realtime semantics, current symbol coverage, candles, MFA assurance and API-to-DB operation remain NOT-VERIFIED.
-- Research promotion has no durable evidence-bound run pipeline. No effectiveness or out-of-sample success is claimed.
+- The research run/promotion workflow is implemented in source, but database execution and an eligible post-registration out-of-sample result have not been verified. No effectiveness or out-of-sample success is claimed.
 - No multi-replica scheduler test or provider-backed timing measurement was possible.
 - Frontend pages passed TypeScript/build/lint but received no authenticated browser smoke test.
 

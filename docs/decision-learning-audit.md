@@ -42,6 +42,12 @@ Final focused run: `npx vitest run src/lib/backend-api.test.ts backend/src/engin
 
 ## Follow-up concern work (2026-10-13)
 
+### Reliability follow-up (2026-10-13)
+
+- The previous remediation report's research status is superseded: this follow-up adds a provider-fetched chronological replay endpoint, immutable server-persisted run artifacts, forward holdout claims and a stored-evidence admin promotion gate. No successful promotion or learning effectiveness is claimed; local DB execution is unavailable.
+- Replay entries now pass paper sizing, spot-only, symbol/concurrency/daily caps, loss stops, drawdown and portfolio heat checks when no explicit test gate is supplied. This closes the former quantity-one approval fallback.
+- Added supported-flow regression tests for unavailable market, short-direction rejection and daily trade cap. Database pgTAP, hosted migration state, scheduler topology and authenticated provider-to-fill E2E are still NOT-VERIFIED. See `docs/VERIFICATION.md` for current command results.
+
 - Decision analysis now reports `marketBias` separately from setup detection, entry confirmation, risk capacity, and final action. A strategy signal alone can no longer produce BUY/SELL from the master decision endpoint; without a planner-validated setup and executor-confirmed closed-bar trigger, final action remains NO_TRADE and no entry/stop/target is published.
 - Candle boundary logic is shared with the browser. Dashboard initialization, Strategy Lab and backtesting now receive boundary-closed candles rather than dropping the last array row. The autonomy pipeline always rechecks the boundary; scheduler callers cannot bypass it. Paper plan execution also checks the candle boundary immediately before processing.
 - Replay order IDs now derive from dataset, plan and bar identity. Repeat-run tests compare the complete replay output for equality.

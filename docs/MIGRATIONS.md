@@ -24,3 +24,7 @@ Until that evidence is supplied, duplicates remain in place. Applying files thro
 ## Quantum paper core
 
 `supabase/migrations/20261015000000_quantum_paper_core.sql` is the new owner-applied migration, sequenced after `20261014000000_coach_daily_budget.sql`. It creates the append-only hash-chained decision ledger, event projections, schema check, and autopilot configuration. Do not enable autopilot until the owner has backed up account state, applied it, and verified it against the target project's history; no remote migration was run here. CI runs `npm run check:migration-versions` to reject duplicate numeric prefixes.
+
+## Immutable research replay
+
+`supabase/migrations/20261018000000_immutable_research_runs.sql` follows `20261017000000_health_empty_and_uncheckpointed_ledger.sql`. It adds append-only research evidence, database-enforced single use of an exact holdout interval, server-only run/promotion functions, and expands `verify_paper_schema()` to require the research objects. Apply it only after confirming all earlier migration IDs in the target project. Local PostgreSQL integration remains unverified until the pgTAP contract in `supabase/tests/research_governance.test.sql` runs against a disposable Supabase database.

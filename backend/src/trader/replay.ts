@@ -6,6 +6,7 @@ import { traderConfig } from './config';
 import { advanceTradePlan, type EntryGateResult } from './executor';
 import { managePaperPosition } from './manager';
 import type { TradePlan } from './types';
+import { calculatePositionSize, markToMarket } from './risk';
 
 export interface ReplayTrade {
   planId: string;
@@ -59,6 +60,8 @@ export function replayClosedCandles(input: {
   let replayAccount: PaperAccountState = { accountId: 'replay', cash: traderConfig.TRADER_STARTING_EQUITY, positions: [], trades: [] };
   const trades: ReplayTrade[] = [];
   const shadowSignals: ReplayResult['shadowSignals'] = [];
+  const entryReservations = new Map<string, string>();
+  const dailyEntries = new Map<string, number>();
   for (let index = 0; index < candles.length; index += 1) {
     const candle = candles[index]!;
     // Planner receives a copy ending at the current closed candle; it cannot read future bars.
@@ -70,12 +73,43 @@ export function replayClosedCandles(input: {
     }
     const nextPlans = [...plans];
     const openedOnBar = new Set<string>();
+    const dayKey = new Date(candle.time * 1000).toISOString().slice(0, 10);
+    const replayGate = (plan: TradePlan, price: number) => {
+      if (input.gate) return input.gate(plan, price);
+      if (plan.side !== 'long') return { approved: false, quantity: 0, reason: 'Replay paper account only supports long entries.' };
+      const otherReservations = [...entryReservations.entries()].filter(([planId]) => planId !== plan.id).map(([, symbol]) => symbol);
+      const occupied = [...positions.filter((position) => position.status === 'open').map((position) => position.symbol), ...otherReservations];
+      if (occupied.includes(plan.symbol)) return { approved: false, quantity: 0, reason: 'A paper position or pending entry is already reserved for this symbol.' };
+      if (positions.filter((position) => position.status === 'open').length + otherReservations.length >= traderConfig.MAX_CONCURRENT_POSITIONS) return { approved: false, quantity: 0, reason: 'Maximum concurrent paper positions reached.' };
+      if ((dailyEntries.get(dayKey) ?? 0) + otherReservations.length >= traderConfig.MAX_TRADES_PER_DAY) return { approved: false, quantity: 0, reason: 'Daily replay trade cap reached.' };
+      const marked = markToMarket(replayAccount, Object.fromEntries(positions.filter((position) => position.status === 'open').map((position) => [position.symbol, candle.close])));
+      if (marked.missingMarkSymbols.length) return { approved: false, quantity: 0, reason: 'Replay risk approval is missing current marks.' };
+      const dayStart = Date.parse(`${dayKey}T00:00:00.000Z`);
+      const weekStart = dayStart - ((new Date(dayStart).getUTCDay() + 6) % 7) * 86_400_000;
+      const dailyPnl = replayAccount.trades.filter((trade) => Date.parse(trade.closedAt) >= dayStart).reduce((sum, trade) => sum + trade.realizedPnl, 0);
+      const weeklyPnl = replayAccount.trades.filter((trade) => Date.parse(trade.closedAt) >= weekStart).reduce((sum, trade) => sum + trade.realizedPnl, 0);
+      if (dailyPnl <= -(marked.equity * traderConfig.DAILY_LOSS_STOP_PCT / 100)) return { approved: false, quantity: 0, reason: 'Daily replay loss limit reached.' };
+      if (weeklyPnl <= -(marked.equity * traderConfig.WEEKLY_LOSS_STOP_PCT / 100)) return { approved: false, quantity: 0, reason: 'Weekly replay loss limit reached.' };
+      if (marked.drawdownPct >= traderConfig.MAX_DRAWDOWN_PCT) return { approved: false, quantity: 0, reason: 'Replay maximum drawdown reached.' };
+      const sizing = calculatePositionSize({ equity: marked.equity, entry: price, invalidation: plan.invalidation,
+        cash: replayAccount.cash, grossExposure: marked.grossExposure,
+        symbolExposure: marked.positions.filter(({ position }) => position.symbol === plan.symbol).reduce((sum, item) => sum + item.currentPrice * item.position.quantity, 0) });
+      if (!sizing.accepted) return { approved: false, quantity: 0, reason: sizing.reason };
+      const openRisk = positions.filter((position) => position.status === 'open')
+        .reduce((sum, position) => sum + Math.max(0, (position.entryPrice - (position.stopLoss ?? position.entryPrice)) * position.quantity), 0);
+      const stopDistance = price - plan.invalidation;
+      const heatHeadroom = Math.max(0, marked.equity * traderConfig.MAX_PORTFOLIO_HEAT_PCT / 100 - openRisk);
+      const quantity = Math.min(sizing.quantity, heatHeadroom / stopDistance);
+      if (!Number.isFinite(quantity) || quantity <= 0) return { approved: false, quantity: 0, reason: 'Replay portfolio heat limit reached.' };
+      entryReservations.set(plan.id, plan.symbol);
+      return { approved: true, quantity };
+    };
     for (const [planIndex, plan] of plans.entries()) {
       if (!['WATCHING', 'ARMED', 'PENDING_ORDER'].includes(plan.status)) continue;
       const step = advanceTradePlan({
         plan, candle, previousCandle: candles[index - 1], recentCandles: candles.slice(Math.max(0, index - 20), index + 1),
         barIndex: index, timeframe: plan.triggerTimeframe ?? '15m', pendingOrder: pending.get(plan.id),
-        gate: (price) => input.gate?.(plan, price) ?? { approved: true, quantity: 1 },
+        gate: (price) => replayGate(plan, price),
         orderIdFactory: () => `replay-${createHash('sha256').update(`${input.datasetId}:${plan.id}:${index}`).digest('hex').slice(0, 32)}`,
       });
       nextPlans[planIndex] = step.plan;
@@ -97,8 +131,11 @@ export function replayClosedCandles(input: {
           const position = replayAccount.positions.at(-1)!;
           openedOnBar.add(position.id);
           positions.push(position);
+          entryReservations.delete(plan.id);
+          dailyEntries.set(dayKey, (dailyEntries.get(dayKey) ?? 0) + 1);
         }
       }
+      if (!['WATCHING', 'ARMED', 'PENDING_ORDER'].includes(step.plan.status)) entryReservations.delete(plan.id);
     }
     plans = nextPlans;
     const stillOpen: PaperPosition[] = [];

@@ -172,3 +172,22 @@ A PostgreSQL/Supabase RLS integration test was not run, so owner/admin/anon beha
 - `npm run typecheck`: **FAIL / BLOCKED** because this workspace's dependencies are incomplete (`react` and `lucide-react` are unavailable); no successful frontend typecheck was established.
 - `npm run backend:typecheck`: **FAIL / BLOCKED** because this workspace's dependencies are incomplete (`zod`, `fastify`, and `vitest` are unavailable). One surfaced diagnostics type mismatch was corrected; compilation remains unverified.
 - Phase 1 route/security tests were added but **NOT-VERIFIED** because Vitest cannot be loaded. Browser behavior, live Supabase schema, provider budget state, feed connectivity, and authenticated AAL2 re-verification remain **NOT-VERIFIED**.
+
+## Research and reliability follow-up — 2026-10-13
+
+This follow-up supersedes older research status claims above. It records source and automated-test state only; it does not imply database application or trading effectiveness.
+
+- Supported stored-plan regression tests cover unavailable markets, spot-only short rejection, daily trade caps and replay rejection of same-symbol competing plans. Full suite: **PASS**, `npm test` — 60 files, 339 tests.
+- Research now fetches provider-owned candles server-side, snapshots trigger/4h/1d series and provenance, replays chronologically with explicit fee/slippage, calculates untouched holdout metrics and seeded baselines, and persists evidence through service-only `record_research_run`. Admin promotion is gated by the stored server result. Research fixtures are synthetic and do not establish effectiveness.
+- The replay's former unconditional quantity-one gate is replaced with shared paper sizing plus spot-only, duplicate-symbol, concurrent-position and daily-entry gates. Focused replay/research/paper tests: **PASS**, 4 files, 19 tests.
+- `npm ci`: sandbox **FAIL** (`spawn EPERM`); elevated retry **PASS**, 370 packages installed; npm reported 8 advisories (2 moderate, 6 high).
+- `npm run typecheck`: **PASS**. `npm run backend:typecheck`: **PASS**. `npm run check:env`: **PASS**, 53 variables. `npm run check:migration-versions`: **PASS**, 42 unique migration files. `npm test`: **PASS**, 60 files / 339 tests. `npm run build`: sandbox **FAIL** (`esbuild` `spawn EPERM`); elevated retry **PASS**, 1,615 modules, with existing `App` chunk warning at 922.48 kB. `npm run lint`: first run **FAIL** for an unused test fixture constant; removed, final rerun pending. `git diff --check`: pending.
+- Research migration: `20261018000000_immutable_research_runs.sql`. The version checker caught and corrected an initial collision with `20261017000000_health_empty_and_uncheckpointed_ledger.sql`.
+- Local DB integration: **NOT-VERIFIED**. `supabase`, `psql`, and Docker are unavailable; pgTAP was not executed. No hosted database was contacted or modified. Migration SQL, RLS, idempotency, concurrency and promotion behavior remain unverified.
+- Scheduler topology: **NOT-VERIFIED**; owner is unsure whether multiple backend scheduler instances can run. No distributed lease was added without deployment evidence. One-worker ownership remains an operational assumption.
+- Authenticated UI/provider-to-paper-fill validation: **NOT-VERIFIED**. Automated fixtures do not replace an end-to-end paper account check.
+
+Follow-up began at `33cdfdf678a7416e203c123c4746317c82884c1f` with a clean worktree. No commit was created. Exact changed files are listed by final `git status --short`.
+
+
+Correction to the verification summary above: final `npm run lint` and `git diff --check` **PASS** (only line-ending normalization warnings). The isolated full `npm test` rerun **PASS**, 60 files / 339 tests; the parallel run's sole 5-second timeout was the import-boundary test. Final backend typecheck, focused 4-file / 19-test run, and unique migration version check also passed after the replay risk-gate update.

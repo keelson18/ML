@@ -31,6 +31,13 @@ function freshestClosedCandle(candles: Candle[], timeframe: Timeframe, stale: bo
   return now - closeTime <= maximumAgeMs ? closed : undefined;
 }
 
+async function activePromotedSetups(): Promise<Set<string>> {
+  if (process.env.NODE_ENV === 'test') return new Set(traderConfig.PROMOTED_SETUP_TYPES);
+  const { data, error } = await getSupabaseClient().from('strategy_promotions').select('setup_type').eq('status', 'active');
+  if (error || !data) throw new Error('Could not verify stored strategy promotion evidence; entries are blocked.');
+  return new Set(data.map((row) => String(row.setup_type)));
+}
+
 interface LoadedAccount {
   account: PaperAccountState;
   version: number;
@@ -106,6 +113,8 @@ export async function advanceStoredTradePlans(input: {
   if (!isClosed(input.candle, input.timeframe, Date.now(), traderConfig.CLOSE_GRACE_MS)) {
     throw new Error('Paper execution requires a boundary-verified closed candle.');
   }
+  const isShadow = input.shadowMode ?? traderConfig.SHADOW_MODE_ENABLED;
+  const promotedSetups = isShadow ? new Set<string>() : await activePromotedSetups();
   const eventRisk = await getEventRiskStatus(input.symbol);
   const riskMarks: Record<string, number> = { [input.symbol]: input.candle.close };
   const observedAccount = await getAccount(input.accountId);
@@ -139,8 +148,6 @@ export async function advanceStoredTradePlans(input: {
     const barIndex = candleIndex(input.timeframe, input.candle.time);
     const plans = [...(account.tradePlans ?? [])];
     const pendingOrders = [...(account.pendingPaperOrders ?? [])];
-    const isShadow = input.shadowMode ?? traderConfig.SHADOW_MODE_ENABLED;
-
     for (let index = 0; index < plans.length; index += 1) {
       const plan = plans[index]!;
       if (plan.symbol !== input.symbol || (plan.triggerTimeframe ?? traderConfig.TRIGGER_TIMEFRAMES[0]) !== input.timeframe || !['WATCHING', 'ARMED', 'PENDING_ORDER'].includes(plan.status)) continue;
@@ -154,7 +161,7 @@ export async function advanceStoredTradePlans(input: {
         if (!market?.isActive || market.priceCurrency !== 'USD' || availability !== 'available') return gateResult = { approved: false, quantity: 0, reason: availability === 'unavailable' ? 'Market is unavailable from the configured provider.' : availability === 'unverified' ? 'Market availability is unverified; entry is blocked.' : 'Market is inactive or not USD quoted.' };
         if (plan.side !== 'long') return gateResult = { approved: false, quantity: 0, reason: 'Spot paper accounts only support long entries.' };
         if (!traderConfig.ALLOWED_GRADES.includes(plan.grade) || !traderConfig.ALLOWED_SETUP_TYPES.includes(plan.setupType)) return gateResult = { approved: false, quantity: 0, reason: 'Setup grade or type is not enabled.' };
-        if (!isShadow && !traderConfig.PROMOTED_SETUP_TYPES.includes(plan.setupType)) return gateResult = { approved: false, quantity: 0, reason: 'Setup has not passed the forward-evidence promotion gate.' };
+        if (!isShadow && !promotedSetups.has(plan.setupType)) return gateResult = { approved: false, quantity: 0, reason: 'Setup has not passed the server-validated research promotion gate.' };
         const target = plan.targets[0]?.price;
         const stopDistance = entryPrice - plan.invalidation;
         if (!target || stopDistance <= 0 || (target - entryPrice) / stopDistance < Math.max(traderConfig.MIN_RR, plan.minRR)) return gateResult = { approved: false, quantity: 0, reason: 'Plan risk/reward is below the configured minimum.' };

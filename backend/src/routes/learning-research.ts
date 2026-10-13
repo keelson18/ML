@@ -1,6 +1,16 @@
 import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
-import { getSupabaseClientWithToken } from '../db';
+import { getSupabaseClient, getSupabaseClientWithToken } from '../db';
+import { TIMEFRAMES, type Timeframe } from '../../../src/lib/types';
+import { getMarket } from '../../../src/lib/markets';
+import { fetchMarketData } from '../services/marketDataService';
+import { selectClosedCandles } from '../trader/candle-math';
+import { runResearchReplay } from '../trader/research-run';
+import { traderConfig } from '../trader/config';
+import { SETUP_TYPES } from '../trader/constants';
+import { config } from '../config';
+import { candleSeconds } from '../trader/candle-math';
+import { createHash } from 'node:crypto';
 
 const learningEventSchema = z.object({
   sourceType: z.enum(['paper_trade', 'research', 'risk_event', 'data_quality']),
@@ -14,12 +24,20 @@ const researchExperimentSchema = z.object({
   hypothesis: z.string().trim().min(1).max(2_000),
   datasetId: z.string().trim().min(1).max(500),
   parameters: z.object({
+    setupType: z.enum(SETUP_TYPES).default(SETUP_TYPES[0]),
     trainingEndIndex: z.number().int().nonnegative(),
     testStartIndex: z.number().int().nonnegative(),
     transactionCostRate: z.number().finite().nonnegative().max(1),
     slippageRate: z.number().finite().nonnegative().max(1),
   }).strict(),
 }).strict();
+
+const runResearchSchema = z.object({
+  symbol: z.string().trim().min(3).max(30),
+  timeframe: z.enum(TIMEFRAMES.map((timeframe) => timeframe.value) as [Timeframe, ...Timeframe[]]),
+  historyLimit: z.number().int().min(200).max(1000).default(1000),
+}).strict();
+const promoteResearchSchema = z.object({ runId: z.string().uuid() }).strict();
 
 function observationContainsSensitiveKey(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(observationContainsSensitiveKey);
@@ -82,6 +100,98 @@ export async function learningResearchRoutes(app: FastifyInstance) {
     } catch {
       request.log.warn({ userId: request.authenticatedUserId }, 'Research experiment persistence failed');
       return reply.code(503).send({ error: 'Research experiment persistence is temporarily unavailable.' });
+    }
+  });
+
+  app.post<{ Params: { id: string } }>('/api/v1/research/experiments/:id/run', { preHandler: app.requireAuth }, async (request, reply) => {
+    if (!request.authenticatedUserId || !request.accessToken) return reply.code(401).send({ error: 'Authentication required.' });
+    const experimentId = z.string().uuid().safeParse(request.params.id);
+    const parsed = runResearchSchema.safeParse(request.body);
+    if (!experimentId.success || !parsed.success) return reply.code(400).send({ error: 'Invalid research run request.' });
+    const market = getMarket(parsed.data.symbol);
+    if (!market?.isActive || market.priceCurrency !== 'USD') return reply.code(400).send({ error: 'Research supports only active USD markets.' });
+    try {
+      const ownerClient = getSupabaseClientWithToken(request.accessToken);
+      const { data: experiment, error: experimentError } = await ownerClient.from('research_experiments')
+        .select('id,user_id,name,hypothesis,status,created_at,parameters')
+        .eq('id', experimentId.data).eq('user_id', request.authenticatedUserId).maybeSingle();
+      if (experimentError || !experiment) return reply.code(404).send({ error: 'Research experiment was not found.' });
+      if (!['draft', 'completed'].includes(experiment.status)) return reply.code(409).send({ error: 'Only a draft experiment or an identical persisted run can be evaluated.' });
+      const parameters = experiment.parameters as { trainingEndIndex?: number; testStartIndex?: number; transactionCostRate?: number; slippageRate?: number };
+      if (!Number.isInteger(parameters.trainingEndIndex) || !Number.isInteger(parameters.testStartIndex)
+        || !Number.isFinite(parameters.transactionCostRate) || !Number.isFinite(parameters.slippageRate)) {
+        return reply.code(400).send({ error: 'Experiment split and cost parameters are incomplete.' });
+      }
+      const triggerTimeframe = parsed.data.timeframe;
+      const timeframes = [...new Set<Timeframe>([triggerTimeframe, '4h', '1d'])];
+      const fetched = await Promise.all(timeframes.map((timeframe) => fetchMarketData(parsed.data.symbol, timeframe, parsed.data.historyLimit)));
+      if (fetched.some((series) => series.stale)) return reply.code(503).send({ error: 'Research requires a fresh provider response; stale cache data cannot be used.' });
+      const now = Date.now();
+      const snapshots = fetched.map((series) => ({
+        timeframe: series.timeframe,
+        provider: series.dataset.provider,
+        dataVersion: series.dataset.dataVersion,
+        fetchedAt: series.fetchedAt,
+        candles: selectClosedCandles(series.candles, series.timeframe, now, traderConfig.CLOSE_GRACE_MS),
+      }));
+      if (snapshots.some((series) => {
+        const latest = series.candles.at(-1);
+        if (!latest) return true;
+        const closeTime = (latest.time + candleSeconds(series.timeframe, latest.time)) * 1000;
+        const maximumAge = candleSeconds(series.timeframe, latest.time) * 1000 * config.marketDataMaxStaleTtlMultiplier;
+        return now - closeTime > maximumAge;
+      })) return reply.code(503).send({ error: 'Research requires recent closed provider candles for every requested timeframe.' });
+      const revision = process.env.APP_REVISION ?? 'unknown';
+      const artifact = runResearchReplay({
+        symbol: parsed.data.symbol,
+        triggerTimeframe,
+        series: snapshots,
+        trainingEndIndex: parameters.trainingEndIndex!,
+        testStartIndex: parameters.testStartIndex!,
+        experimentCreatedAt: experiment.created_at,
+        feeRate: parameters.transactionCostRate!,
+        slippageRate: parameters.slippageRate!,
+        codeRevision: revision,
+      });
+      const runVersion = createHash('sha256').update(JSON.stringify({ experimentId: experiment.id, datasetId: artifact.datasetId, configHash: artifact.configHash, codeRevision: artifact.codeRevision })).digest('hex');
+      const service = getSupabaseClient();
+      const { data: runId, error: persistError } = await service.rpc('record_research_run', {
+        p_experiment_id: experiment.id,
+        p_user_id: request.authenticatedUserId,
+        p_run_version: runVersion,
+        p_seed: traderConfig.RESEARCH_RANDOM_SEED,
+        p_configuration: { symbol: parsed.data.symbol, triggerTimeframe, historyLimit: parsed.data.historyLimit, parameters, codeRevision: artifact.codeRevision, pipelineVersion: artifact.pipelineVersion, datasetVersions: artifact.datasetVersions },
+        p_metrics: { ...artifact.metrics, validation: artifact.validation, datasetId: artifact.datasetId, configHash: artifact.configHash },
+        p_artifacts: artifact,
+        p_conclusion: artifact.validation.passed ? 'Server-side chronological replay passed configured evidence checks.' : `Not validated: ${artifact.validation.reasons.join(' ')}`,
+      });
+      if (persistError || typeof runId !== 'string') throw new Error('Research run persistence failed.');
+      return reply.code(201).send({ runId, runVersion, datasetId: artifact.datasetId, metrics: artifact.metrics, validation: artifact.validation });
+    } catch (error) {
+      request.log.warn({ userId: request.authenticatedUserId, reason: error instanceof Error ? error.message : 'unknown' }, 'Research replay failed');
+      return reply.code(503).send({ error: 'Research replay could not be completed or persisted.' });
+    }
+  });
+
+  app.post<{ Params: { id: string } }>('/api/v1/admin/research/experiments/:id/promote', { preHandler: app.requireAdmin }, async (request, reply) => {
+    const experimentId = z.string().uuid().safeParse(request.params.id);
+    const parsed = promoteResearchSchema.safeParse(request.body);
+    if (!experimentId.success || !parsed.success) return reply.code(400).send({ error: 'Invalid research promotion request.' });
+    if (!request.authenticatedUserId) return reply.code(401).send({ error: 'Authentication required.' });
+    try {
+      const { error } = await getSupabaseClient().rpc('approve_research_strategy', {
+        p_experiment_id: experimentId.data,
+        p_run_id: parsed.data.runId,
+        p_reviewer_id: request.authenticatedUserId,
+      });
+      if (error) {
+        request.log.warn({ code: error.code, userId: request.authenticatedUserId }, 'Research strategy promotion rejected');
+        return reply.code(error.code === '42501' ? 403 : error.code === '23514' ? 409 : 503)
+          .send({ error: error.code === '23514' ? 'Stored research evidence has not passed the server promotion gates.' : 'Research promotion was rejected.' });
+      }
+      return { promoted: true };
+    } catch {
+      return reply.code(503).send({ error: 'Research promotion is temporarily unavailable.' });
     }
   });
 }

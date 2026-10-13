@@ -48,6 +48,17 @@ describe('shared replay core', () => {
     expect(results.doubledSlippage.trades[0]!.slippage).toBeGreaterThan(results.base.trades[0]!.slippage);
   });
 
+  it('applies the supported paper risk gate by default instead of accepting every replay entry', () => {
+    const second = { ...plan, id: 'second-plan' };
+    const result = replayClosedCandles({
+      candles: [bar(900), bar(1800), bar(2700, { open: 101, high: 105, low: 101, close: 104 })],
+      datasetId: 'default-gate', shadowMode: false,
+      plansAt: (_history, index) => index === 0 ? [plan, second] : [],
+    });
+    expect(result.finalPlans.filter((candidate) => candidate.status === 'OPEN')).toHaveLength(1);
+    expect(result.trades).toHaveLength(0);
+  });
+
   it('rejects nonchronological candles and builds strictly ordered walk-forward folds', () => {
     expect(() => replayClosedCandles({ candles: [bar(2), bar(1)], datasetId: 'bad' })).toThrow('strictly chronological');
     const folds = walkForward({ observations: Array.from({ length: 10 }, (_, index) => index), trainSize: 4, validationSize: 2, testSize: 2 });

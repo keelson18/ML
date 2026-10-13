@@ -9,11 +9,13 @@ select required.object_type, required.object_name,
 from (values
   ('table','paper_sim_accounts'), ('table','decision_ledger'), ('table','paper_fills'),
   ('table','shadow_trades'), ('table','paper_autopilot'), ('table','autopilot_settings'),
-  ('table','paper_ledger_verification_checkpoints'),
+  ('table','paper_ledger_verification_checkpoints'), ('table','research_experiments'),
+  ('table','research_runs'), ('table','research_results'), ('table','research_holdout_claims'), ('table','strategy_promotions'),
   ('rpc','record_paper_account_update'), ('rpc','set_paper_autopilot'),
   ('rpc','list_enabled_paper_autopilots'), ('rpc','pause_paper_autopilot'),
   ('rpc','resume_paper_autopilot'), ('rpc','touch_paper_autopilot_run'), ('rpc','get_paper_autopilot_limits'),
   ('rpc','paper_ledger_health'), ('rpc','paper_accounting_health'), ('rpc','admin_reverify_paper_ledger'),
-  ('rpc','admin_record_access_denial'), ('rpc','admin_record_health_audit'), ('rpc','verify_decision_ledger')
+  ('rpc','admin_record_access_denial'), ('rpc','admin_record_health_audit'), ('rpc','verify_decision_ledger'),
+  ('rpc','record_research_run'), ('rpc','approve_research_strategy')
 ) as required(object_type, object_name)
 order by object_type, object_name;
