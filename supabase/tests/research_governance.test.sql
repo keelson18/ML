@@ -1,7 +1,8 @@
 begin;
-select plan(11);
+select plan(12);
 
 select has_table('public', 'research_holdout_claims', 'holdout claims prevent repeated tuning on the same chronological test period');
+select has_table('public', 'research_approvals', 'administrator approval decisions are persisted for audit');
 select has_table('public', 'strategy_promotions', 'active strategies retain a database reference to their validated run');
 select ok(to_regprocedure('public.record_research_run(uuid,uuid,text,bigint,jsonb,jsonb,jsonb,text)') is not null,
   'research results are persisted through the server-only transaction function');

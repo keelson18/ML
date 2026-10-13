@@ -215,7 +215,7 @@ DECLARE
   required_tables text[] := ARRAY[
     'paper_sim_accounts','decision_ledger','paper_fills','shadow_trades','paper_autopilot',
     'autopilot_settings','paper_ledger_verification_checkpoints','research_experiments',
-    'research_runs','research_results','research_holdout_claims','strategy_promotions'
+    'research_runs','research_results','research_approvals','research_holdout_claims','strategy_promotions'
   ];
   required_rpcs text[] := ARRAY[
     'record_paper_account_update','set_paper_autopilot','list_enabled_paper_autopilots',

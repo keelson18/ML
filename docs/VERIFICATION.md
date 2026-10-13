@@ -191,3 +191,5 @@ Follow-up began at `33cdfdf678a7416e203c123c4746317c82884c1f` with a clean workt
 
 
 Correction to the verification summary above: final `npm run lint` and `git diff --check` **PASS** (only line-ending normalization warnings). The isolated full `npm test` rerun **PASS**, 60 files / 339 tests; the parallel run's sole 5-second timeout was the import-boundary test. Final backend typecheck, focused 4-file / 19-test run, and unique migration version check also passed after the replay risk-gate update.
+
+Local database retry details: sandbox `npx supabase test db` could not fetch the CLI because npm cache-only mode had no cached package. Elevated `npx --yes supabase test db` ran the CLI but failed to connect to local PostgreSQL at `127.0.0.1:54322` (`ECONNREFUSED`). Elevated `npx --yes supabase start` confirmed the blocker: `docker: command not found (podman also not found)`. The research pgTAP contract and migrations therefore still have **NOT-VERIFIED** execution status. The schema verifier and operator inventory now also require `research_approvals`, which the promotion RPC writes.
