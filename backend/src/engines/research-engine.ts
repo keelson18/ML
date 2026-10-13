@@ -8,6 +8,7 @@ export interface ResearchContext extends EngineContext {
   signalFn: (candles: Candle[]) => Signal[];
   trainingEndIndex: number;
   testStartIndex: number;
+  testStartTime?: number;
   transactionCostRate: number;
   slippageRate: number;
 }

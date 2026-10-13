@@ -27,8 +27,7 @@ export async function persistResearchExperiment(context: ResearchContext, userId
       hypothesis: `Research experiment ${context.experimentVersion}`,
       datasetId: context.datasetId,
       parameters: {
-        trainingEndIndex: context.trainingEndIndex,
-        testStartIndex: context.testStartIndex,
+        testStartTime: context.testStartTime ?? Math.ceil(Date.now() / 1000) + 120,
         transactionCostRate: context.transactionCostRate,
         slippageRate: context.slippageRate,
       },

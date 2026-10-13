@@ -25,8 +25,8 @@ const researchExperimentSchema = z.object({
   datasetId: z.string().trim().min(1).max(500),
   parameters: z.object({
     setupType: z.enum(SETUP_TYPES).default(SETUP_TYPES[0]),
-    trainingEndIndex: z.number().int().nonnegative(),
-    testStartIndex: z.number().int().nonnegative(),
+    testStartTime: z.number().int().positive().refine((value) => value * 1000 > Date.now() + 30_000,
+      'The untouched test interval must be registered before its start time.'),
     transactionCostRate: z.number().finite().nonnegative().max(1),
     slippageRate: z.number().finite().nonnegative().max(1),
   }).strict(),
@@ -117,12 +117,18 @@ export async function learningResearchRoutes(app: FastifyInstance) {
         .eq('id', experimentId.data).eq('user_id', request.authenticatedUserId).maybeSingle();
       if (experimentError || !experiment) return reply.code(404).send({ error: 'Research experiment was not found.' });
       if (!['draft', 'completed'].includes(experiment.status)) return reply.code(409).send({ error: 'Only a draft experiment or an identical persisted run can be evaluated.' });
-      const parameters = experiment.parameters as { trainingEndIndex?: number; testStartIndex?: number; transactionCostRate?: number; slippageRate?: number };
-      if (!Number.isInteger(parameters.trainingEndIndex) || !Number.isInteger(parameters.testStartIndex)
-        || !Number.isFinite(parameters.transactionCostRate) || !Number.isFinite(parameters.slippageRate)) {
-        return reply.code(400).send({ error: 'Experiment split and cost parameters are incomplete.' });
+      const parameters = experiment.parameters as { testStartTime?: number; transactionCostRate?: number; slippageRate?: number };
+      if (!Number.isInteger(parameters.testStartTime)
+        || !Number.isFinite(parameters.transactionCostRate) || parameters.transactionCostRate! < 0 || parameters.transactionCostRate! >= 1
+        || !Number.isFinite(parameters.slippageRate) || parameters.slippageRate! < 0 || parameters.slippageRate! >= 1
+        || parameters.testStartTime! * 1000 <= Date.parse(experiment.created_at)) {
+        return reply.code(400).send({ error: 'Experiment must contain a future registered holdout start and fixed cost assumptions.' });
       }
       const triggerTimeframe = parsed.data.timeframe;
+      const minimumForwardBars = Math.ceil(traderConfig.MIN_FORWARD_DAYS * 86_400 / candleSeconds(triggerTimeframe, parameters.testStartTime!));
+      if (minimumForwardBars + 2 > parsed.data.historyLimit) {
+        return reply.code(422).send({ error: `This timeframe needs at least ${minimumForwardBars + 2} history bars to preserve the configured ${traderConfig.MIN_FORWARD_DAYS}-day holdout and training context.` });
+      }
       const timeframes = [...new Set<Timeframe>([triggerTimeframe, '4h', '1d'])];
       const fetched = await Promise.all(timeframes.map((timeframe) => fetchMarketData(parsed.data.symbol, timeframe, parsed.data.historyLimit)));
       if (fetched.some((series) => series.stale)) return reply.code(503).send({ error: 'Research requires a fresh provider response; stale cache data cannot be used.' });
@@ -141,18 +147,33 @@ export async function learningResearchRoutes(app: FastifyInstance) {
         const maximumAge = candleSeconds(series.timeframe, latest.time) * 1000 * config.marketDataMaxStaleTtlMultiplier;
         return now - closeTime > maximumAge;
       })) return reply.code(503).send({ error: 'Research requires recent closed provider candles for every requested timeframe.' });
+      const triggerCandles = snapshots.find((series) => series.timeframe === triggerTimeframe)?.candles ?? [];
+      if (triggerCandles[0] && triggerCandles[0].time * 1000 > parameters.testStartTime! * 1000) {
+        return reply.code(422).send({ error: 'The registered holdout start is outside the provider history window; register a new future holdout before collecting evidence.' });
+      }
+      const testStartIndex = triggerCandles.findIndex((candle) => candle.time >= parameters.testStartTime!);
+      if (testStartIndex < 0) {
+        return reply.code(202).send({ state: 'collecting', testStartTime: parameters.testStartTime, collectedDays: 0, collectedTrades: 0,
+          requiredDays: traderConfig.MIN_FORWARD_DAYS, requiredTrades: traderConfig.MIN_FORWARD_TRADES });
+      }
+      if (testStartIndex < 2) return reply.code(422).send({ error: 'Provider history does not contain enough pre-registration training candles.' });
       const revision = process.env.APP_REVISION ?? 'unknown';
       const artifact = runResearchReplay({
         symbol: parsed.data.symbol,
         triggerTimeframe,
         series: snapshots,
-        trainingEndIndex: parameters.trainingEndIndex!,
-        testStartIndex: parameters.testStartIndex!,
+        trainingEndIndex: testStartIndex - 1,
+        testStartIndex,
         experimentCreatedAt: experiment.created_at,
         feeRate: parameters.transactionCostRate!,
         slippageRate: parameters.slippageRate!,
         codeRevision: revision,
       });
+      if (artifact.metrics.testDays < traderConfig.MIN_FORWARD_DAYS || artifact.metrics.tradeCount < traderConfig.MIN_FORWARD_TRADES) {
+        return reply.code(202).send({ state: 'collecting', collectedDays: artifact.metrics.testDays,
+          requiredDays: traderConfig.MIN_FORWARD_DAYS, tradeThresholdMet: artifact.metrics.tradeCount >= traderConfig.MIN_FORWARD_TRADES,
+          message: 'The fixed holdout is collecting forward candles. No run or holdout claim is persisted until the evidence window and trade minimum are reached.' });
+      }
       const runVersion = createHash('sha256').update(JSON.stringify({ experimentId: experiment.id, datasetId: artifact.datasetId, configHash: artifact.configHash, codeRevision: artifact.codeRevision })).digest('hex');
       const service = getSupabaseClient();
       const { data: runId, error: persistError } = await service.rpc('record_research_run', {

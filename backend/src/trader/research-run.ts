@@ -51,7 +51,7 @@ function hash(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
-function summarize(result: ReplayResult, testStartIndex: number, bars: Candle[]) {
+function summarize(result: ReplayResult, testStartIndex: number, bars: Candle[], timeframe: Timeframe) {
   const trades = result.trades;
   const rs = trades.map((trade) => trade.rMultipleAfterCosts).filter(Number.isFinite);
   const winners = rs.filter((value) => value > 0).reduce((sum, value) => sum + value, 0);
@@ -65,7 +65,8 @@ function summarize(result: ReplayResult, testStartIndex: number, bars: Candle[])
     maxDrawdownR = Math.max(maxDrawdownR, peak - cumulative);
   }
   const testStart = bars[testStartIndex]?.time;
-  const testEnd = bars.at(-1)?.time;
+  const lastBar = bars.at(-1);
+  const testEnd = lastBar ? lastBar.time + candleSeconds(timeframe, lastBar.time) : undefined;
   const testDays = testStart !== undefined && testEnd !== undefined ? Math.max(0, (testEnd - testStart) / 86_400) : 0;
   return {
     barsProcessed: bars.length - testStartIndex,
@@ -157,7 +158,7 @@ export function runResearchReplay(input: ResearchRunInput): ResearchRunArtifact 
     candles: bars,
     plansAt: plannerAt(input.testStartIndex, bars.length - 1),
   });
-  const metrics = summarize(replay, input.testStartIndex, bars);
+  const metrics = summarize(replay, input.testStartIndex, bars, input.triggerTimeframe);
   const trainingDurations = trainingReplay.trades.map((trade) => Math.max(1,
     Math.round((trade.exitTime - trade.entryTime) / candleSeconds(input.triggerTimeframe, trade.entryTime))));
   const randomHoldingBars = trainingDurations.length
@@ -173,12 +174,14 @@ export function runResearchReplay(input: ResearchRunInput): ResearchRunArtifact 
       / (firstHoldBar.open * traderConfig.RISK_PER_TRADE_PCT / 100)
     : null;
   const experimentCreated = Date.parse(input.experimentCreatedAt);
-  const trainingEndTime = bars[input.trainingEndIndex]?.time;
+  const trainingEndBar = bars[input.trainingEndIndex];
+  const trainingEndTime = trainingEndBar ? trainingEndBar.time + candleSeconds(input.triggerTimeframe, trainingEndBar.time) : undefined;
   const testStartTime = bars[input.testStartIndex]?.time;
-  const testEndTime = bars.at(-1)?.time;
+  const lastBar = bars.at(-1);
+  const testEndTime = lastBar ? lastBar.time + candleSeconds(input.triggerTimeframe, lastBar.time) : undefined;
   if (!Number.isFinite(experimentCreated) || trainingEndTime === undefined || testStartTime === undefined || testEndTime === undefined) throw new Error('Research experiment dates are invalid.');
   const reasons = [
-    ...(trainingEndTime >= testStartTime ? ['Training and test periods overlap.'] : []),
+    ...(trainingEndTime > testStartTime ? ['Training and test periods overlap.'] : []),
     ...(testStartTime * 1000 <= experimentCreated ? ['The untouched test period predates experiment registration and is historical, not forward evidence.'] : []),
     ...(metrics.tradeCount < traderConfig.MIN_FORWARD_TRADES ? [`Test trade count is below ${traderConfig.MIN_FORWARD_TRADES}.`] : []),
     ...(metrics.testDays < traderConfig.MIN_FORWARD_DAYS ? [`Test period is shorter than ${traderConfig.MIN_FORWARD_DAYS} days.`] : []),

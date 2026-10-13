@@ -28,3 +28,7 @@ Until that evidence is supplied, duplicates remain in place. Applying files thro
 ## Immutable research replay
 
 `supabase/migrations/20261018000000_immutable_research_runs.sql` follows `20261017000000_health_empty_and_uncheckpointed_ledger.sql`. It adds append-only research evidence, database-enforced single use of an exact holdout interval, server-only run/promotion functions, and expands `verify_paper_schema()` to require the research objects. Apply it only after confirming all earlier migration IDs in the target project. Local PostgreSQL integration remains unverified until the pgTAP contract in `supabase/tests/research_governance.test.sql` runs against a disposable Supabase database.
+
+`supabase/migrations/20261019000000_reject_overlapping_research_holdouts.sql` adds a BEFORE INSERT trigger that locks by symbol/timeframe and rejects any intersecting `[start, end)` holdout range. The trigger preserves existing rows and permits adjacent non-overlapping intervals. Its concurrency harness is `scripts/test-research-holdout-concurrency.mjs`; run it against local Supabase only after `supabase start`. It explicitly refuses non-local hosts.
+
+`supabase/migrations/20261020000000_research_holdout_registration_window.sql` locks each draft's research split to a future test start recorded at experiment creation. Repeated requests return collecting status until the configured forward duration and trade-count minima are present; they do not complete the draft or persist partial outcome snapshots.

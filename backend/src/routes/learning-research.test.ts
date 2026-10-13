@@ -1,6 +1,7 @@
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { learningResearchRoutes } from './learning-research';
+import { traderConfig } from '../trader/config';
 
 const dbMocks = vi.hoisted(() => ({ getSupabaseClient: vi.fn(), getSupabaseClientWithToken: vi.fn() }));
 const marketMocks = vi.hoisted(() => ({ fetchMarketData: vi.fn() }));
@@ -76,7 +77,7 @@ describe('learning and research persistence routes', () => {
       method: 'POST', url: '/api/v1/research/experiments', headers: { authorization: 'Bearer session-token' },
       payload: {
         name: 'test-run', hypothesis: 'Test the setup', datasetId: 'provider:dataset-v1',
-        parameters: { trainingEndIndex: 30, testStartIndex: 30, transactionCostRate: 0.001, slippageRate: 0.001 },
+        parameters: { testStartTime: Math.ceil(Date.now() / 1000) + 120, transactionCostRate: 0.001, slippageRate: 0.001 },
       },
     });
     expect(response.statusCode).toBe(201);
@@ -84,41 +85,129 @@ describe('learning and research persistence routes', () => {
     await app.close();
   });
 
-  it('runs only server-fetched candles and persists the immutable replay artifact', async () => {
+  it('rejects a historical holdout boundary at experiment registration', async () => {
+    const app = await createApp();
+    const response = await app.inject({
+      method: 'POST', url: '/api/v1/research/experiments', headers: { authorization: 'Bearer session-token' },
+      payload: { name: 'historical', hypothesis: 'No leakage', datasetId: 'old', parameters: {
+        testStartTime: 1, transactionCostRate: 0.001, slippageRate: 0.001,
+      } },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(insert).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('refuses a trigger timeframe whose bounded provider history cannot hold the full forward window', async () => {
+    const query = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: {
+        id: TEST_ID, user_id: 'authenticated-user', name: 'too-short', hypothesis: 'test', status: 'draft',
+        created_at: new Date(Date.now() - 60_000).toISOString(),
+        parameters: { testStartTime: Math.ceil(Date.now() / 1000) + 120, transactionCostRate: 0.001, slippageRate: 0.0005 },
+      }, error: null }),
+    };
+    dbMocks.getSupabaseClientWithToken.mockReturnValue({ from: vi.fn().mockReturnValue(query) });
+    const app = await createApp();
+    const response = await app.inject({
+      method: 'POST', url: `/api/v1/research/experiments/${TEST_ID}/run`, headers: { authorization: 'Bearer session-token' },
+      payload: { symbol: 'BTCUSD', timeframe: '15m', historyLimit: 1000 },
+    });
+    expect(response.statusCode).toBe(422);
+    expect(marketMocks.fetchMarketData).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('collects future holdout candles over time without persisting an underpowered run', async () => {
+    const timeframe = '4h' as const;
+    const step = 14_400;
+    const latest = Math.floor(Date.now() / 1000 / step) * step - step * 2;
+    const testStartTime = latest - 20 * step;
+    const query = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: {
+        id: TEST_ID, user_id: 'authenticated-user', name: 'forward-run', hypothesis: 'test', status: 'draft',
+        created_at: new Date((testStartTime - 86_400) * 1000).toISOString(),
+        parameters: { setupType: 'trend-pullback', testStartTime, transactionCostRate: 0.001, slippageRate: 0.0005 },
+      }, error: null }),
+    };
+    dbMocks.getSupabaseClientWithToken.mockReturnValue({ from: vi.fn().mockReturnValue(query) });
+    const serviceRpc = vi.fn();
+    dbMocks.getSupabaseClient.mockReturnValue({ rpc: serviceRpc });
+    marketMocks.fetchMarketData.mockImplementation(async (_symbol: string, requestedTimeframe: '4h' | '1d') => {
+      const count = requestedTimeframe === '4h' ? 700 : 120;
+      const interval = requestedTimeframe === '4h' ? step : 86_400;
+      const end = Math.floor(Date.now() / 1000 / interval) * interval - interval * 2;
+      const candles = Array.from({ length: count }, (_, index) => {
+        const close = 100 + index * 0.01;
+        return { time: end - (count - index - 1) * interval, open: close - 0.01, high: close + 0.1, low: close - 0.1, close, volume: 100 + index };
+      });
+      return { timeframe: requestedTimeframe, candles, stale: false, fetchedAt: Date.now(),
+        dataset: { provider: 'unit-fixture', dataVersion: `${requestedTimeframe}-v1` } };
+    });
+    const app = await createApp();
+    const oldRevision = process.env.APP_REVISION;
+    process.env.APP_REVISION = 'test-revision';
+    try {
+      const response = await app.inject({
+        method: 'POST', url: `/api/v1/research/experiments/${TEST_ID}/run`, headers: { authorization: 'Bearer session-token' },
+        payload: { symbol: 'BTCUSD', timeframe, historyLimit: 700 },
+      });
+      expect(response.statusCode).toBe(202);
+      expect(response.json()).toMatchObject({ state: 'collecting', requiredDays: traderConfig.MIN_FORWARD_DAYS, tradeThresholdMet: false });
+      expect(response.json()).not.toHaveProperty('metrics');
+      expect(serviceRpc).not.toHaveBeenCalled();
+    } finally {
+      if (oldRevision === undefined) delete process.env.APP_REVISION;
+      else process.env.APP_REVISION = oldRevision;
+      await app.close();
+    }
+  });
+
+  it('persists an immutable artifact only after configured evidence thresholds are reached', async () => {
+    const timeframe = '4h' as const;
+    const step = 14_400;
+    const latest = Math.floor(Date.now() / 1000 / step) * step - step * 2;
+    const testStartTime = latest - 20 * step;
     const query = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
       maybeSingle: vi.fn().mockResolvedValue({ data: {
         id: TEST_ID, user_id: 'authenticated-user', name: 'test-run', hypothesis: 'test', status: 'draft',
-        created_at: '2026-01-01T00:00:00.000Z',
-        parameters: { setupType: 'trend-pullback', trainingEndIndex: 100, testStartIndex: 120, transactionCostRate: 0.001, slippageRate: 0.0005 },
+        created_at: new Date((testStartTime - 86_400) * 1000).toISOString(),
+        parameters: { setupType: 'trend-pullback', testStartTime, transactionCostRate: 0.001, slippageRate: 0.0005 },
       }, error: null }),
     };
     dbMocks.getSupabaseClientWithToken.mockReturnValue({ from: vi.fn().mockReturnValue(query) });
     const serviceRpc = vi.fn().mockResolvedValue({ data: TEST_ID, error: null });
     dbMocks.getSupabaseClient.mockReturnValue({ rpc: serviceRpc });
-    marketMocks.fetchMarketData.mockImplementation(async (_symbol: string, timeframe: '15m' | '4h' | '1d') => {
-      const count = timeframe === '15m' ? 220 : 60;
-      const step = timeframe === '15m' ? 900 : timeframe === '4h' ? 14_400 : 86_400;
-      const latest = Math.floor(Date.now() / 1000 / step) * step - step * 2;
-      const first = latest - (count - 1) * step;
+    marketMocks.fetchMarketData.mockImplementation(async (_symbol: string, requestedTimeframe: '4h' | '1d') => {
+      const count = requestedTimeframe === '4h' ? 700 : 120;
+      const interval = requestedTimeframe === '4h' ? step : 86_400;
+      const end = Math.floor(Date.now() / 1000 / interval) * interval - interval * 2;
       const candles = Array.from({ length: count }, (_, index) => {
         const close = 100 + index * 0.05;
-        return { time: first + index * step, open: close - 0.02, high: close + 0.1, low: close - 0.1, close, volume: 100 + index };
+        return { time: end - (count - index - 1) * interval, open: close - 0.02, high: close + 0.1, low: close - 0.1, close, volume: 100 + index };
       });
-      return { timeframe, candles, stale: false, fetchedAt: Date.now(),
-        dataset: { provider: 'unit-fixture', dataVersion: `${timeframe}-v1` } };
+      return { timeframe: requestedTimeframe, candles, stale: false, fetchedAt: Date.now(),
+        dataset: { provider: 'unit-fixture', dataVersion: `${requestedTimeframe}-v1` } };
     });
+    const oldDays = traderConfig.MIN_FORWARD_DAYS;
+    const oldTrades = traderConfig.MIN_FORWARD_TRADES;
+    traderConfig.MIN_FORWARD_DAYS = 0;
+    traderConfig.MIN_FORWARD_TRADES = 0;
     const oldRevision = process.env.APP_REVISION;
     process.env.APP_REVISION = 'test-revision';
     try {
       const app = await createApp();
       const response = await app.inject({
         method: 'POST', url: `/api/v1/research/experiments/${TEST_ID}/run`, headers: { authorization: 'Bearer session-token' },
-        payload: { symbol: 'BTCUSD', timeframe: '15m', historyLimit: 500 },
+        payload: { symbol: 'BTCUSD', timeframe, historyLimit: 700 },
       });
       expect(response.statusCode).toBe(201);
-      expect(marketMocks.fetchMarketData).toHaveBeenCalledTimes(3);
+      expect(marketMocks.fetchMarketData).toHaveBeenCalledTimes(2);
       expect(serviceRpc).toHaveBeenCalledWith('record_research_run', expect.objectContaining({
         p_experiment_id: TEST_ID, p_user_id: 'authenticated-user', p_artifacts: expect.objectContaining({
           codeRevision: 'test-revision', strategyVersion: 'trend-pullback-v1',
@@ -127,6 +216,8 @@ describe('learning and research persistence routes', () => {
       }));
       await app.close();
     } finally {
+      traderConfig.MIN_FORWARD_DAYS = oldDays;
+      traderConfig.MIN_FORWARD_TRADES = oldTrades;
       if (oldRevision === undefined) delete process.env.APP_REVISION;
       else process.env.APP_REVISION = oldRevision;
     }

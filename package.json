@@ -18,6 +18,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:research-holdout-concurrency": "node scripts/test-research-holdout-concurrency.mjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json"
   },
@@ -47,6 +48,7 @@
     "eslint-plugin-react-hooks": "^5.1.0-rc.0",
     "eslint-plugin-react-refresh": "^0.4.11",
     "globals": "^15.9.0",
+    "pg": "^8.23.1",
     "postcss": "^8.4.35",
     "tailwindcss": "^3.4.1",
     "tsx": "^4.23.13",

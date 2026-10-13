@@ -1,5 +1,5 @@
 begin;
-select plan(12);
+select plan(16);
 
 select has_table('public', 'research_holdout_claims', 'holdout claims prevent repeated tuning on the same chronological test period');
 select has_table('public', 'research_approvals', 'administrator approval decisions are persisted for audit');
@@ -22,6 +22,14 @@ select ok(not has_function_privilege('authenticated', 'public.record_research_ru
   'authenticated clients cannot call the server persistence function');
 select ok(position('FOR UPDATE' in pg_get_functiondef('public.record_research_run(uuid,uuid,text,bigint,jsonb,jsonb,jsonb,text)'::regprocedure)) > 0,
   'run retries serialize per experiment before checking for an existing result');
+select ok(exists (select 1 from pg_trigger where tgname = 'research_holdout_no_overlap' and not tgisinternal),
+  'holdout inserts run through an overlap guard');
+select ok(position('pg_advisory_xact_lock' in pg_get_functiondef('public.reject_overlapping_research_holdout()'::regprocedure)) > 0,
+  'overlap claims serialize concurrent transactions by market and timeframe');
+select ok(position('research_holdout_no_overlap' in pg_get_functiondef('public.verify_paper_schema()'::regprocedure)) > 0,
+  'health schema verification fails when the holdout overlap trigger is missing');
+select ok(position('research_experiment_holdout_registration' in pg_get_functiondef('public.verify_paper_schema()'::regprocedure)) > 0,
+  'health schema verification requires the registered-forward-boundary trigger');
 
 select * from finish();
 rollback;
