@@ -14,7 +14,7 @@ function series(timeframe: Timeframe, count: number, stepSeconds: number): Resea
 function input(overrides: Partial<Parameters<typeof runResearchReplay>[0]> = {}) {
   return {
     symbol: 'BTCUSD', triggerTimeframe: '15m' as const,
-    series: [series('15m', 220, 900), series('4h', 60, 14_400), series('1d', 60, 86_400)],
+    series: [series('15m', 220, 900), series('1h', 100, 3_600), series('4h', 60, 14_400), series('1d', 60, 86_400)],
     trainingEndIndex: 100, testStartIndex: 120, experimentCreatedAt: '2026-01-01T00:00:00.000Z',
     feeRate: 0.001, slippageRate: 0.0005, codeRevision: 'test-revision',
     ...overrides,
@@ -29,7 +29,7 @@ describe('server research replay artifact', () => {
     expect(first.datasetId).toMatch(/^research:[a-f0-9]{64}$/);
     expect(first.costs).toEqual({ feeRate: 0.001, slippageRate: 0.0005 });
     expect(first.split).toMatchObject({ trainingEndIndex: 100, testStartIndex: 120 });
-    expect(first.snapshot.map((item) => item.candles.length)).toEqual([220, 60, 60]);
+    expect(first.snapshot.map((item) => item.candles.length)).toEqual([220, 100, 60, 60]);
     expect(first.validation.promotionEligible).toBe(false);
     expect(first.baselines.buyAndHoldExpectancyR).not.toBeNull();
     expect(first.baselines.randomEntryExpectancyR).not.toBeNull();
@@ -48,5 +48,13 @@ describe('server research replay artifact', () => {
     expect(() => runResearchReplay(input({ testStartIndex: 100 }))).toThrow('boundaries are invalid');
     expect(() => runResearchReplay(input({ codeRevision: 'unknown' }))).toThrow('source revision is required');
     expect(() => runResearchReplay(input({ series: [series('15m', 220, 900), series('4h', 60, 14_400)] }))).toThrow('requires provider data');
+  });
+
+  it('rejects mixed-provider timeframes and duplicate timeframe series', () => {
+    const source = input();
+    const mixed = source.series.map((item, index) => index === 1 ? { ...item, provider: 'another-provider' } : item);
+    expect(() => runResearchReplay(input({ series: mixed }))).toThrow('one provider');
+    const duplicate = [...source.series, source.series[0]!];
+    expect(() => runResearchReplay(input({ series: duplicate }))).toThrow('duplicate timeframe');
   });
 });

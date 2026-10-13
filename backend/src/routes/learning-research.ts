@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import { getSupabaseClient, getSupabaseClientWithToken } from '../db';
-import { TIMEFRAMES, type Timeframe } from '../../../src/lib/types';
+import type { Timeframe } from '../../../src/lib/types';
 import { getMarket } from '../../../src/lib/markets';
 import { fetchMarketData } from '../services/marketDataService';
 import { selectClosedCandles } from '../trader/candle-math';
@@ -34,7 +34,7 @@ const researchExperimentSchema = z.object({
 
 const runResearchSchema = z.object({
   symbol: z.string().trim().min(3).max(30),
-  timeframe: z.enum(TIMEFRAMES.map((timeframe) => timeframe.value) as [Timeframe, ...Timeframe[]]),
+  timeframe: z.literal('15m'),
   historyLimit: z.number().int().min(200).max(1000).default(1000),
 }).strict();
 const promoteResearchSchema = z.object({ runId: z.string().uuid() }).strict();
@@ -129,7 +129,7 @@ export async function learningResearchRoutes(app: FastifyInstance) {
       if (minimumForwardBars + 2 > parsed.data.historyLimit) {
         return reply.code(422).send({ error: `This timeframe needs at least ${minimumForwardBars + 2} history bars to preserve the configured ${traderConfig.MIN_FORWARD_DAYS}-day holdout and training context.` });
       }
-      const timeframes = [...new Set<Timeframe>([triggerTimeframe, '4h', '1d'])];
+      const timeframes = [...new Set<Timeframe>([triggerTimeframe, traderConfig.SETUP_TIMEFRAME, '4h', '1d'])];
       const fetched = await Promise.all(timeframes.map((timeframe) => fetchMarketData(parsed.data.symbol, timeframe, parsed.data.historyLimit)));
       if (fetched.some((series) => series.stale)) return reply.code(503).send({ error: 'Research requires a fresh provider response; stale cache data cannot be used.' });
       const now = Date.now();

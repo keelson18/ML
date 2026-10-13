@@ -188,21 +188,26 @@ export async function traderRoutes(app: FastifyInstance) {
     const results = [];
     for (const market of candidates) {
       try {
-        const [daily, fourHour, trigger] = await Promise.all([
+        const triggerTimeframe = traderConfig.TRIGGER_TIMEFRAMES[0] as Timeframe;
+        const [daily, fourHour, setup, trigger] = await Promise.all([
           fetchMarketData(market.symbol, '1d', 100, { priority: true }),
           fetchMarketData(market.symbol, '4h', 100, { priority: true }),
-          fetchMarketData(market.symbol, traderConfig.TRIGGER_TIMEFRAMES[0] as Timeframe, 100, { priority: true }),
+          fetchMarketData(market.symbol, traderConfig.SETUP_TIMEFRAME, 100, { priority: true }),
+          fetchMarketData(market.symbol, triggerTimeframe, 100, { priority: true }),
         ]);
-        if (traderConfig.STALE_DATA_BLOCKS_ENTRIES && (daily.stale || fourHour.stale || trigger.stale)) continue;
+        if (traderConfig.STALE_DATA_BLOCKS_ENTRIES && (daily.stale || fourHour.stale || setup.stale || trigger.stale)) continue;
         const dailyCandles = closedCandles(daily.candles, '1d');
         const fourHourCandles = closedCandles(fourHour.candles, '4h');
-        const triggerCandles = closedCandles(trigger.candles, traderConfig.TRIGGER_TIMEFRAMES[0] as Timeframe);
+        const setupCandles = closedCandles(setup.candles, traderConfig.SETUP_TIMEFRAME);
+        const triggerCandles = closedCandles(trigger.candles, triggerTimeframe);
         results.push(createTradePlan({
           accountId: request.authenticatedUserId,
           symbol: market.symbol,
           htfCandles: { '1d': dailyCandles, '4h': fourHourCandles },
+          setupCandles,
           triggerCandles,
-          datasetId: `${daily.dataset.id}:${fourHour.dataset.id}:${trigger.dataset.id}`,
+          triggerTimeframe,
+          datasetId: `${daily.dataset.id}:${fourHour.dataset.id}:${setup.dataset.id}:${trigger.dataset.id}`,
         }));
       } catch (error) {
         request.log.warn({ symbol: market.symbol, reason: error instanceof Error ? error.message : 'unknown' }, 'Trader planner skipped market');

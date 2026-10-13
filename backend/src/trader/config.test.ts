@@ -11,8 +11,10 @@ describe('trader configuration', () => {
       MAX_PORTFOLIO_HEAT_PCT: 2,
       MIN_RR: 2,
       HTF_TIMEFRAMES: ['4h', '1d'],
+      SETUP_TIMEFRAME: '1h',
       TRIGGER_TIMEFRAMES: ['15m', '1h'],
       MGMT_TIMEFRAME: '5m',
+      SETUP_EXPIRY_BARS: 3,
       ALLOWED_GRADES: ['A', 'B'],
       ALLOWED_SETUP_TYPES: ['trend-pullback'],
       PROMOTED_SETUP_TYPES: [],
@@ -35,5 +37,6 @@ describe('trader configuration', () => {
       .toMatchObject({ TRADER_STARTING_EQUITY: 50_000, ALLOWED_GRADES: ['A'], STALE_DATA_BLOCKS_ENTRIES: false });
     expect(() => parseTraderConfig({ RISK_PER_TRADE_PCT: '0' })).toThrow('RISK_PER_TRADE_PCT has an invalid trader configuration value.');
     expect(() => parseTraderConfig({ HTF_TIMEFRAMES: '2m' })).toThrow('HTF_TIMEFRAMES has an invalid trader configuration value.');
+    expect(() => parseTraderConfig({ TRIGGER_TIMEFRAMES: '1h,15m' })).toThrow('TRIGGER_TIMEFRAMES has an invalid trader configuration value.');
   });
 });

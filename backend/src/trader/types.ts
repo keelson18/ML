@@ -87,6 +87,7 @@ export interface PlannerInput {
   accountId: string;
   symbol: string;
   htfCandles: Partial<Record<Timeframe, Candle[]>>;
+  setupCandles: Candle[];
   triggerCandles: Candle[];
   triggerTimeframe?: Timeframe;
   datasetId: string;

@@ -119,9 +119,20 @@ describe('learning and research persistence routes', () => {
     await app.close();
   });
 
+  it('does not allow research replay to use a timeframe other than the validated 15m confirmation', async () => {
+    const app = await createApp();
+    const response = await app.inject({
+      method: 'POST', url: `/api/v1/research/experiments/${TEST_ID}/run`, headers: { authorization: 'Bearer session-token' },
+      payload: { symbol: 'BTCUSD', timeframe: '4h', historyLimit: 1000 },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(marketMocks.fetchMarketData).not.toHaveBeenCalled();
+    await app.close();
+  });
+
   it('collects future holdout candles over time without persisting an underpowered run', async () => {
-    const timeframe = '4h' as const;
-    const step = 14_400;
+    const timeframe = '15m' as const;
+    const step = 900;
     const latest = Math.floor(Date.now() / 1000 / step) * step - step * 2;
     const testStartTime = latest - 20 * step;
     const query = {
@@ -136,9 +147,9 @@ describe('learning and research persistence routes', () => {
     dbMocks.getSupabaseClientWithToken.mockReturnValue({ from: vi.fn().mockReturnValue(query) });
     const serviceRpc = vi.fn();
     dbMocks.getSupabaseClient.mockReturnValue({ rpc: serviceRpc });
-    marketMocks.fetchMarketData.mockImplementation(async (_symbol: string, requestedTimeframe: '4h' | '1d') => {
-      const count = requestedTimeframe === '4h' ? 700 : 120;
-      const interval = requestedTimeframe === '4h' ? step : 86_400;
+    marketMocks.fetchMarketData.mockImplementation(async (_symbol: string, requestedTimeframe: '15m' | '4h' | '1d' | '1h') => {
+      const count = requestedTimeframe === '15m' ? 700 : requestedTimeframe === '1h' ? 500 : requestedTimeframe === '4h' ? 100 : 120;
+      const interval = requestedTimeframe === '15m' ? step : requestedTimeframe === '1h' ? 3_600 : requestedTimeframe === '4h' ? 14_400 : 86_400;
       const end = Math.floor(Date.now() / 1000 / interval) * interval - interval * 2;
       const candles = Array.from({ length: count }, (_, index) => {
         const close = 100 + index * 0.01;
@@ -149,6 +160,8 @@ describe('learning and research persistence routes', () => {
     });
     const app = await createApp();
     const oldRevision = process.env.APP_REVISION;
+    const oldDays = traderConfig.MIN_FORWARD_DAYS;
+    traderConfig.MIN_FORWARD_DAYS = 1;
     process.env.APP_REVISION = 'test-revision';
     try {
       const response = await app.inject({
@@ -162,13 +175,14 @@ describe('learning and research persistence routes', () => {
     } finally {
       if (oldRevision === undefined) delete process.env.APP_REVISION;
       else process.env.APP_REVISION = oldRevision;
+      traderConfig.MIN_FORWARD_DAYS = oldDays;
       await app.close();
     }
   });
 
   it('persists an immutable artifact only after configured evidence thresholds are reached', async () => {
-    const timeframe = '4h' as const;
-    const step = 14_400;
+    const timeframe = '15m' as const;
+    const step = 900;
     const latest = Math.floor(Date.now() / 1000 / step) * step - step * 2;
     const testStartTime = latest - 20 * step;
     const query = {
@@ -183,9 +197,9 @@ describe('learning and research persistence routes', () => {
     dbMocks.getSupabaseClientWithToken.mockReturnValue({ from: vi.fn().mockReturnValue(query) });
     const serviceRpc = vi.fn().mockResolvedValue({ data: TEST_ID, error: null });
     dbMocks.getSupabaseClient.mockReturnValue({ rpc: serviceRpc });
-    marketMocks.fetchMarketData.mockImplementation(async (_symbol: string, requestedTimeframe: '4h' | '1d') => {
-      const count = requestedTimeframe === '4h' ? 700 : 120;
-      const interval = requestedTimeframe === '4h' ? step : 86_400;
+    marketMocks.fetchMarketData.mockImplementation(async (_symbol: string, requestedTimeframe: '15m' | '4h' | '1d' | '1h') => {
+      const count = requestedTimeframe === '15m' ? 700 : requestedTimeframe === '1h' ? 500 : requestedTimeframe === '4h' ? 100 : 120;
+      const interval = requestedTimeframe === '15m' ? step : requestedTimeframe === '1h' ? 3_600 : requestedTimeframe === '4h' ? 14_400 : 86_400;
       const end = Math.floor(Date.now() / 1000 / interval) * interval - interval * 2;
       const candles = Array.from({ length: count }, (_, index) => {
         const close = 100 + index * 0.05;
@@ -207,7 +221,7 @@ describe('learning and research persistence routes', () => {
         payload: { symbol: 'BTCUSD', timeframe, historyLimit: 700 },
       });
       expect(response.statusCode).toBe(201);
-      expect(marketMocks.fetchMarketData).toHaveBeenCalledTimes(2);
+      expect(marketMocks.fetchMarketData).toHaveBeenCalledTimes(4);
       expect(serviceRpc).toHaveBeenCalledWith('record_research_run', expect.objectContaining({
         p_experiment_id: TEST_ID, p_user_id: 'authenticated-user', p_artifacts: expect.objectContaining({
           codeRevision: 'test-revision', strategyVersion: 'trend-pullback-v1',

@@ -372,13 +372,16 @@ export async function manageOpenPositions(accountId: string, symbol: string, can
     const openPositions = account.positions.filter((position) => position.status === 'open' && position.symbol === symbol);
     const atrSeries = atr(history, 14);
     const currentAtr = atrSeries.at(-1);
-    const swingLow = analyzeMarketStructure(history).lows.at(-1)?.value;
+    const structure = analyzeMarketStructure(history);
+    const swingLow = structure.lows.at(-1)?.value;
+    const swingHigh = structure.highs.at(-1)?.value;
     for (const position of openPositions) {
       const managed = managePaperPosition({
         position,
         candle,
         atr: currentAtr,
         swingLow,
+        swingHigh,
         barIndex: (position.barsHeld ?? 0) + 1,
         invalidationObservedAtBar: thesisInvalidated ? position.barsHeld ?? 0 : undefined,
       });

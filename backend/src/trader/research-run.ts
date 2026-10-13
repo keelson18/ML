@@ -102,8 +102,11 @@ export function runResearchReplay(input: ResearchRunInput): ResearchRunArtifact 
   const trigger = input.series.find((series) => series.timeframe === input.triggerTimeframe);
   const daily = input.series.find((series) => series.timeframe === '1d');
   const fourHour = input.series.find((series) => series.timeframe === '4h');
-  if (!trigger || !daily || !fourHour) throw new Error('Research requires provider data for the trigger, 4h, and 1d timeframes.');
+  const setup = input.series.find((series) => series.timeframe === traderConfig.SETUP_TIMEFRAME);
+  if (!trigger || !daily || !fourHour || !setup) throw new Error('Research requires provider data for the 1h setup, 15m trigger, 4h, and 1d timeframes.');
   if (input.series.some((series) => series.candles.length === 0 || !series.provider || !series.dataVersion)) throw new Error('Research dataset provenance is incomplete.');
+  if (new Set(input.series.map((series) => series.timeframe)).size !== input.series.length) throw new Error('Research dataset contains duplicate timeframe series.');
+  if (new Set(input.series.map((series) => series.provider)).size !== 1) throw new Error('Research timeframe series must come from one provider.');
   for (const series of input.series) {
     for (let index = 0; index < series.candles.length; index += 1) {
       const candle = series.candles[index]!;
@@ -138,6 +141,7 @@ export function runResearchReplay(input: ResearchRunInput): ResearchRunArtifact 
         triggerTimeframe: input.triggerTimeframe,
         triggerCandles: history,
         htfCandles: { '1d': throughClosed(daily), '4h': throughClosed(fourHour) },
+        setupCandles: throughClosed(setup),
         datasetId,
       });
       if (!result.plan) return [];

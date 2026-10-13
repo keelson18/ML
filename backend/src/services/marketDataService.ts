@@ -114,7 +114,7 @@ export async function probeMarketData(canonicalSymbol: string): Promise<{ candle
     throw new Error('Market probe is not configured for this instrument.');
   }
   const candles = await fetchFromProvider(instrument, '1m', 5, false);
-  validateCandles(candles, canonicalSymbol);
+  validateCandles(candles, instrument, '1m');
   if (candles.length === 0) throw new Error('Provider returned no candles.');
   return { candleCount: candles.length };
 }
@@ -230,7 +230,7 @@ async function fetchMarketDataUncoalesced(canonicalSymbol: string, timeframe: Ti
   };
 
   const candles = await fetchFromProvider(instrument, timeframe, limit, priority);
-  validateCandles(candles, canonicalSymbol);
+  validateCandles(candles, instrument, timeframe);
   const provider = instrument.provider;
   const sourceInstrument = sourceSymbol;
   const startTimestamp = candles[0]?.time ?? null;
@@ -402,12 +402,17 @@ function limitMarketDataSeries(series: MarketDataSeries, limit: number): MarketD
   };
 }
 
-function validateCandles(candles: Candle[], canonicalSymbol: string): void {
+function validateCandles(candles: Candle[], instrument: Market, timeframe: Timeframe, nowMs = Date.now()): void {
   let previousTime: number | undefined;
   for (const candle of candles) {
     const values = [candle.time, candle.open, candle.high, candle.low, candle.close, candle.volume];
+    const futureDated = candle.time * 1000 > nowMs;
+    const misalignedCryptoBar = instrument.marketType === 'crypto' && timeframe !== '1w' && timeframe !== '1M'
+      && candle.time % candleSeconds(timeframe, candle.time) !== 0;
     if (values.some((value) => !Number.isFinite(value))
       || candle.time < 0
+      || futureDated
+      || misalignedCryptoBar
       || candle.open <= 0
       || candle.high <= 0
       || candle.low <= 0
@@ -416,7 +421,7 @@ function validateCandles(candles: Candle[], canonicalSymbol: string): void {
       || candle.high < Math.max(candle.open, candle.close, candle.low)
       || candle.low > Math.min(candle.open, candle.close, candle.high)
       || (previousTime !== undefined && candle.time <= previousTime)) {
-      throw new Error(`Provider returned invalid or unordered candles for ${canonicalSymbol}.`);
+      throw new Error(`Provider returned invalid, future-dated, misaligned, or unordered candles for ${instrument.canonicalSymbol}.`);
     }
     previousTime = candle.time;
   }

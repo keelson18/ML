@@ -10,6 +10,10 @@ const position: PaperPosition = {
   targets: [{ price: 110, fractionOfPosition: 0.5 }, { price: 120, fractionOfPosition: 0.5 }], targetsTaken: [],
   barsHeld: 0, maxFavorablePrice: 100, status: 'open', openedAt: new Date(0).toISOString(),
 };
+const shortPosition: PaperPosition = {
+  ...position, id: 'short-position', side: 'sell', stopLoss: 105,
+  targets: [{ price: 90, fractionOfPosition: 0.5 }, { price: 80, fractionOfPosition: 0.5 }], initialRisk: 5,
+};
 
 function bar(values: Partial<Candle>): Candle {
   return { time: 60, open: 100, high: 100, low: 99, close: 100, volume: 1_000, ...values };
@@ -57,5 +61,33 @@ describe('paper position manager', () => {
       position, candle: bar({ open: 98, low: 97, high: 99, close: 98 }), barIndex: 3, invalidationObservedAtBar: 2,
     });
     expect(result.exits[0]).toEqual({ quantity: 10, price: 98, reason: 'thesis-invalidated' });
+  });
+
+  it('applies short stop-first rules and adverse gap pricing', () => {
+    const result = managePaperPosition({ position: shortPosition, candle: bar({ open: 107, high: 108, low: 79 }), barIndex: 1 });
+    expect(result.exits).toEqual([{ quantity: 10, price: 107, reason: 'stop' }]);
+    expect(result.position.status).toBe('closed');
+  });
+
+  it('takes short targets on the candle low and covers at the worse opening price on a favorable gap', () => {
+    const result = managePaperPosition({ position: shortPosition, candle: bar({ open: 87, high: 101, low: 79, close: 85 }), barIndex: 1 });
+    expect(result.exits).toEqual([{ quantity: 5, price: 87, reason: 'target' }, { quantity: 5, price: 80, reason: 'target' }]);
+    expect(result.position.status).toBe('closed');
+  });
+
+  it('moves a short stop down to fee-adjusted break-even and trails it without loosening', () => {
+    const breakEven = managePaperPosition({ position: shortPosition, candle: bar({ high: 101, low: 94, close: 96 }), barIndex: 1 });
+    expect(breakEven.position.stopLoss).toBeLessThan(100);
+    const trailing = managePaperPosition({ position: shortPosition, candle: bar({ high: 100, low: 88, close: 90 }), atr: 1, swingHigh: 94, barIndex: 2 });
+    expect(trailing.position.stopLoss).toBeLessThanOrEqual(94);
+    const next = managePaperPosition({ position: trailing.position, candle: bar({ high: 91, low: 86, close: 88 }), atr: 1, swingHigh: 89, barIndex: 3 });
+    expect(next.position.stopLoss).toBeLessThanOrEqual(trailing.position.stopLoss!);
+  });
+
+  it('measures short progress and favorable/adverse excursions in the correct direction', () => {
+    const result = managePaperPosition({ position: shortPosition, candle: bar({ high: 103, low: 90, close: 94 }), barIndex: 1 });
+    expect(result.position.maxFavorablePrice).toBe(90);
+    expect(result.position.maxAdversePrice).toBe(103);
+    expect(result.position.stopLoss).toBeLessThan(105);
   });
 });

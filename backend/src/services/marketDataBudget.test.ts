@@ -20,8 +20,14 @@ function twelveDataOk(input: string | URL | Request): Response {
   return new Response(JSON.stringify({ status: 'ok', meta: { symbol }, values: [{ datetime: '2026-10-03 12:00:00', open: '100', high: '102', low: '99', close: '101', volume: '50' }] }), { status: 200 });
 }
 
-function massiveOk(): Response {
-  return new Response(JSON.stringify({ status: 'OK', ticker: 'X:BTCUSD', results: [{ t: 1_700_000_000_000, o: 100, h: 102, l: 99, c: 101, v: 50 }] }), { status: 200 });
+function massiveOk(input: string | URL | Request): Response {
+  const url = String(input);
+  const interval = url.match(/\/range\/(\d+)\/(minute|hour|day|week|month)\//);
+  const multiplier = Number(interval?.[1] ?? 1);
+  const unitSeconds = { minute: 60, hour: 3_600, day: 86_400, week: 604_800, month: 2_592_000 }[interval?.[2] as 'minute' | 'hour' | 'day' | 'week' | 'month'] ?? 60;
+  const step = multiplier * unitSeconds;
+  const time = Math.floor(1_700_000_000 / step) * step * 1_000;
+  return new Response(JSON.stringify({ status: 'OK', ticker: 'X:BTCUSD', results: [{ t: time, o: 100, h: 102, l: 99, c: 101, v: 50 }] }), { status: 200 });
 }
 
 beforeEach(() => {
@@ -47,7 +53,7 @@ afterEach(() => {
 
 describe('Massive request budget', () => {
   it('fails with 429 without calling the provider when the budget cannot be met in time', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(massiveOk());
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => Promise.resolve(massiveOk(input)));
     vi.stubGlobal('fetch', fetchMock);
 
     await fetchMarketData('BTCUSD', '1h', 100);

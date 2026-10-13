@@ -23,6 +23,7 @@ export class AutonomousScheduler {
   ) {
     const jobs: ScheduledJob[] = [
       ...traderConfig.HTF_TIMEFRAMES.map((timeframe) => ({ role: 'planner' as const, timeframe: timeframe as Timeframe })),
+      { role: 'planner', timeframe: traderConfig.SETUP_TIMEFRAME as Timeframe },
       ...traderConfig.TRIGGER_TIMEFRAMES.map((timeframe) => ({ role: 'executor' as const, timeframe: timeframe as Timeframe })),
       { role: 'manager', timeframe: traderConfig.MGMT_TIMEFRAME as Timeframe },
     ];

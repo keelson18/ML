@@ -17,6 +17,7 @@ export function providerRequestSpacingMs(requestsPerWindow = config.massiveReque
 
 export const AUTOPILOT_TIMEFRAMES = [...new Set([
   ...traderConfig.HTF_TIMEFRAMES,
+  traderConfig.SETUP_TIMEFRAME,
   ...traderConfig.TRIGGER_TIMEFRAMES,
   traderConfig.MGMT_TIMEFRAME,
 ])] as Timeframe[];
@@ -198,7 +199,10 @@ export class PaperAutopilotScheduler {
             if (due.has(timeframe as Timeframe) && activePlans.some((plan) => plan.symbol === symbol && (plan.triggerTimeframe ?? traderConfig.TRIGGER_TIMEFRAMES[0]) === timeframe)) required.add(timeframe as Timeframe);
           }
           if ((traderConfig.HTF_TIMEFRAMES as Timeframe[]).some((timeframe) => due.has(timeframe))) {
-            for (const timeframe of [...(traderConfig.HTF_TIMEFRAMES as Timeframe[]), ...(traderConfig.TRIGGER_TIMEFRAMES as Timeframe[])]) required.add(timeframe as Timeframe);
+            for (const timeframe of [...(traderConfig.HTF_TIMEFRAMES as Timeframe[]), traderConfig.SETUP_TIMEFRAME as Timeframe, ...(traderConfig.TRIGGER_TIMEFRAMES as Timeframe[])]) required.add(timeframe as Timeframe);
+          }
+          if (due.has(traderConfig.SETUP_TIMEFRAME as Timeframe)) {
+            for (const timeframe of [...(traderConfig.HTF_TIMEFRAMES as Timeframe[]), traderConfig.SETUP_TIMEFRAME as Timeframe, ...(traderConfig.TRIGGER_TIMEFRAMES as Timeframe[])]) required.add(timeframe as Timeframe);
           }
         }
         for (const timeframe of required) combined.add(timeframe);
@@ -254,21 +258,25 @@ export class PaperAutopilotScheduler {
           }
         }
         for (const symbol of row.symbols) {
-          const plannerDue = (traderConfig.HTF_TIMEFRAMES as Timeframe[]).some((timeframe) => due.has(timeframe));
+          const plannerDue = (traderConfig.HTF_TIMEFRAMES as Timeframe[]).some((timeframe) => due.has(timeframe))
+            || due.has(traderConfig.SETUP_TIMEFRAME as Timeframe);
           if (plannerDue) {
             const daily = seriesByKey.get(`${symbol}:1d`);
             const fourHour = seriesByKey.get(`${symbol}:4h`);
-            if (daily && fourHour && !accountEntryPause) {
+            const setupSeries = seriesByKey.get(`${symbol}:${traderConfig.SETUP_TIMEFRAME}`);
+            if (daily && fourHour && setupSeries && !accountEntryPause) {
               const existingPlans = await listStoredTradePlans(row.account_id);
-              for (const trigger of traderConfig.TRIGGER_TIMEFRAMES as Timeframe[]) {
-                if (existingPlans.some((plan) => plan.symbol === symbol && (plan.triggerTimeframe ?? traderConfig.TRIGGER_TIMEFRAMES[0]) === trigger && ['WATCHING', 'ARMED', 'PENDING_ORDER'].includes(plan.status))) continue;
+              const trigger = traderConfig.TRIGGER_TIMEFRAMES[0] as Timeframe;
+              if (!existingPlans.some((plan) => plan.symbol === symbol && (plan.triggerTimeframe ?? traderConfig.TRIGGER_TIMEFRAMES[0]) === trigger && ['WATCHING', 'ARMED', 'PENDING_ORDER'].includes(plan.status))) {
                 const triggerSeries = seriesByKey.get(`${symbol}:${trigger}`);
-                if (!triggerSeries) continue;
+                if (triggerSeries) {
                 const dailyCandles = selectClosedCandles(daily.candles, '1d', now, traderConfig.CLOSE_GRACE_MS);
                 const fourHourCandles = selectClosedCandles(fourHour.candles, '4h', now, traderConfig.CLOSE_GRACE_MS);
+                const setupCandles = selectClosedCandles(setupSeries.candles, traderConfig.SETUP_TIMEFRAME, now, traderConfig.CLOSE_GRACE_MS);
                 const triggerCandles = selectClosedCandles(triggerSeries.candles, trigger, now, traderConfig.CLOSE_GRACE_MS);
-                const result = createTradePlan({ accountId: row.account_id, symbol, htfCandles: { '1d': dailyCandles, '4h': fourHourCandles }, triggerCandles, triggerTimeframe: trigger, datasetId: `${daily.dataset.id}:${fourHour.dataset.id}:${triggerSeries.dataset.id}` });
+                const result = createTradePlan({ accountId: row.account_id, symbol, htfCandles: { '1d': dailyCandles, '4h': fourHourCandles }, setupCandles, triggerCandles, triggerTimeframe: trigger, datasetId: `${daily.dataset.id}:${fourHour.dataset.id}:${setupSeries.dataset.id}:${triggerSeries.dataset.id}` });
                 if (result.plan) await storeTradePlan(row.account_id, result.plan);
+                }
               }
             }
           }

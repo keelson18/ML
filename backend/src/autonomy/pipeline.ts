@@ -114,20 +114,22 @@ export class AutonomousPipeline {
 
     if (role === 'planner') {
       const triggerTimeframe = traderConfig.TRIGGER_TIMEFRAMES[0] as Timeframe;
-      const [daily, fourHour, trigger] = await Promise.all([
-        fetchMarketData(symbol, '1d', 100, { priority: true }), fetchMarketData(symbol, '4h', 100, { priority: true }), fetchMarketData(symbol, triggerTimeframe, 100, { priority: true }),
+      const [daily, fourHour, setup, trigger] = await Promise.all([
+        fetchMarketData(symbol, '1d', 100, { priority: true }), fetchMarketData(symbol, '4h', 100, { priority: true }),
+        fetchMarketData(symbol, traderConfig.SETUP_TIMEFRAME, 100, { priority: true }), fetchMarketData(symbol, triggerTimeframe, 100, { priority: true }),
       ]);
-      if (traderConfig.STALE_DATA_BLOCKS_ENTRIES && (daily.stale || fourHour.stale || trigger.stale)) {
+      if (traderConfig.STALE_DATA_BLOCKS_ENTRIES && (daily.stale || fourHour.stale || setup.stale || trigger.stale)) {
         return { ...this.skip(symbol, timeframe, closedCandle, 'Stale market data; planner produced no plan.'), role, closedTrades, marketDataStale: true };
       }
       const closedDaily = selectClosedCandles(daily.candles, '1d', Date.now(), traderConfig.CLOSE_GRACE_MS);
       const closedFourHour = selectClosedCandles(fourHour.candles, '4h', Date.now(), traderConfig.CLOSE_GRACE_MS);
+      const closedSetup = selectClosedCandles(setup.candles, traderConfig.SETUP_TIMEFRAME, Date.now(), traderConfig.CLOSE_GRACE_MS);
       const closedTrigger = selectClosedCandles(trigger.candles, triggerTimeframe, Date.now(), traderConfig.CLOSE_GRACE_MS);
       const plannerResult = createTradePlan({
         accountId: this.config.accountId, symbol,
-        htfCandles: { '1d': closedDaily, '4h': closedFourHour }, triggerCandles: closedTrigger,
+        htfCandles: { '1d': closedDaily, '4h': closedFourHour }, setupCandles: closedSetup, triggerCandles: closedTrigger,
         triggerTimeframe,
-        datasetId: `${daily.dataset.id}:${fourHour.dataset.id}:${trigger.dataset.id}`,
+        datasetId: `${daily.dataset.id}:${fourHour.dataset.id}:${setup.dataset.id}:${trigger.dataset.id}`,
       });
       if (plannerResult.plan) await storeTradePlan(this.config.accountId, plannerResult.plan);
       if (timeframe === '1d' && symbol === this.config.symbols[0]) {
