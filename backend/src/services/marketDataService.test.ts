@@ -48,6 +48,26 @@ describe('market data instrument mapping', () => {
     expect(result.dataset).toMatchObject({ provider: 'massive', sourceInstrument: 'X:BTCUSD', quoteCurrency: 'USD', timeframe: '1h' });
   });
 
+  it('changes dataset identity when a provider corrects candle content at the same timestamps', async () => {
+    config.massiveApiKey = 'test-key';
+    let close = 101;
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => new Response(JSON.stringify({
+      status: 'OK', ticker: 'X:BTCUSD',
+      results: [{ t: 1_700_000_000_000, o: 100, h: 102, l: 99, c: close, v: 50 }],
+    }), { status: 200 })));
+
+    const original = await fetchMarketData('BTCUSD', '1h', 1);
+    close = 100.5;
+    clearMarketDataCache();
+    const corrected = await fetchMarketData('BTCUSD', '1h', 1);
+
+    expect(original.dataset.startTimestamp).toBe(corrected.dataset.startTimestamp);
+    expect(original.dataset.endTimestamp).toBe(corrected.dataset.endTimestamp);
+    expect(original.dataset.dataVersion).not.toBe(corrected.dataset.dataVersion);
+    expect(original.dataset.id).not.toBe(corrected.dataset.id);
+    expect(corrected.identity.dataVersion).toBe(corrected.dataset.dataVersion);
+  });
+
   it('sends the Massive key in an Authorization header, never in the URL', async () => {
     config.massiveApiKey = 'server-test-key';
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({

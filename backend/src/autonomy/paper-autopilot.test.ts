@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { entryCandleIsFresh, providerRequestSpacingMs, replayCandlesAfter, replaySequentialCandles, uniqueSeriesRequests } from './paper-autopilot';
+import { entryCandleIsFresh, prioritizeSeriesRequests, providerRequestSpacingMs, replayCandlesAfter, replaySequentialCandles, uniqueSeriesRequests } from './paper-autopilot';
 import { closePaperPosition, simulatePaperOrder, type PaperAccountState } from '../engines/paper-execution';
 import { traderConfig } from '../trader/config';
 
@@ -17,6 +17,18 @@ describe('paper autopilot scheduling helpers', () => {
       { symbol: 'BTCUSD', timeframe: '15m' },
       { symbol: 'ETHUSD', timeframe: '15m' },
     ]);
+  });
+
+  it('prioritizes position management, then entry triggers, then planner history', () => {
+    const requests = [
+      { symbol: 'BTCUSD', timeframe: '1d' as const },
+      { symbol: 'BTCUSD', timeframe: '15m' as const },
+      { symbol: 'BTCUSD', timeframe: '5m' as const },
+      { symbol: 'BTCUSD', timeframe: '4h' as const },
+      { symbol: 'BTCUSD', timeframe: '1h' as const },
+    ];
+    expect(prioritizeSeriesRequests(requests, '5m', ['15m', '1h']).map(({ timeframe }) => timeframe))
+      .toEqual(['5m', '15m', '1h', '1d', '4h']);
   });
 
   it('replays catch-up candles chronologically and within the configured bound', () => {

@@ -25,6 +25,21 @@ describe('Trader Desk risk calculations', () => {
     expect(result.reason).toContain('Invalid stop distance');
   });
 
+  it.each([
+    ['non-finite equity', { equity: Number.NaN }],
+    ['negative cash', { cash: -1 }],
+    ['missing exposure input', { grossExposure: Number.NaN }],
+    ['negative exposure', { symbolExposure: -1 }],
+    ['wrong-side stop', { invalidation: 101 }],
+  ])('fails closed for %s', (_label, overrides) => {
+    const result = calculatePositionSize({
+      equity: 100_000, entry: 100, invalidation: 90, cash: 100_000, grossExposure: 0, symbolExposure: 0,
+      ...overrides,
+    });
+    expect(result.accepted).toBe(false);
+    expect(result.quantity).toBe(0);
+  });
+
   it('includes unrealized losses in mark-to-market drawdown', () => {
     const snapshot = markToMarket({
       accountId: 'a', cash: 95_000, positions: [{
@@ -35,6 +50,20 @@ describe('Trader Desk risk calculations', () => {
     expect(snapshot.equity).toBe(99_000);
     expect(snapshot.unrealizedPnl).toBe(-1_000);
     expect(snapshot.drawdownPct).toBeCloseTo(1);
+  });
+
+  it('marks missing, zero, and non-finite position prices as incomplete risk inputs', () => {
+    const account = {
+      accountId: 'a', cash: 9_000, positions: [{
+        id: 'p', symbol: 'BTCUSD', assetId: 'BTCUSD', side: 'buy' as const, quantity: 10, entryPrice: 100,
+        entryFee: 0, status: 'open' as const, openedAt: new Date(0).toISOString(),
+      }], trades: [],
+    };
+
+    expect(markToMarket(account, {}).missingMarkSymbols).toEqual(['BTCUSD']);
+    expect(markToMarket(account, { BTCUSD: 0 }).missingMarkSymbols).toEqual(['BTCUSD']);
+    expect(markToMarket(account, { BTCUSD: Number.POSITIVE_INFINITY }).missingMarkSymbols).toEqual(['BTCUSD']);
+    expect(markToMarket(account, { BTCUSD: 80 }).missingMarkSymbols).toEqual([]);
   });
 
   it('blocks a new proposal when the configured weekly loss stop is reached', () => {

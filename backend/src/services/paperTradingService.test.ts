@@ -1,34 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { advanceStoredTradePlans, executeDecision, getAccount, manageOpenPositions, markCandleProcessed, storeTradePlan, wasCandleProcessed } from './paperTradingService';
-import type { TradeDecision } from '../engines/decision-engine';
+import { advanceStoredTradePlans, closeOpenPaperPosition, getAccount, manageOpenPositions, markCandleProcessed, storeTradePlan, wasCandleProcessed } from './paperTradingService';
+import { fetchMarketData } from './marketDataService';
 import type { TradePlan } from '../trader/types';
 import { traderConfig } from '../trader/config';
 
 vi.mock('./marketAvailability', () => ({ getMarketAvailability: () => [{ symbol: 'BTCUSD', status: 'available', checkedAt: 1 }] }));
-
-function buyDecision(): TradeDecision {
-  return {
-    decision: 'BUY',
-    marketBias: 'buy',
-    stages: {
-      setupDetection: { status: 'not_evaluated', reason: 'Test fixture.' },
-      entryConfirmation: { status: 'not_confirmed', reason: 'Test fixture.' },
-      riskApproval: { status: 'approved', reasons: [] },
-      finalDecision: { action: 'NO_TRADE', reason: 'Test fixture.' },
-    },
-    confidence: 0.9,
-    entry: 100,
-    invalidation: 95,
-    targets: [{ price: 110 }],
-    strategy: 'test',
-    supportingEvidence: [],
-    contradictions: [],
-    reasoning: 'Test decision',
-    explanation: 'Test decision',
-    engineVersions: {},
-    timestamp: new Date().toISOString(),
-  };
-}
+vi.mock('./marketDataService', () => ({ fetchMarketData: vi.fn() }));
 
 describe('backend paper position lifecycle', () => {
   it('rejects a forming candle before loading plans or touching account state', async () => {
@@ -67,6 +44,18 @@ describe('backend paper position lifecycle', () => {
       expect(filled.plans[0]?.status).toBe('OPEN');
       expect(filled.orders[0]?.status).toBe('filled');
       expect((await getAccount(accountId)).positions[0]).toMatchObject({ status: 'open', planId: plan.id, stopLoss: 95 });
+      const retry = await advanceStoredTradePlans({ accountId, symbol: plan.symbol, timeframe: '15m', candle: next, candles: [first, next], shadowMode: false });
+      expect(retry.filled).toBe(0);
+      expect((await getAccount(accountId)).positions.filter((position) => position.status === 'open')).toHaveLength(1);
+
+      const now = Date.now();
+      const forming = { time: Math.floor(now / 60_000) * 60, open: 104, high: 112, low: 103, close: 111, volume: 100 };
+      vi.mocked(fetchMarketData).mockResolvedValue({ candles: [forming], stale: true } as never);
+      await expect(closeOpenPaperPosition(accountId, plan.symbol)).rejects.toThrow('fresh, closed market price');
+      vi.mocked(fetchMarketData).mockResolvedValue({ candles: [forming], stale: false } as never);
+      await expect(closeOpenPaperPosition(accountId, plan.symbol)).rejects.toThrow('fresh, closed market price');
+      expect((await getAccount(accountId)).positions.find((position) => position.status === 'open')).toBeDefined();
+
       const exit = { time: triggerTime + timeframeSeconds * 2, open: 104, high: 112, low: 103, close: 111, volume: 100 };
       const closed = await manageOpenPositions(accountId, plan.symbol, exit, [first, next, exit], false, '5m');
       expect(closed).toHaveLength(1);
@@ -100,65 +89,6 @@ describe('backend paper position lifecycle', () => {
       expect((await getAccount(accountId)).shadowSignals).toHaveLength(1);
     } finally { traderConfig.PROMOTED_SETUP_TYPES = oldPromotions; }
   });
-  it('rejects non-USD-quoted markets for USD paper accounts', async () => {
-    const accountId = `non-usd-${Date.now()}`;
-    const result = await executeDecision({ accountId, symbol: 'USDJPY', decision: buyDecision() });
-
-    expect(result.accepted).toBe(false);
-    expect(result.reason).toBe('Paper accounts support USD-quoted markets only.');
-    expect((await getAccount(accountId)).positions).toHaveLength(0);
-  });
-
-  it('rejects new positions when market data is stale', async () => {
-    const accountId = `stale-${Date.now()}`;
-    const result = await executeDecision({ accountId, symbol: 'BTCUSD', decision: buyDecision(), marketDataStale: true });
-
-    expect(result.accepted).toBe(false);
-    expect((await getAccount(accountId)).positions).toHaveLength(0);
-  });
-
-  it('closes a position automatically when its stop is touched and journals excursions', async () => {
-    const accountId = `lifecycle-${Date.now()}`;
-    await executeDecision({ accountId, symbol: 'BTCUSD', decision: buyDecision() });
-
-    const trades = await manageOpenPositions(accountId, 'BTCUSD', {
-      time: Math.floor(Date.now() / 1000), open: 100, high: 101, low: 94, close: 96, volume: 10,
-    });
-
-    expect(trades).toHaveLength(1);
-    expect(trades[0].realizedPnl).toBeLessThan(0);
-    expect(trades[0].maeR).toBeLessThan(0);
-    expect(trades[0].mfeR).toBeGreaterThan(0);
-    expect((await getAccount(accountId)).positions[0].status).toBe('closed');
-    expect((await getAccount(accountId)).tradeJournal?.[0]?.metrics).toMatchObject({ maeR: trades[0].maeR, mfeR: trades[0].mfeR });
-  });
-
-  it('enforces configurable daily account trade caps and records the rejected gate', async () => {
-    const accountId = `daily-cap-${Date.now()}`;
-    const oldDailyCap = traderConfig.MAX_TRADES_PER_DAY;
-    traderConfig.MAX_TRADES_PER_DAY = 1;
-    try {
-      const first = await executeDecision({ accountId, symbol: 'BTCUSD', decision: buyDecision() });
-      const second = await executeDecision({ accountId, symbol: 'ETHUSD', decision: buyDecision() });
-      expect(first.accepted).toBe(true);
-      expect(second.accepted).toBe(false);
-      expect(second.reason).toBe('Daily trade cap reached (1).');
-      expect((await getAccount(accountId)).executionGateResults).toHaveLength(1);
-    } finally { traderConfig.MAX_TRADES_PER_DAY = oldDailyCap; }
-  });
-
-  it('does not open a short on a spot crypto SELL decision', async () => {
-    const accountId = `short-${Date.now()}`;
-    const result = await executeDecision({
-      accountId,
-      symbol: 'BTCUSD',
-      decision: { ...buyDecision(), decision: 'SELL', invalidation: 105, targets: [{ price: 90 }] },
-    });
-    expect(result.accepted).toBe(false);
-    expect(result.reason).toContain('Short paper positions are not enabled');
-    expect((await getAccount(accountId)).positions).toHaveLength(0);
-  });
-
   it('keeps planner, executor, and manager candle checkpoints independent', async () => {
     const accountId = `roles-${Date.now()}`;
     await markCandleProcessed(accountId, 'BTCUSD', '15m', 900, 'executor');

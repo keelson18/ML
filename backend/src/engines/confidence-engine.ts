@@ -142,7 +142,8 @@ export const confidenceEngine: IntelligenceEngine<ConfidenceAnalysis> & {
       explanation: `Historical sample quality is ${sampleQuality}.`,
     });
 
-    const calibration = context.modelCalibrated === true ? 1 : context.modelProbability !== undefined ? context.modelProbability : 0.5;
+    // An uncalibrated probability is not evidence of confidence; keep it neutral until validated.
+    const calibration = context.modelCalibrated === true ? 1 : 0.5;
     factors.push({
       factor: 'model-calibration',
       score: calibration,

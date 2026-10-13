@@ -37,6 +37,11 @@ export function uniqueSeriesRequests(requests: SeriesRequest[]): SeriesRequest[]
   return [...unique.values()];
 }
 
+export function prioritizeSeriesRequests(requests: SeriesRequest[], management: Timeframe, triggers: readonly Timeframe[]): SeriesRequest[] {
+  const priority = (timeframe: Timeframe) => timeframe === management ? 0 : triggers.includes(timeframe) ? 1 : 2;
+  return [...requests].sort((left, right) => priority(left.timeframe) - priority(right.timeframe));
+}
+
 export function replayCandlesAfter(candles: Candle[], checkpoint: number | undefined, maximum: number): Candle[] {
   return candles.filter((candle) => checkpoint === undefined || candle.time > checkpoint).slice(0, maximum);
 }
@@ -205,12 +210,9 @@ export class PaperAutopilotScheduler {
 
     const seriesByKey = new Map<string, MarketDataSeries>();
     const failuresByKey = new Map<string, string>();
-    const seriesRequests = uniqueSeriesRequests([...requestsBySymbol].flatMap(([symbol, timeframes]) =>
-      [...timeframes].map((timeframe) => ({ symbol, timeframe })))).sort((a, b) => {
-        const priority = (timeframe: Timeframe) => timeframe === traderConfig.MGMT_TIMEFRAME ? 0
-          : (traderConfig.TRIGGER_TIMEFRAMES as Timeframe[]).includes(timeframe) ? 1 : 2;
-        return priority(a.timeframe) - priority(b.timeframe);
-      });
+    const seriesRequests = prioritizeSeriesRequests(uniqueSeriesRequests([...requestsBySymbol].flatMap(([symbol, timeframes]) =>
+      [...timeframes].map((timeframe) => ({ symbol, timeframe })))),
+    traderConfig.MGMT_TIMEFRAME as Timeframe, traderConfig.TRIGGER_TIMEFRAMES as Timeframe[]);
     let previousRequestWasFresh = false;
     for (const { symbol, timeframe } of seriesRequests) {
       if (previousRequestWasFresh) await new Promise((resolve) => setTimeout(resolve, providerRequestSpacingMs()));

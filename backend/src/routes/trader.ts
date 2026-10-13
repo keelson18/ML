@@ -12,7 +12,7 @@ import { createTradePlan, rankPlannerResults } from '../trader/planner';
 import { getAccount, listStoredTradePlans, storeTradePlan } from '../services/paperTradingService';
 import { markToMarket } from '../trader/risk';
 import type { TradePlan } from '../trader/types';
-import { selectClosedCandles } from '../trader/candle-math';
+import { candleSeconds, isClosed, selectClosedCandles } from '../trader/candle-math';
 import { reconcilePaperAccount } from '../trader/decision-ledger';
 import { getSupabaseClient } from '../db';
 import { paperAutopilotScheduler, isAutopilotSymbol, type PaperAutopilotConfig } from '../autonomy/paper-autopilot';
@@ -107,9 +107,14 @@ export async function traderRoutes(app: FastifyInstance) {
       await Promise.all(open.map(async (position) => {
         try {
           const data = await fetchMarketData(position.symbol, '1m', 2, { priority: true });
-          const mark = data.candles.at(-1)?.close;
-          if (!mark || !Number.isFinite(mark) || data.stale) staleSymbols.push(position.symbol);
-          prices[position.symbol] = mark && Number.isFinite(mark) ? mark : position.entryPrice;
+          const now = Date.now();
+          const closed = selectClosedCandles(data.candles, '1m', now, traderConfig.CLOSE_GRACE_MS).at(-1);
+          const closeAt = closed ? (closed.time + candleSeconds('1m', closed.time)) * 1000 : Number.NaN;
+          const maxAge = closed ? candleSeconds('1m', closed.time) * 1000 * config.marketDataMaxStaleTtlMultiplier : 0;
+          const usable = !data.stale && closed && isClosed(closed, '1m', now, traderConfig.CLOSE_GRACE_MS)
+            && Number.isFinite(closed.close) && closed.close > 0 && now - closeAt <= maxAge;
+          if (!usable) staleSymbols.push(position.symbol);
+          prices[position.symbol] = usable ? closed.close : position.entryPrice;
         } catch {
           staleSymbols.push(position.symbol);
           prices[position.symbol] = position.entryPrice;
@@ -126,6 +131,15 @@ export async function traderRoutes(app: FastifyInstance) {
         cash: account.cash, startingEquity: traderConfig.TRADER_STARTING_EQUITY,
         equity: marked.equity, unrealizedPnl: marked.unrealizedPnl, drawdownPct: marked.drawdownPct,
         openRiskCash, heatPct: marked.equity > 0 ? openRiskCash / marked.equity * 100 : 0,
+        grossExposurePct: marked.equity > 0 ? marked.grossExposure / marked.equity * 100 : 0,
+        riskLimits: {
+          dailyLossStopPct: traderConfig.DAILY_LOSS_STOP_PCT,
+          maxDrawdownPct: traderConfig.MAX_DRAWDOWN_PCT,
+          maxGrossExposurePct: traderConfig.MAX_GROSS_EXPOSURE_PCT,
+          maxPortfolioHeatPct: traderConfig.MAX_PORTFOLIO_HEAT_PCT,
+          riskPerTradePct: traderConfig.RISK_PER_TRADE_PCT,
+          minRewardRisk: traderConfig.MIN_RR,
+        },
         dailyPnl, weeklyPnl, dailyLossLimitPct: traderConfig.DAILY_LOSS_STOP_PCT,
         weeklyLossLimitPct: traderConfig.WEEKLY_LOSS_STOP_PCT, staleSymbols,
         ledgerStatus, reconciliation,

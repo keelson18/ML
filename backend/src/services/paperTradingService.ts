@@ -1,7 +1,6 @@
-import { closePaperPosition, reducePaperPosition, simulatePaperOrder, type PaperAccountState, type PaperOrderRequest, type PaperOrderResult, type PaperTrade } from '../engines/paper-execution';
+import { closePaperPosition, reducePaperPosition, simulatePaperOrder, type PaperAccountState, type PaperTrade } from '../engines/paper-execution';
 import type { Candle } from '../../../src/lib/types';
 import { getMarket } from '../../../src/lib/markets';
-import type { TradeDecision } from '../engines/decision-engine';
 import { atr } from '../../../src/lib/indicators';
 import { analyzeMarketStructure } from '../../../src/lib/market-structure';
 import { getSupabaseClient } from '../db';
@@ -17,9 +16,20 @@ import { randomUUID, createHash } from 'node:crypto';
 import { computeResearchMetrics, createDailyReview, type JournalSample } from '../trader/research';
 import { getMarketAvailability } from './marketAvailability';
 import { evaluateEventEntryGate, getEventRiskStatus } from '../trader/event-risk';
-import { candleIndex, isClosed } from '../trader/candle-math';
+import { candleIndex, candleSeconds, isClosed, selectClosedCandles } from '../trader/candle-math';
+import { config } from '../config';
 
 const testAccounts = new Map<string, PaperAccountState>();
+
+function freshestClosedCandle(candles: Candle[], timeframe: Timeframe, stale: boolean, now = Date.now()): Candle | undefined {
+  if (stale) return undefined;
+  const closed = selectClosedCandles(candles, timeframe, now, traderConfig.CLOSE_GRACE_MS).at(-1);
+  if (!closed || !isClosed(closed, timeframe, now, traderConfig.CLOSE_GRACE_MS)
+    || !Number.isFinite(closed.close) || closed.close <= 0) return undefined;
+  const closeTime = (closed.time + candleSeconds(timeframe, closed.time)) * 1000;
+  const maximumAgeMs = candleSeconds(timeframe, closed.time) * 1000 * config.marketDataMaxStaleTtlMultiplier;
+  return now - closeTime <= maximumAgeMs ? closed : undefined;
+}
 
 interface LoadedAccount {
   account: PaperAccountState;
@@ -97,6 +107,26 @@ export async function advanceStoredTradePlans(input: {
     throw new Error('Paper execution requires a boundary-verified closed candle.');
   }
   const eventRisk = await getEventRiskStatus(input.symbol);
+  const riskMarks: Record<string, number> = { [input.symbol]: input.candle.close };
+  const observedAccount = await getAccount(input.accountId);
+  const marksToLoad = [...new Set(observedAccount.positions
+    .filter((position) => position.status === 'open' && position.symbol !== input.symbol)
+    .map((position) => position.symbol))];
+  await Promise.all(marksToLoad.map(async (symbol) => {
+    if (process.env.NODE_ENV === 'test') {
+      const position = observedAccount.positions.find((candidate) => candidate.status === 'open' && candidate.symbol === symbol);
+      if (position) riskMarks[symbol] = position.entryPrice;
+      return;
+    }
+    try {
+      const series = await fetchMarketData(symbol, '1m', 3, { priority: true });
+      const closed = freshestClosedCandle(series.candles, '1m', series.stale);
+      if (!closed) return;
+      riskMarks[symbol] = closed.close;
+    } catch {
+      // A missing current mark blocks new risk; entry-price fallback is diagnostic only.
+    }
+  }));
   return updateAccount(input.accountId, (startingAccount) => {
     let account = startingAccount;
     const checkpoint = candleCheckpoint(input.symbol, input.timeframe, 'executor');
@@ -145,9 +175,11 @@ export async function advanceStoredTradePlans(input: {
         const weekStart = dayStart - ((new Date(dayStart).getUTCDay() + 6) % 7) * 86_400_000;
         const dailyPnl = account.trades.filter((trade) => Date.parse(trade.closedAt) >= dayStart).reduce((sum, trade) => sum + trade.realizedPnl, 0);
         const weeklyPnl = account.trades.filter((trade) => Date.parse(trade.closedAt) >= weekStart).reduce((sum, trade) => sum + trade.realizedPnl, 0);
-        const markPrices: Record<string, number> = { [plan.symbol]: input.candle.close };
-        for (const position of openPositions) if (markPrices[position.symbol] === undefined) markPrices[position.symbol] = position.entryPrice;
-        const snapshot = markToMarket(account, markPrices);
+        const snapshot = markToMarket(account, riskMarks);
+        if (snapshot.missingMarkSymbols.length > 0) return gateResult = {
+          approved: false, quantity: 0,
+          reason: `Risk approval requires a fresh mark for every open position: ${snapshot.missingMarkSymbols.join(', ')}.`,
+        };
         if (dailyPnl <= -(snapshot.equity * traderConfig.DAILY_LOSS_STOP_PCT / 100)) return gateResult = { approved: false, quantity: 0, reason: 'Daily loss limit reached.' };
         if (weeklyPnl <= -(snapshot.equity * traderConfig.WEEKLY_LOSS_STOP_PCT / 100)) return gateResult = { approved: false, quantity: 0, reason: 'Weekly loss limit reached.' };
         if (snapshot.drawdownPct >= traderConfig.MAX_DRAWDOWN_PCT) return gateResult = { approved: false, quantity: 0, reason: 'Maximum drawdown limit reached.' };
@@ -313,10 +345,10 @@ function recordPaperTrade(account: PaperAccountState, trade: PaperTrade, timefra
 }
 
 export async function closeOpenPaperPosition(accountId: string, symbol: string): Promise<PaperTrade> {
-  const candles = (await fetchMarketData(symbol, '1m', 1, { priority: true })).candles;
-  const candle = candles.at(-1);
+  const series = await fetchMarketData(symbol, '1m', 3, { priority: true });
+  const candle = freshestClosedCandle(series.candles, '1m', series.stale);
   const exitPrice = candle?.close;
-  if (!exitPrice || !Number.isFinite(exitPrice)) throw new Error('A current market price is unavailable.');
+  if (!candle || !exitPrice) throw new Error('A fresh, closed market price is unavailable; the paper position was not changed.');
   return updateAccount(accountId, (account) => {
     const result = closePaperPosition(account, symbol, exitPrice, traderConfig.FEE_RATE, 'paper-simulator-1.0.0', `trade-${Date.now()}`, undefined, candle, traderConfig.SLIPPAGE_RATE);
     if ('error' in result) throw new Error(result.error);
@@ -422,115 +454,5 @@ export async function markCandleProcessed(accountId: string, symbol: string, tim
       account: { ...account, processedCandles: { ...account.processedCandles, [key]: time } },
       result: undefined,
     };
-  });
-}
-
-export async function executeDecision(input: {
-  accountId?: string;
-  symbol: string;
-  decision: TradeDecision;
-  processedCandle?: { timeframe: string; time: number };
-  marketDataStale?: boolean;
-}) {
-  const accountId = input.accountId ?? 'autonomy:default';
-  const decision = input.decision;
-  const requestedPrice = decision.entry ?? 0;
-  const market = getMarket(input.symbol);
-  const quoteCurrency = market?.priceCurrency ?? market?.quoteAsset;
-  const orderId = `paper-${Date.now()}`;
-  const checkpoint = input.processedCandle ? candleCheckpoint(input.symbol, input.processedCandle.timeframe, 'executor') : undefined;
-  const accountSnapshot = await getAccount(accountId);
-  const markPrices: Record<string, number> = { [input.symbol]: requestedPrice };
-  if (process.env.NODE_ENV !== 'test') {
-    await Promise.all(accountSnapshot.positions.filter((position) => position.status === 'open').map(async (position) => {
-      const candles = (await fetchMarketData(position.symbol, '1m', 2, { priority: true })).candles;
-      const mark = candles.at(-1)?.close;
-      if (!mark || !Number.isFinite(mark)) throw new Error('A mark-to-market price is unavailable for an open position.');
-      markPrices[position.symbol] = mark;
-    }));
-  } else {
-    for (const position of accountSnapshot.positions.filter((candidate) => candidate.status === 'open')) markPrices[position.symbol] = position.entryPrice;
-  }
-
-  return updateAccount<PaperOrderResult>(accountId, (account) => {
-    if (quoteCurrency !== 'USD') {
-      return {
-        account,
-        result: { accepted: false, orderId, status: 'rejected', reason: 'Paper accounts support USD-quoted markets only.', account },
-      };
-    }
-    if (checkpoint && account.processedCandles?.[checkpoint] === input.processedCandle?.time) {
-      return { account, result: simulatePaperOrder(account, {
-        orderId: 'duplicate-candle', positionId: 'duplicate-candle', decisionId: `decision-${decision.timestamp}`,
-        assetId: input.symbol, symbol: input.symbol, decision, riskApproved: false, portfolioApproved: false,
-        quantity: 0, requestedPrice: 0, feeRate: 0, slippageRate: 0, executionVersion: 'paper-simulator-1.0.0',
-      }) };
-    }
-    const executionTime = Date.parse(decision.timestamp);
-    const dayStart = new Date(Number.isFinite(executionTime) ? executionTime : Date.now()).setUTCHours(0, 0, 0, 0);
-    const dailyEntries = new Map<string, string>();
-    for (const trade of account.trades) if (Date.parse(trade.openedAt) >= dayStart) dailyEntries.set(trade.positionId, trade.symbol);
-    for (const position of account.positions) if (Date.parse(position.openedAt) >= dayStart) dailyEntries.set(position.id, position.symbol);
-    const capReason = dailyEntries.size >= traderConfig.MAX_TRADES_PER_DAY
-      ? `Daily trade cap reached (${traderConfig.MAX_TRADES_PER_DAY}).`
-      : [...dailyEntries.values()].filter((entrySymbol) => entrySymbol === input.symbol).length >= traderConfig.MAX_TRADES_PER_SYMBOL_PER_DAY
-        ? `Daily trade cap for ${input.symbol} reached (${traderConfig.MAX_TRADES_PER_SYMBOL_PER_DAY}).`
-        : undefined;
-    if (capReason) {
-      const gate = { id: randomUUID(), accountId, symbol: input.symbol, gate: 'daily-trade-cap', result: 'rejected' as const, reason: capReason, occurredAt: decision.timestamp };
-      const nextAccount = { ...account, executionGateResults: [...(account.executionGateResults ?? []), gate] };
-      return { account: nextAccount, result: { accepted: false, orderId, status: 'rejected', reason: capReason, account: nextAccount } };
-    }
-    const snapshot = markToMarket(account, markPrices);
-    const stop = decision.invalidation;
-    const target = decision.targets?.[0]?.price;
-    const sizing = stop === undefined ? { accepted: false, quantity: 0, reason: 'Invalid stop distance.' } : calculatePositionSize({
-      equity: snapshot.equity,
-      entry: requestedPrice,
-      invalidation: stop,
-      cash: account.cash,
-      grossExposure: snapshot.grossExposure,
-      symbolExposure: snapshot.positions.filter((item) => item.position.symbol === input.symbol)
-        .reduce((sum, item) => sum + item.currentPrice * item.position.quantity, 0),
-    });
-    const quantity = sizing.quantity;
-    const riskDistance = stop === undefined ? 0 : Math.abs(requestedPrice - stop);
-    const rewardDistance = target === undefined ? 0 : Math.abs(target - requestedPrice);
-    const directionValid = decision.decision === 'BUY'
-      ? stop !== undefined && target !== undefined && stop < requestedPrice && target > requestedPrice
-      : decision.decision === 'SELL'
-        ? stop !== undefined && target !== undefined && stop > requestedPrice && target < requestedPrice
-        : false;
-    const riskApproved = !input.marketDataStale
-      && (decision.decision === 'BUY' || decision.decision === 'SELL')
-      && requestedPrice > 0
-      && stop !== undefined && stop > 0
-      && target !== undefined && target > 0
-      && directionValid && riskDistance > 0 && rewardDistance / riskDistance >= traderConfig.MIN_RR
-      && sizing.accepted
-      && quantity > 0
-      && snapshot.equity > 0;
-    const request: PaperOrderRequest = {
-      orderId,
-      positionId: `position-${Date.now()}`,
-      decisionId: `decision-${decision.timestamp}`,
-      assetId: input.symbol,
-      symbol: input.symbol,
-      decision,
-      riskApproved,
-      portfolioApproved: riskApproved,
-      quantity,
-      requestedPrice,
-      feeRate: traderConfig.FEE_RATE,
-      slippageRate: traderConfig.SLIPPAGE_RATE,
-      stopLoss: decision.invalidation,
-      takeProfit: decision.targets?.[0]?.price,
-      executionVersion: 'paper-simulator-1.0.0',
-    };
-    const result = simulatePaperOrder(account, request);
-    const nextAccount = checkpoint
-      ? { ...result.account, processedCandles: { ...result.account.processedCandles, [checkpoint]: input.processedCandle!.time } }
-      : result.account;
-    return { account: nextAccount, result: { ...result, account: nextAccount } };
   });
 }

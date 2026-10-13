@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { TIMEFRAMES, type Candle, type Market, type MarketDataIdentity, type Timeframe } from '../../../src/lib/types';
 import { getMarket } from '../../../src/lib/markets';
 import { config } from '../config';
@@ -145,6 +146,12 @@ export interface MarketDataFetchOptions {
   priority?: boolean;
 }
 
+function candleContentVersion(provider: string, candles: Candle[]): string {
+  const contentHash = createHash('sha256').update(JSON.stringify(candles.map(({ time, open, high, low, close, volume }) =>
+    [time, open, high, low, close, volume]))).digest('hex');
+  return `${provider}-ohlcv-v1:sha256:${contentHash}`;
+}
+
 export function fetchMarketData(canonicalSymbol: string, timeframe: Timeframe, limit = 1000, options: MarketDataFetchOptions = {}): Promise<MarketDataSeries> {
   if (!Number.isInteger(limit) || limit < 1 || limit > 1000) return Promise.reject(new Error('Candle limit must be an integer between 1 and 1000.'));
 
@@ -228,7 +235,7 @@ async function fetchMarketDataUncoalesced(canonicalSymbol: string, timeframe: Ti
   const sourceInstrument = sourceSymbol;
   const startTimestamp = candles[0]?.time ?? null;
   const endTimestamp = candles.at(-1)?.time ?? null;
-  const dataVersion = `${provider}-ohlcv-v1`;
+  const dataVersion = candleContentVersion(provider, candles);
   const datasetId = [provider, sourceInstrument, instrument.quoteAsset, timeframe, startTimestamp ?? 'empty', endTimestamp ?? 'empty', dataVersion].join(':');
 
   const identity: MarketDataIdentity = {
@@ -384,13 +391,13 @@ function limitMarketDataSeries(series: MarketDataSeries, limit: number): MarketD
 
   const startTimestamp = candles[0]?.time ?? null;
   const endTimestamp = candles.at(-1)?.time ?? null;
-  const dataVersion = series.dataset.dataVersion;
+  const dataVersion = candleContentVersion(series.dataset.provider, candles);
   const datasetId = [series.dataset.provider, series.dataset.sourceInstrument, series.instrument.quoteAsset, series.timeframe, startTimestamp ?? 'empty', endTimestamp ?? 'empty', dataVersion].join(':');
 
   return {
     ...series,
-    identity: { ...series.identity, startTimestamp, endTimestamp, datasetId },
-    dataset: { ...series.dataset, startTimestamp, endTimestamp, id: datasetId },
+    identity: { ...series.identity, startTimestamp, endTimestamp, datasetId, dataVersion },
+    dataset: { ...series.dataset, startTimestamp, endTimestamp, id: datasetId, dataVersion },
     candles,
   };
 }

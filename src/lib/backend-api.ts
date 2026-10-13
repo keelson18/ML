@@ -257,6 +257,8 @@ export interface TraderPlan {
 export interface TraderOverview {
   cash: number; startingEquity: number; equity: number; unrealizedPnl: number; drawdownPct: number;
   openRiskCash: number; heatPct: number; dailyPnl: number; weeklyPnl: number;
+  grossExposurePct: number;
+  riskLimits: { dailyLossStopPct: number; maxDrawdownPct: number; maxGrossExposurePct: number; maxPortfolioHeatPct: number; riskPerTradePct: number; minRewardRisk: number };
   dailyLossLimitPct: number; weeklyLossLimitPct: number; staleSymbols: string[];
   ledgerStatus: 'verified' | 'broken' | 'unavailable';
   reconciliation: { ok: boolean; actualEquity: number; expectedEquity: number; difference: number };

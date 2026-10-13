@@ -4,6 +4,8 @@
 
 Paper trading is not live trading. Simulated results are not live performance and do not predict future performance. Paper fills omit queue position, partial fills, outages, funding, borrow, and realistic slippage in thin books.
 
+The current simulator is spot-long only. Entry orders are all-or-none on a later candle: stop entries use the candle open when it gaps through the trigger, otherwise the trigger price, then apply configured adverse slippage and fees. Position management evaluates only closed candles; if both the stop and a target are inside one candle, the stop is assumed first because intrabar ordering is unknown. Target exits use the target or a better candle open, and each reduction allocates entry fees/slippage in proportion to the reduced quantity. This is a conservative deterministic bar model, not an exchange order-book or partial-fill model. Manual paper closes require a fresh closed 1m provider candle. Results must remain labeled simulated.
+
 Strategies tuned on the same data used for evaluation are overfit. Evaluate with chronological walk-forward splits and a locked forward test. Record every setup and parameter set tried; testing many variants inflates apparent results.
 
 Reports must show the sample size and confidence interval. Below `MIN_TRADES_FOR_STATS`, show `INSUFFICIENT SAMPLE (n < MIN_TRADES_FOR_STATS)` and omit win rate. Compare results after costs with buy-and-hold on the same symbol and period, at least 1,000 seeded random-entry runs using the same execution assumptions, and holding cash.

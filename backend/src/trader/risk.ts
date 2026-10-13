@@ -22,10 +22,12 @@ export interface PositionSizingResult {
 export function calculatePositionSize(input: PositionSizingInput): PositionSizingResult {
   const perUnitRisk = Math.abs(input.entry - input.invalidation);
   const riskCash = input.equity * traderConfig.RISK_PER_TRADE_PCT / 100;
-  if (!Number.isFinite(input.entry) || input.entry <= 0 || !Number.isFinite(perUnitRisk) || perUnitRisk <= 0) {
+  if (![input.equity, input.entry, input.invalidation, input.cash, input.grossExposure, input.symbolExposure].every(Number.isFinite)
+    || input.entry <= 0 || input.invalidation <= 0 || input.invalidation >= input.entry || perUnitRisk <= 0
+    || input.grossExposure < 0 || input.symbolExposure < 0) {
     return { accepted: false, quantity: 0, riskCash, perUnitRisk, reason: 'Invalid stop distance.' };
   }
-  if (!Number.isFinite(input.equity) || input.equity <= 0 || !Number.isFinite(input.cash) || input.cash <= 0) {
+  if (input.equity <= 0 || input.cash <= 0) {
     return { accepted: false, quantity: 0, riskCash, perUnitRisk, reason: 'Insufficient paper equity or cash.' };
   }
   const maxQtyByRisk = riskCash / perUnitRisk;
@@ -45,12 +47,19 @@ export interface MarkToMarketSnapshot {
   grossExposure: number;
   unrealizedPnl: number;
   drawdownPct: number;
+  /** Positions without a valid current mark are shown at entry for diagnostics, never treated as verified risk inputs. */
+  missingMarkSymbols: string[];
   positions: Array<{ position: PaperAccountState['positions'][number]; currentPrice: number; pnl: number; pnlPct: number; weight: number }>;
 }
 
 export function markToMarket(account: PaperAccountState, markPrices: Readonly<Record<string, number>>): MarkToMarketSnapshot {
-  const positions = account.positions.filter((position) => position.status === 'open').map((position) => {
-    const currentPrice = markPrices[position.symbol] ?? position.entryPrice;
+  const openPositions = account.positions.filter((position) => position.status === 'open');
+  const missingMarkSymbols = [...new Set(openPositions.filter((position) =>
+    !Number.isFinite(markPrices[position.symbol]) || (markPrices[position.symbol] ?? 0) <= 0,
+  ).map((position) => position.symbol))];
+  const positions = openPositions.map((position) => {
+    const suppliedMark = markPrices[position.symbol];
+    const currentPrice = Number.isFinite(suppliedMark) && suppliedMark > 0 ? suppliedMark : position.entryPrice;
     const pnl = position.side === 'buy'
       ? (currentPrice - position.entryPrice) * position.quantity
       : (position.entryPrice - currentPrice) * position.quantity;
@@ -77,6 +86,7 @@ export function markToMarket(account: PaperAccountState, markPrices: Readonly<Re
     grossExposure,
     unrealizedPnl,
     drawdownPct,
+    missingMarkSymbols,
     positions: positions.map((item) => ({ ...item, weight: equity > 0 ? item.currentPrice * item.position.quantity / equity : 0 })),
   };
 }
