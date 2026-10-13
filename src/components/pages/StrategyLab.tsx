@@ -1,7 +1,7 @@
 import { Activity, TrendingDown, TrendingUp, Zap } from 'lucide-react';
 import { useMemo } from 'react';
 import type { Candle, Signal, Timeframe } from '../../lib/types';
-import { getStrategyAvailability, runAllLibraryStrategies, STRATEGY_CATEGORIES } from '../../lib/strategies/index';
+import { getStrategyAvailability, runAllLibraryStrategiesWithDiagnostics, STRATEGY_CATEGORIES } from '../../lib/strategies/index';
 
 interface Props {
   signals: Signal[];
@@ -22,7 +22,8 @@ const ICONS = {
 
 export default function StrategyLab({ signals, candles, timeframe }: Props) {
   const availability = useMemo(() => getStrategyAvailability(candles, timeframe), [candles, timeframe]);
-  const librarySignals = useMemo(() => runAllLibraryStrategies(candles, timeframe), [candles, timeframe]);
+  const library = useMemo(() => runAllLibraryStrategiesWithDiagnostics(candles, timeframe), [candles, timeframe]);
+  const librarySignals = library.signals;
   const signalsById = new Map<string, Signal[]>();
   for (const signal of librarySignals) {
     if (!signal.strategyId) continue;
@@ -43,6 +44,10 @@ export default function StrategyLab({ signals, candles, timeframe }: Props) {
       </div>
 
       <div className="space-y-6">
+        {library.failures.length > 0 && <div role="alert" className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-warning">
+          {library.failures.length} strategy detector(s) failed; their outputs are unavailable and cannot be treated as evidence.
+          <ul className="mt-2 list-inside list-disc">{library.failures.map((failure) => <li key={failure.strategyId}>{failure.strategy} ({failure.strategyId}): {failure.message}</li>)}</ul>
+        </div>}
         {STRATEGY_CATEGORIES.map((category) => {
           const categoryStrategies = availability.filter(({ strategy }) => strategy.category === category);
           if (!categoryStrategies.length) return null;

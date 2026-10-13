@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { config } from '../config';
-import { fetchMarketData, clearMarketDataCache, resetMassiveBudgetForTests } from './marketDataService';
+import { fetchMarketData, clearMarketDataCache, getCachedCandleFreshness, resetMassiveBudgetForTests } from './marketDataService';
 
 const originalMassiveKey = config.massiveApiKey;
 const originalTwelveDataKey = config.twelveDataApiKey;
@@ -141,6 +141,11 @@ describe('market data instrument mapping', () => {
 });
 
 describe('market data cache freshness and bounds', () => {
+  it('reports cached candle status as unverified when there is no cache and makes no provider request', () => {
+    const result = getCachedCandleFreshness(['BTCUSD'], ['1h'], 3);
+    expect(result[0]).toMatchObject({ status: 'unverified', newestClosedCandleAt: null, ageMs: null });
+  });
+
   it('returns an unexpired cached result without another provider request', async () => {
     config.massiveApiKey = 'test-key';
     const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {

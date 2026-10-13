@@ -14,15 +14,18 @@ import { registerAuthGuards } from './middleware/fastify-auth';
 import { marketAvailabilityRoutes } from './routes/market-availability';
 import { traderRoutes } from './routes/trader';
 import { adminUserRoutes } from './routes/admin-users';
+import { adminOverviewRoutes } from './routes/admin-overview';
 import { eventRoutes } from './routes/events';
 import { newsRoutes } from './routes/news';
 import { personalDataRoutes } from './routes/personal-data';
+import { learningResearchRoutes } from './routes/learning-research';
 import { coachContextRoutes } from './routes/coach-context';
 import { registerLiveStream } from './live/register-stream';
 import { probeAllMarkets } from './services/marketAvailability';
 import { readJsonSafe } from '../../shared/http';
 import { createHash } from 'node:crypto';
 import { isSupabaseServerKey } from './utils/supabase-server-key';
+import { traderConfig } from './trader/config';
 
 // Allowed CORS origins from env, defaults to local dev
 function allowedOrigins(): string[] {
@@ -78,29 +81,30 @@ function schemaFailureMessage(schema: SchemaHealth): string {
 }
 
 async function readPaperLedgerHealth() {
-  if (paperLedgerHealthCache && Date.now() - paperLedgerHealthCache.checkedAt < 300_000) return paperLedgerHealthCache.value;
+  if (paperLedgerHealthCache && Date.now() - paperLedgerHealthCache.checkedAt < config.adminOverviewCacheTtlMs) return paperLedgerHealthCache.value;
   if (paperLedgerHealthCheck) return paperLedgerHealthCheck;
   paperLedgerHealthCheck = (async () => {
     let value: PaperHealth = {
       status: 'unavailable', checkedAccounts: 0, brokenAccounts: 0, hashChainVerified: false, accounting: { checked: 0, failures: 0, accounts: [] },
     };
     try {
-      const { data, error } = await getSupabaseClient().rpc('paper_ledger_health');
-      if (!error && data && typeof data === 'object') {
-        const hash = data as { status?: string; checkedAccounts?: number; brokenAccounts?: number };
-        const { data: accounts, error: accountError } = await getSupabaseClient().from('paper_sim_accounts').select('state');
-        if (!accountError && accounts) {
-          const { reconcilePaperAccount } = await import('./trader/decision-ledger');
-          const reconciliations = accounts.map((item) => {
-            const state = item.state as import('./engines/paper-execution').PaperAccountState;
-            const reconciliation = reconcilePaperAccount(state);
-            return { accountRef: createHash('sha256').update(state.accountId).digest('hex').slice(0, 12), ok: reconciliation.ok, difference: reconciliation.difference };
-          });
-          const failures = reconciliations.filter((item) => !item.ok).length;
-          value = { status: hash.status === 'broken' || failures > 0 ? 'broken' : hash.status === 'verified' ? 'verified' : 'unavailable',
-            checkedAccounts: Number(hash.checkedAccounts ?? 0), brokenAccounts: Number(hash.brokenAccounts ?? 0),
-            hashChainVerified: hash.status === 'verified', accounting: { checked: accounts.length, failures, accounts: reconciliations } };
-        }
+      const client = getSupabaseClient();
+      const { error: checkpointError } = await client.from('paper_ledger_verification_checkpoints').select('account_id').limit(0);
+      if (checkpointError) throw new Error('Incremental ledger verification is not installed.');
+      const [{ data: ledgerData, error: ledgerError }, { data: accountingData, error: accountingError }] = await Promise.all([
+        client.rpc('paper_ledger_health'),
+        client.rpc('paper_accounting_health', { p_starting_equity: traderConfig.TRADER_STARTING_EQUITY, p_tolerance: traderConfig.ACCOUNTING_RECONCILIATION_TOLERANCE }),
+      ]);
+      if (!ledgerError && ledgerData && typeof ledgerData === 'object' && !accountingError && accountingData && typeof accountingData === 'object') {
+        const hash = ledgerData as { status?: string; checkedAccounts?: number; brokenAccounts?: number };
+        const accounting = accountingData as { status?: string; checkedAccounts?: number; brokenAccounts?: number };
+        const checkedAccounts = Number(hash.checkedAccounts ?? 0);
+        const accountingChecked = Number(accounting.checkedAccounts ?? 0);
+        const accountingFailures = Number(accounting.brokenAccounts ?? 0);
+        const hashChainVerified = hash.status === 'verified' && checkedAccounts > 0;
+        value = { status: hash.status === 'broken' || accounting.status === 'broken' ? 'broken' : hashChainVerified && accountingChecked > 0 ? 'verified' : 'unavailable',
+          checkedAccounts, brokenAccounts: Number(hash.brokenAccounts ?? 0), hashChainVerified,
+          accounting: { checked: accountingChecked, failures: accountingFailures, accounts: [] } };
       }
     } catch { value = { status: 'unavailable', checkedAccounts: 0, brokenAccounts: 0, hashChainVerified: false, accounting: { checked: 0, failures: 0, accounts: [] } }; }
     paperLedgerHealthCache = { checkedAt: Date.now(), value };
@@ -178,9 +182,11 @@ export function buildServer() {
   void app.register(traderRoutes);
   void app.register(coachContextRoutes);
   void app.register(adminUserRoutes);
+  void app.register(adminOverviewRoutes);
   void app.register(eventRoutes);
   void app.register(newsRoutes);
   void app.register(personalDataRoutes);
+  void app.register(learningResearchRoutes);
   if (config.liveFeed.enabled) registerLiveStream(app, allowedOrigins());
   const healthResponse = async () => ({
     status: 'ok', service: 'quantum-api', autonomy: pipeline.getSnapshot(), schema: await readSchemaHealth(), paperLedger: await readPaperLedgerHealth(),

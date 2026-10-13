@@ -7,6 +7,12 @@ import { StreamGateway } from './stream-gateway';
 import { TicketStore } from './stream-tickets';
 import type { LiveFeed } from './types';
 
+let activeGateway: StreamGateway | undefined;
+
+export function getLiveFeedDiagnostics() {
+  return activeGateway?.feedDiagnostics() ?? null;
+}
+
 export function registerLiveStream(app: FastifyInstance, allowedOrigins: readonly string[]): void {
   const live = config.liveFeed;
   const feeds: LiveFeed[] = live.coinbase.enabled
@@ -26,6 +32,7 @@ export function registerLiveStream(app: FastifyInstance, allowedOrigins: readonl
     maxConnectionMs: live.gateway.maxConnectionMs,
   });
   const ticketLimiter = new WindowLimiter(live.gateway.ticketRateLimitMax, config.rateLimitWindowMs);
+  activeGateway = gateway;
 
   app.post('/api/v1/stream/ticket', { preHandler: app.requireAuth }, async (request, reply) => {
     const userId = request.authenticatedUserId;
@@ -35,5 +42,8 @@ export function registerLiveStream(app: FastifyInstance, allowedOrigins: readonl
   });
 
   gateway.attach(app.server);
-  app.addHook('onClose', () => gateway.close());
+  app.addHook('onClose', async () => {
+    if (activeGateway === gateway) activeGateway = undefined;
+    await gateway.close();
+  });
 }

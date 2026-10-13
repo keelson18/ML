@@ -74,7 +74,7 @@ function evidenceAgreement(evidence: EngineEvidence[], direction: 'buy' | 'sell'
 
 function evidenceIndependence(evidence: EngineEvidence[]): number {
   if (evidence.length === 0) return 0.5;
-  const sources = new Set(evidence.map((item) => item.source));
+  const sources = new Set(evidence.map((item) => item.correlationGroup ?? item.source));
   return Math.min(1, sources.size / Math.max(evidence.length, 1) + (sources.size >= 3 ? 0.25 : 0));
 }
 
@@ -130,7 +130,7 @@ export const confidenceEngine: IntelligenceEngine<ConfidenceAnalysis> & {
       factor: 'evidence-independence',
       score: independence,
       weight: weightFor('evidence-independence'),
-      explanation: `Evidence independence is ${(independence * 100).toFixed(0)}% based on ${new Set(context.evidence.map((item) => item.source)).size} distinct source(s).`,
+      explanation: `Evidence independence is ${(independence * 100).toFixed(0)}% after grouping correlated evidence from ${new Set(context.evidence.map((item) => item.correlationGroup ?? item.source)).size} independent group(s).`,
     });
 
     const sampleQuality = context.historicalSampleQuality ?? 'none';
@@ -218,7 +218,7 @@ export const confidenceEngine: IntelligenceEngine<ConfidenceAnalysis> & {
       engineVersion: ENGINE_VERSION,
       timestamp: new Date().toISOString(),
       inputContextId: context.inputContextId,
-      status: riskBlocked ? 'degraded' : 'ok',
+      status: riskBlocked || context.dataQualityBlocked ? 'degraded' : 'ok',
       result,
       confidence: reduced,
       evidence,

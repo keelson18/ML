@@ -15,6 +15,7 @@ export interface ProviderBudgetSnapshot {
   usedInWindow: number;
   queued: number;
   backoffUntil: string | null;
+  last429At: string | null;
 }
 
 export class ProviderBudgetExhaustedError extends Error {
@@ -31,6 +32,7 @@ interface SentRequest {
 export class ProviderBudget {
   private readonly sent: SentRequest[] = [];
   private backoffUntil = 0;
+  private last429At: number | null = null;
   private queued = 0;
   private readonly reservedForPriority: number;
   private readonly now: () => number;
@@ -69,7 +71,8 @@ export class ProviderBudget {
   }
 
   backoff(ms: number): void {
-    this.backoffUntil = Math.max(this.backoffUntil, this.now() + ms);
+    this.last429At = this.now();
+    this.backoffUntil = Math.max(this.backoffUntil, this.last429At + ms);
   }
 
   snapshot(): ProviderBudgetSnapshot {
@@ -82,6 +85,7 @@ export class ProviderBudget {
       usedInWindow: this.sent.length,
       queued: this.queued,
       backoffUntil: this.backoffUntil > now ? new Date(this.backoffUntil).toISOString() : null,
+      last429At: this.last429At === null ? null : new Date(this.last429At).toISOString(),
     };
   }
 

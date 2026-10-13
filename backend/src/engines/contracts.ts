@@ -1,4 +1,4 @@
-import type { Candle, Timeframe } from '../../../src/lib/types';
+import type { Candle, MarketType, Timeframe } from '../../../src/lib/types';
 
 export type EngineStatus = 'ok' | 'degraded' | 'failed';
 
@@ -8,6 +8,7 @@ export interface EngineEvidence {
   id: string;
   kind: EvidenceKind;
   source: string;
+  correlationGroup?: string;
   direction?: 'bullish' | 'bearish' | 'neutral';
   score?: number;
   explanation: string;
@@ -19,6 +20,14 @@ export interface EngineContext {
   timeframe: Timeframe;
   candles: Candle[];
   observedAt?: number;
+  dataState?: 'ready' | 'degraded' | 'stale' | 'failed';
+  candleClosure?: 'verified_closed' | 'forming' | 'unknown';
+  dataSource?: {
+    provider: string;
+    fetchedAt: number;
+    datasetId: string;
+    marketType?: MarketType;
+  };
 }
 
 export interface EngineResult<TResult> {

@@ -6,13 +6,12 @@ import type { ResearchContext } from '../../../backend/src/engines/research-engi
 
 export async function persistLearningEvent(context: LearningContext, userId: string, correlationId = createCorrelationId()): Promise<string> {
   try {
-    const result = await api.post<{ id: string }>('/learning/events', {
-      userId,
+    const result = await api.post<{ id: string }>('/api/v1/learning/events', {
       sourceType: context.observation.source,
-      sourceId: context.observation.id,
-      observation: context.observation.facts,
+      sourceId: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(context.observation.id)
+        ? context.observation.id : null,
+      observation: { observationId: context.observation.id, facts: context.observation.facts },
       hypothesis: context.hypothesis,
-      status: context.experimentCompleted ? (context.validationPassed ? (context.approved ? 'approved' : 'candidate') : 'rejected') : 'hypothesis',
     });
     writeLog(createLogEvent('info', 'learning.event.persisted', correlationId, { eventId: result.id, userId }));
     return result.id;
@@ -23,8 +22,7 @@ export async function persistLearningEvent(context: LearningContext, userId: str
 
 export async function persistResearchExperiment(context: ResearchContext, userId: string, correlationId = createCorrelationId()): Promise<string> {
   try {
-    const result = await api.post<{ id: string }>('/research/experiments', {
-      userId,
+    const result = await api.post<{ id: string }>('/api/v1/research/experiments', {
       name: context.experimentVersion,
       hypothesis: `Research experiment ${context.experimentVersion}`,
       datasetId: context.datasetId,

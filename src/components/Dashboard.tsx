@@ -7,7 +7,6 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { TIMEFRAMES, MARKET_TYPES, type Candle, type Timeframe, type Signal, type Recommendation, type MLPrediction, type MarketType, type CMSContent } from '../lib/types';
 import { getDataProvider } from '../lib/providers';
-import { riskLevels } from '../lib/strategies';
 import { runAllStrategies } from '../lib/strategies/index';
 import { combineSignals } from '../lib/backtest';
 import { fetchMLPrediction, fetchCachedMLPrediction } from '../lib/mlClient';
@@ -188,7 +187,7 @@ export default function Dashboard() {
     setServerDecision(null);
     setServerDecisionError(null);
     if (decisionCandles.length < 60) return () => { cancelled = true; };
-    requestBackendDecision(symbol, timeframe, decisionCandles)
+    requestBackendDecision(symbol, timeframe)
       .then((decision) => { if (!cancelled) { setServerDecision(decision); setServerDecisionError(decision ? null : 'Decision service returned no result.'); } })
       .catch((error) => { if (!cancelled) { setServerDecision(null); setServerDecisionError(error instanceof Error ? error.message : 'Decision analysis failed.'); } });
     return () => { cancelled = true; };
@@ -231,23 +230,16 @@ export default function Dashboard() {
     setMlLoading(false);
   };
 
-  const { signals, recommendation, risk } = useMemo(() => {
-    if (decisionCandles.length < 60) return { signals: [] as Signal[], recommendation: null as Recommendation | null, risk: null };
+  const { signals, recommendation } = useMemo(() => {
+    if (decisionCandles.length < 60) return { signals: [] as Signal[], recommendation: null as Recommendation | null };
     const sigs = runAllStrategies(decisionCandles, timeframe);
     const rec = combineSignals(sigs, ml, decisionCandles, symbol, timeframe);
-    const r = riskLevels(decisionCandles);
-    return { signals: sigs, recommendation: rec, risk: r };
+    return { signals: sigs, recommendation: rec };
   }, [decisionCandles, ml, symbol, timeframe]);
 
   const overlays = useMemo(() => {
-    const all = signals.flatMap((s) => s.overlays ?? []);
-    if (recommendation?.stopLoss && recommendation?.takeProfit && recommendation.entry) {
-      all.push({ type: 'hline' as const, id: 'sl', price: recommendation.stopLoss, color: '#ef4444', label: 'SL' });
-      all.push({ type: 'hline' as const, id: 'tp', price: recommendation.takeProfit, color: '#22c55e', label: 'TP' });
-      all.push({ type: 'hline' as const, id: 'entry', price: recommendation.entry, color: '#10a37f', label: 'Entry' });
-    }
-    return all;
-  }, [signals, recommendation]);
+    return signals.flatMap((signal) => signal.overlays ?? []);
+  }, [signals]);
 
   const priceChange = useMemo(() => {
     if (candles.length < 2) return null;
@@ -374,7 +366,7 @@ export default function Dashboard() {
             <button type="button" onClick={() => setReloadKey((key) => key + 1)} className="rounded border border-warning/40 px-2 py-1 font-medium hover:bg-warning/10">Retry</button>
           </div>
         )}
-        <AutonomousCommandCenter symbol={symbol} timeframe={timeframe} marketType={marketType} wsStatus={wsStatus} candles={candles} candlesStale={Boolean(dataError && candles.length)} overlays={overlays} recommendation={recommendation} serverDecision={serverDecision} serverDecisionError={serverDecisionError} signals={signals} markets={availableMarkets} onSymbolChange={setSymbol} theme={theme} risk={risk} livePrice={livePrice} loading={loading} />
+        <AutonomousCommandCenter symbol={symbol} timeframe={timeframe} marketType={marketType} wsStatus={wsStatus} candles={candles} candlesStale={Boolean(dataError && candles.length)} overlays={overlays} recommendation={recommendation} serverDecision={serverDecision} serverDecisionError={serverDecisionError} signals={signals} markets={availableMarkets} onSymbolChange={setSymbol} theme={theme} livePrice={livePrice} loading={loading} />
       </div>
     );
   };

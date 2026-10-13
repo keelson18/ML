@@ -63,6 +63,7 @@ export class CoinbaseFeed implements LiveFeed {
   private reconnectTimer: Timer | undefined;
   private staleTimer: ReturnType<typeof setInterval> | undefined;
   private lastMessageAt = 0;
+  private lastTickAt: number | null = null;
   private attempt = 0;
   private closed = false;
 
@@ -86,8 +87,8 @@ export class CoinbaseFeed implements LiveFeed {
     return this.state;
   }
 
-  diagnostics(): Readonly<CoinbaseFeedStats> {
-    return { ...this.stats };
+  diagnostics(): Readonly<CoinbaseFeedStats> & { subscribedSymbols: number; lastTickAt: number | null } {
+    return { ...this.stats, subscribedSymbols: this.desired.size, lastTickAt: this.lastTickAt };
   }
 
   subscribe(symbols: readonly string[]): void {
@@ -175,6 +176,7 @@ export class CoinbaseFeed implements LiveFeed {
         if (!this.acceptSequence(ticker.product_id, envelope.sequence_num)) continue;
         this.stats.ticks += 1;
         const tick: Tick = { symbol, price: ticker.price, volume: null, timestamp };
+        this.lastTickAt = timestamp;
         for (const listener of this.tickListeners) listener(tick);
       }
     }

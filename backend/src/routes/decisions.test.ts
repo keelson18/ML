@@ -19,8 +19,14 @@ function series() {
     time: lastClosedTime - (59 - index) * 3600,
     open: 100, high: 101, low: 99, close: 100, volume: 1,
   }));
-  const forming = { time: lastClosedTime + 3600, open: 100, high: 101, low: 99, close: 100, volume: 1 };
-  return { candles: [...closed, forming] };
+  const forming = { time: lastClosedTime + 10 * 3600, open: 100, high: 101, low: 99, close: 100, volume: 1 };
+  return {
+    candles: [...closed, forming],
+    instrument: { marketType: 'crypto' },
+    dataset: { id: 'test-provider:test-series', provider: 'massive' },
+    fetchedAt: Date.now(),
+    stale: false,
+  };
 }
 
 async function createApp() {
@@ -54,7 +60,7 @@ function analyzeRequest(app: Awaited<ReturnType<typeof createApp>>, token: strin
 describe('server-side decision analysis', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    lastClosedTime = 1_700_000_000;
+    lastClosedTime = Math.floor(Date.now() / 3_600_000) * 3_600 - 3_600;
     mocks.fetchMarketData.mockImplementation(async () => series());
     mocks.analyze.mockImplementation(async () => ({ decision: { result: { decision: 'NO_TRADE' } } }));
   });
@@ -86,6 +92,20 @@ describe('server-side decision analysis', () => {
     await app.close();
   });
 
+  it('passes only boundary-verified closed candles with provider provenance to analysis', async () => {
+    const app = await createApp();
+    await analyzeRequest(app, 'user-closed-check');
+    const [, userId] = mocks.analyze.mock.calls[0] ?? [];
+    const [input] = mocks.analyze.mock.calls[0] ?? [];
+    expect(userId).toBe('user-closed-check');
+    expect(input).toMatchObject({
+      candleClosure: 'verified_closed', dataState: 'ready',
+      dataSource: { provider: 'massive', marketType: 'crypto', datasetId: 'test-provider:test-series' },
+    });
+    expect(input.candles.at(-1).time).toBe(lastClosedTime);
+    await app.close();
+  });
+
   it('charges the quota only for uncached analyses', async () => {
     const app = await createApp();
     const max = config.analyzeRateLimitMax;
@@ -93,10 +113,10 @@ describe('server-side decision analysis', () => {
       expect((await analyzeRequest(app, 'user-quota')).statusCode).toBe(200);
     }
     for (let index = 1; index < max; index += 1) {
-      lastClosedTime += 3600;
+      lastClosedTime -= 3600;
       expect((await analyzeRequest(app, 'user-quota')).statusCode).toBe(200);
     }
-    lastClosedTime += 3600;
+    lastClosedTime -= 3600;
     const limited = await analyzeRequest(app, 'user-quota');
     expect(limited.statusCode).toBe(429);
     expect(limited.json()).toEqual({ error: 'Analysis is busy. Try again shortly.' });

@@ -17,6 +17,8 @@ export interface ResearchAnalysis {
   leakageDetected: boolean;
   chronological: boolean;
   outOfSampleReady: boolean;
+  validationState: 'INSUFFICIENT_EVIDENCE' | 'INVALID_DESIGN';
+  sampleSize: number;
   datasetId: string;
   experimentVersion: string;
   warnings: string[];
@@ -49,13 +51,15 @@ export const researchIntelligenceEngine: IntelligenceEngine<ResearchAnalysis> & 
     if (!isChronological) warnings.push('Dataset timestamps are not strictly chronological.');
     if (!splitValid) warnings.push('Training and out-of-sample boundaries are invalid.');
     if (!costsValid) warnings.push('Transaction cost and slippage assumptions must be non-negative finite values.');
-    if (context.candles.length < 30) warnings.push('At least 30 candles are recommended for research validation.');
+    warnings.push('No deterministic fill/outcome evaluator or realized out-of-sample metrics were supplied; this design cannot establish validation.');
     const leakageDetected = !splitValid || !isChronological;
     const result: ResearchAnalysis = {
-      reproducible: Boolean(context.datasetId && context.experimentVersion && costsValid),
+      reproducible: false,
       leakageDetected,
       chronological: isChronological,
-      outOfSampleReady: !leakageDetected && costsValid && context.candles.length >= 30,
+      outOfSampleReady: false,
+      validationState: leakageDetected || !costsValid ? 'INVALID_DESIGN' : 'INSUFFICIENT_EVIDENCE',
+      sampleSize: 0,
       datasetId: context.datasetId,
       experimentVersion: context.experimentVersion,
       warnings,
@@ -74,7 +78,7 @@ export const researchIntelligenceEngine: IntelligenceEngine<ResearchAnalysis> & 
         source: ENGINE_NAME,
         direction: 'neutral',
         score: result.leakageDetected ? 1 : 0,
-        explanation: result.leakageDetected ? 'Research design failed leakage safeguards.' : 'Chronological and out-of-sample safeguards passed.',
+        explanation: result.leakageDetected ? 'Research design failed chronological or split safeguards.' : 'Chronology and split boundaries were checked; no realized outcome evaluation was provided.',
       },
     ];
 

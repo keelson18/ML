@@ -1,10 +1,11 @@
-import { runAllStrategies, selectBestStrategy, type Strategy } from '../../../src/lib/strategies/index';
+import { runAllStrategiesWithDiagnostics, selectBestStrategy, type Strategy } from '../../../src/lib/strategies/index';
 import type { Signal } from '../../../src/lib/types';
 import type { EngineContext, EngineEvidence, EngineResult, IntelligenceEngine } from './contracts';
 
 export interface StrategyAnalysis {
-  selectedStrategy: Pick<Strategy, 'name' | 'type' | 'timeframes' | 'minCandles'>;
+  selectedStrategy: Pick<Strategy, 'id' | 'version' | 'name' | 'type' | 'timeframes' | 'minCandles'>;
   signals: Signal[];
+  executionFailures: { strategyId: string; strategy: string; message: string }[];
 }
 
 const ENGINE_NAME = 'strategy-intelligence';
@@ -34,8 +35,9 @@ export const strategyIntelligenceEngine: IntelligenceEngine<StrategyAnalysis> = 
   analyze(context: EngineContext): EngineResult<StrategyAnalysis> {
     const startedAt = performance.now();
     const selectedStrategy = selectBestStrategy(context.candles, context.timeframe);
-    const signals = runAllStrategies(context.candles, context.timeframe);
+    const { signals, failures } = runAllStrategiesWithDiagnostics(context.candles, context.timeframe);
     const warnings: string[] = [];
+    for (const failure of failures) warnings.push(`${failure.strategy} (${failure.strategyId}) failed: ${failure.message}`);
 
     if (context.candles.length < selectedStrategy.minCandles) {
       warnings.push(`Selected strategy requires at least ${selectedStrategy.minCandles} candles.`);
@@ -53,15 +55,18 @@ export const strategyIntelligenceEngine: IntelligenceEngine<StrategyAnalysis> = 
       engineVersion: ENGINE_VERSION,
       timestamp: new Date().toISOString(),
       inputContextId: context.inputContextId,
-      status: context.candles.length < selectedStrategy.minCandles ? 'degraded' : 'ok',
+      status: context.candles.length < selectedStrategy.minCandles || failures.length > 0 ? 'degraded' : 'ok',
       result: {
         selectedStrategy: {
+          id: selectedStrategy.id,
+          version: selectedStrategy.version,
           name: selectedStrategy.name,
           type: selectedStrategy.type,
           timeframes: selectedStrategy.timeframes,
           minCandles: selectedStrategy.minCandles,
         },
         signals,
+        executionFailures: failures,
       },
       confidence,
       evidence: buildEvidence(signals),

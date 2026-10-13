@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fetchBackendHealth, fetchCanonicalMarketData, runTraderAutopilotNow } from './backend-api';
+import { fetchBackendHealth, fetchCanonicalMarketData, requestBackendDecision, runTraderAutopilotNow } from './backend-api';
 import { supabase } from './supabase';
 
 vi.mock('./supabase', () => ({
@@ -73,5 +73,13 @@ describe('authenticated backend responses', () => {
     const init = fetchMock.mock.calls[0]?.[1];
     expect(init?.method).toBe('POST');
     expect(new Headers(init?.headers).has('Content-Type')).toBe(false);
+  });
+
+  it('asks the server to load decision candles instead of sending client candles', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ decision: { result: { decision: 'NO_TRADE' } } }), { status: 200 }));
+    await expect(requestBackendDecision('BTCUSD', '1h')).resolves.toEqual({ decision: 'NO_TRADE' });
+    const [path, init] = fetchMock.mock.calls[0] ?? [];
+    expect(path).toBe('/api/v1/decisions/analyze');
+    expect(JSON.parse(String(init?.body))).toEqual({ symbol: 'BTCUSD', timeframe: '1h' });
   });
 });

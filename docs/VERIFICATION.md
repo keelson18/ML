@@ -163,3 +163,12 @@ A PostgreSQL/Supabase RLS integration test was not run, so owner/admin/anon beha
 - `npm test`: **PASS**, 51 test files and 280 tests. The sandbox invocation initially failed to spawn esbuild (`EPERM`); the elevated run succeeded. Test fixtures now return provider instrument metadata matching the requested source ticker, and autopilot defaults are derived from the active registry.
 - `git diff --check`: **PASS**.
 - Live API/provider/Supabase access and browser page workflows remain **NOT-VERIFIED** in this local run. The local automated checks do not prove that the owner’s backend is running or that its database migrations and provider credentials are ready.
+
+### Admin System Health — Phase 1
+
+- Aggregated admin overview, strict response validation, process-local provider/feed snapshots, cached candle freshness, environment label, and server-side TTL are implemented. Sources that throw or lack evidence return `unverified`; provider requests are not made by the overview.
+- Migration `20261016000000_admin_health_checkpoints.sql` adds a service-role-only per-account sequence/hash checkpoint and changes normal ledger health to verify only new rows. Full ledger re-verification is an explicit AAL2-gated, one-per-minute action; its success audit is part of the database transaction, and MFA denials are audited. Migration application and database execution are **NOT-VERIFIED**.
+- `npm run check:env`: **PASS** (52 environment reads documented). `npm run check:migration-versions`: **PASS** (40 unique versions).
+- `npm run typecheck`: **FAIL / BLOCKED** because this workspace's dependencies are incomplete (`react` and `lucide-react` are unavailable); no successful frontend typecheck was established.
+- `npm run backend:typecheck`: **FAIL / BLOCKED** because this workspace's dependencies are incomplete (`zod`, `fastify`, and `vitest` are unavailable). One surfaced diagnostics type mismatch was corrected; compilation remains unverified.
+- Phase 1 route/security tests were added but **NOT-VERIFIED** because Vitest cannot be loaded. Browser behavior, live Supabase schema, provider budget state, feed connectivity, and authenticated AAL2 re-verification remain **NOT-VERIFIED**.

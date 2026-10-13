@@ -1,6 +1,7 @@
 // Builds decision-engine risk context from actual plans and marked account state.
 import { masterDecisionEngine, type DecisionEngineContext } from '../engines/decision-engine';
 import type { Candle, Timeframe } from '../../../src/lib/types';
+import type { MarketType } from '../../../src/lib/types';
 import type { TradePlan } from '../trader/types';
 import { traderConfig } from '../trader/config';
 import { markToMarket, calculatePositionSize } from '../trader/risk';
@@ -14,6 +15,9 @@ export interface AnalyzeInput {
   candles: Candle[];
   inputContextId?: string;
   plan?: TradePlan;
+  candleClosure?: 'verified_closed' | 'forming' | 'unknown';
+  dataState?: 'ready' | 'degraded' | 'stale' | 'failed';
+  dataSource?: { provider: string; fetchedAt: number; datasetId: string; marketType?: MarketType };
 }
 
 async function buildContext(input: AnalyzeInput, accountId: string): Promise<DecisionEngineContext> {
@@ -68,6 +72,10 @@ async function buildContext(input: AnalyzeInput, accountId: string): Promise<Dec
     timeframe: input.timeframe,
     candles: input.candles,
     observedAt: Math.floor(Date.now() / 1000),
+    entryZone: input.plan?.zone,
+    candleClosure: input.candleClosure ?? 'unknown',
+    dataState: input.dataState ?? 'degraded',
+    dataSource: input.dataSource,
     risk: {
       trade: {
         size: sizing.quantity,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Candle } from '../../../src/lib/types';
 import { masterDecisionEngine } from './decision-engine';
+import { confidenceEngine } from './confidence-engine';
 import { explainabilityEngine } from './explainability-engine';
 import { historicalSimilarityEngine } from './historical-similarity-engine';
 import { indicatorIntelligenceEngine } from './indicator-engine';
@@ -21,6 +22,7 @@ import { marketContextEngine } from './market-context-engine';
 import { marketRegimeEngine } from './regime-engine';
 import { mlIntelligenceEngine } from './ml-engine';
 import { patternIntelligenceEngine } from './pattern-engine';
+import { LIVE_STRATEGY_IDS, selectBestStrategy, STRATEGY_REGISTRY } from '../../../src/lib/strategies/index';
 
 function candles(count: number): Candle[] {
   return Array.from({ length: count }, (_, index) => {
@@ -36,7 +38,135 @@ function candles(count: number): Candle[] {
   });
 }
 
+function closedDecisionInput(inputContextId: string) {
+  const boundary = Math.floor(Date.now() / 3_600_000) * 3_600;
+  const inputCandles = Array.from({ length: 80 }, (_, index) => {
+    const close = 100 + index * 0.25;
+    return { time: boundary - (80 - index) * 3_600, open: close - 0.1, high: close + 0.2, low: close - 0.2, close, volume: 100 };
+  });
+  const entry = inputCandles.at(-1)!.close;
+  return {
+    inputContextId, symbol: 'BTCUSD', timeframe: '1h' as const, candles: inputCandles,
+    observedAt: Math.floor(Date.now() / 1000), candleClosure: 'verified_closed' as const,
+    dataState: 'ready' as const, dataSource: { provider: 'fixture', fetchedAt: Date.now(), datasetId: 'synthetic-test-fixture' },
+    risk: {
+      trade: { size: 1, entryPrice: entry, stopLossPrice: entry - 1, takeProfitPrice: entry + 2, portfolioValue: 10_000 },
+      state: { currentDailyPnL: 0, currentDrawdown: 0, currentExposure: 0, currentLeverage: 0 },
+      limits: { maxDailyLoss: -0.05, maxDrawdown: -0.2, maxPortfolioExposure: 0.5, maxLeverage: 1, minRiskReward: 1.5 },
+      ruleVersion: 'test-risk',
+    },
+    portfolio: {
+      value: 10_000, positions: [],
+      proposedTrade: { symbol: 'BTCUSD', marketType: 'crypto', size: 1, entryPrice: entry },
+      limits: { maxExposureRatio: 0.5, maxConcentrationRisk: 1, maxCorrelationRisk: 1 }, ruleVersion: 'test-portfolio',
+    },
+  };
+}
+
 describe('marketStructureEngine', () => {
+  it('does not authorize a directional action when candle closure and freshness are unknown', () => {
+    const input = candles(80).map((candle, index) => {
+      const close = 100 + index;
+      return { time: index * 3_600, open: close - 0.1, high: close + 0.2, low: close - 0.2, close, volume: 100 };
+    });
+    const originalDetectors = STRATEGY_REGISTRY.map((strategy) => strategy.detect);
+    try {
+      STRATEGY_REGISTRY.forEach((strategy, index) => {
+        strategy.detect = index === 0
+          ? () => [{ strategy: 'test-only forced direction', side: 'buy', confidence: 0.99, reason: 'Synthetic fixture signal.' }]
+          : () => [];
+      });
+      const result = masterDecisionEngine.analyze({
+        inputContextId: 'unknown-candle-state', symbol: 'BTCUSDT', timeframe: '1h', candles: input,
+        risk: {
+          trade: { size: 1, entryPrice: 180, stopLossPrice: 170, takeProfitPrice: 200, portfolioValue: 10_000 },
+          state: { currentDailyPnL: 0, currentDrawdown: 0, currentExposure: 0, currentLeverage: 0 },
+          limits: { maxDailyLoss: -0.05, maxDrawdown: -0.2, maxPortfolioExposure: 0.5, maxLeverage: 1, minRiskReward: 1.5 },
+          ruleVersion: 'test-risk',
+        },
+        portfolio: {
+          value: 10_000, positions: [],
+          proposedTrade: { symbol: 'BTCUSDT', marketType: 'crypto', size: 1, entryPrice: 180 },
+          limits: { maxExposureRatio: 0.5, maxConcentrationRisk: 1, maxCorrelationRisk: 1 }, ruleVersion: 'test-portfolio',
+        },
+      });
+      expect(result.result.decision).toBe('NO_TRADE');
+      expect(result.result.contradictions.join(' ')).toMatch(/freshness|closure|candle/i);
+    } finally {
+      STRATEGY_REGISTRY.forEach((strategy, index) => { strategy.detect = originalDetectors[index]; });
+    }
+  });
+
+  it('reports strategy detector exceptions instead of treating them as no signal', () => {
+    const strategy = STRATEGY_REGISTRY[0];
+    const originalDetector = strategy.detect;
+    try {
+      strategy.detect = () => { throw new Error('synthetic detector failure'); };
+      const result = strategyIntelligenceEngine.analyze({
+        inputContextId: 'strategy-exception', symbol: 'BTCUSDT', timeframe: '1h', candles: candles(80),
+      });
+      expect(result.status).toBe('degraded');
+      expect(result.warnings.join(' ')).toContain(strategy.id);
+      expect(result.warnings.join(' ')).toContain('failed');
+    } finally {
+      strategy.detect = originalDetector;
+    }
+  });
+
+  it('does not count same-price-series strategy votes as independent confirmation', () => {
+    const candlesInput = candles(80);
+    const market = analyzeMarketIntelligence({ inputContextId: 'correlated-votes', symbol: 'BTCUSD', timeframe: '1h', candles: candlesInput });
+    const evidence = Array.from({ length: 4 }, (_, index) => ({
+      id: `strategy:${index}`, kind: 'calculated' as const, source: `strategy-${index}`,
+      correlationGroup: 'ohlcv-derived-strategy-signals', direction: 'bullish' as const,
+      score: 0.9, explanation: 'Synthetic correlated test evidence.',
+    }));
+    const result = confidenceEngine.analyze({
+      inputContextId: 'correlated-votes', symbol: 'BTCUSD', timeframe: '1h', candles: candlesInput,
+      market, evidence, contradictions: [], riskApproved: true, portfolioApproved: true,
+      dataQualityBlocked: false, decisionDirection: 'buy',
+    });
+    expect(result.result.factors.find((factor) => factor.factor === 'evidence-independence')?.score).toBe(0.25);
+  });
+
+  it('does not let a high-confidence signal from an unselected strategy substitute for a setup', () => {
+    const context = closedDecisionInput('missing-selected-setup');
+    const selected = selectBestStrategy(context.candles, context.timeframe);
+    const alternative = STRATEGY_REGISTRY.find((strategy) => strategy.id !== selected.id && LIVE_STRATEGY_IDS.has(strategy.id));
+    expect(alternative).toBeDefined();
+    const originalDetectors = STRATEGY_REGISTRY.map((strategy) => strategy.detect);
+    try {
+      STRATEGY_REGISTRY.forEach((strategy) => {
+        strategy.detect = strategy.id === alternative!.id
+          ? () => [{ strategy: strategy.name, side: 'buy', confidence: 0.99, reason: 'Synthetic non-selected signal.' }]
+          : () => [];
+      });
+      const result = masterDecisionEngine.analyze(context);
+      expect(result.result.decision).toBe('NO_TRADE');
+      expect(result.result.explanation).toContain(`selected strategy ${selected.name}`);
+    } finally {
+      STRATEGY_REGISTRY.forEach((strategy, index) => { strategy.detect = originalDetectors[index]; });
+    }
+  });
+
+  it('publishes the exact stop and target that passed risk approval', () => {
+    const context = closedDecisionInput('risk-level-consistency');
+    const selected = selectBestStrategy(context.candles, context.timeframe);
+    const strategy = STRATEGY_REGISTRY.find((item) => item.id === selected.id)!;
+    const originalDetectors = STRATEGY_REGISTRY.map((item) => item.detect);
+    try {
+      STRATEGY_REGISTRY.forEach((item) => { item.detect = () => []; });
+      strategy.detect = () => [{ strategy: strategy.name, side: 'buy', confidence: 0.8, reason: 'Synthetic selected setup trigger.' }];
+      const result = masterDecisionEngine.analyze({ ...context, entryZone: { low: context.risk.trade.entryPrice - 0.25, high: context.risk.trade.entryPrice } });
+      expect(result.result.decision).toBe('BUY');
+      expect(result.result.entry).toBe(context.risk.trade.entryPrice);
+      expect(result.result.invalidation).toBe(context.risk.trade.stopLossPrice);
+      expect(result.result.targets).toEqual([{ price: context.risk.trade.takeProfitPrice }]);
+    } finally {
+      STRATEGY_REGISTRY.forEach((item, index) => { item.detect = originalDetectors[index]; });
+    }
+  });
+
   it('degrades safely when the context is too short', () => {
     const result = marketStructureEngine.analyze({
       inputContextId: 'short-context',
@@ -403,6 +533,28 @@ describe('marketStructureEngine', () => {
     expect(result.result.anomalies).toContain('Candle 4 has an invalid high value.');
   });
 
+  it('distinguishes non-continuous market-session gaps from crypto data gaps', () => {
+    const input: Candle[] = [
+      { time: 1_800_000_000, open: 100, high: 101, low: 99, close: 100, volume: 100 },
+      { time: 1_800_086_400, open: 100, high: 102, low: 99, close: 101, volume: 100 },
+      { time: 1_800_345_600, open: 101, high: 103, low: 100, close: 102, volume: 100 },
+    ];
+    const common = {
+      inputContextId: 'session-gap', symbol: 'TEST', timeframe: '1d' as const, candles: input,
+      observedAt: 1_800_432_000, candleClosure: 'verified_closed' as const, dataState: 'ready' as const,
+    };
+    const stock = dataQualityEngine.analyze({
+      ...common, dataSource: { provider: 'fixture', fetchedAt: common.observedAt * 1000, datasetId: 'stock-fixture', marketType: 'stock' },
+    });
+    const crypto = dataQualityEngine.analyze({
+      ...common, dataSource: { provider: 'fixture', fetchedAt: common.observedAt * 1000, datasetId: 'crypto-fixture', marketType: 'crypto' },
+    });
+    expect(stock.status).toBe('ok');
+    expect(stock.warnings.join(' ')).toContain('possible scheduled market-session gap');
+    expect(crypto.status).toBe('failed');
+    expect(crypto.warnings.join(' ')).toContain('data gap');
+  });
+
   it('degrades stale data and derives a versioned market context', () => {
     const input = candles(80);
     const stale = dataQualityEngine.analyze({
@@ -648,7 +800,7 @@ describe('marketStructureEngine', () => {
     expect(result.evidence.some((item) => item.source === 'knowledge-intelligence')).toBe(true);
   });
 
-  it('keeps learning controlled until validation and approval are complete', () => {
+  it('rejects caller-supplied validation booleans without reproducible evidence', () => {
     const result = learningIntelligenceEngine.analyze({
       inputContextId: 'learning-context',
       symbol: 'BTCUSDT',
@@ -661,11 +813,29 @@ describe('marketStructureEngine', () => {
       approved: false,
     });
 
+    expect(result.result.stage).toBe('rejected');
+    expect(result.result.nextAction).toContain('INSUFFICIENT_RESEARCH_EVIDENCE');
+    expect(result.result.productionMutationAllowed).toBe(false);
+  });
+
+  it('keeps a validated research candidate pending an auditable approval record', () => {
+    const result = learningIntelligenceEngine.analyze({
+      inputContextId: 'learning-evidence-context', symbol: 'BTCUSDT', timeframe: '1h', candles: [],
+      observation: { id: 'obs-2', source: 'research', facts: {} },
+      hypothesis: 'The setup remains stable in ranging conditions.', experimentCompleted: true,
+      validationPassed: true, approved: true,
+      validationEvidence: {
+        reportId: 'report-1', strategyVersion: 'strategy-1', datasetProvenance: 'provider:dataset-version',
+        testWindow: { start: '2026-01-01T00:00:00Z', end: '2026-02-01T00:00:00Z' },
+        costsIncluded: true, sampleSize: 100, acceptanceChecksPassed: true,
+        metrics: { expectancyR: 0.1, profitFactor: 1.2, maxDrawdownR: 3 },
+      },
+    });
     expect(result.result.stage).toBe('candidate');
     expect(result.result.productionMutationAllowed).toBe(false);
   });
 
-  it('accepts a chronological research design with explicit costs and OOS boundaries', () => {
+  it('does not call a zero-trade run out-of-sample ready', () => {
     const input = candles(40);
     const result = researchIntelligenceEngine.analyze({
       inputContextId: 'research-context',
@@ -682,7 +852,8 @@ describe('marketStructureEngine', () => {
     });
 
     expect(result.result.leakageDetected).toBe(false);
-    expect(result.result.outOfSampleReady).toBe(true);
-    expect(result.result.reproducible).toBe(true);
+    expect(result.result.outOfSampleReady).toBe(false);
+    expect(result.result.reproducible).toBe(false);
+    expect(result.result.warnings.join(' ')).toMatch(/trade|outcome|evidence/i);
   });
 });

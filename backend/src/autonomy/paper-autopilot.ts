@@ -71,6 +71,20 @@ export class PaperAutopilotScheduler {
   private readonly lastBoundaries = new Map<Timeframe, number>();
   private readonly accountQueues = new Map<string, Promise<void>>();
   private readonly manualRuns = new Set<string>();
+  private lastCycleAt: string | null = null;
+  private nextScheduledAt: string | null = null;
+  private lastError: string | null = null;
+
+  diagnostics() {
+    return {
+      running: this.active,
+      cycleInProgress: Boolean(this.running),
+      lastCycleAt: this.lastCycleAt,
+      lastBoundaries: Object.fromEntries(this.lastBoundaries),
+      nextScheduledAt: this.nextScheduledAt,
+      lastError: this.lastError,
+    };
+  }
 
   start(): void {
     if (this.active) return;
@@ -82,6 +96,7 @@ export class PaperAutopilotScheduler {
     this.active = false;
     if (this.timer) clearTimeout(this.timer);
     this.timer = undefined;
+    this.nextScheduledAt = null;
   }
 
   async queueAccountRun(accountId: string): Promise<{ queued: true }> {
@@ -103,6 +118,7 @@ export class PaperAutopilotScheduler {
   private scheduleNext(): void {
     if (!this.active) return;
     const nextRun = Math.min(...AUTOPILOT_TIMEFRAMES.map((timeframe) => nextScheduledRunAt(Date.now(), timeframe, traderConfig.CLOSE_GRACE_MS)));
+    this.nextScheduledAt = new Date(nextRun).toISOString();
     this.timer = setTimeout(() => { void this.runScheduledCycle(); }, Math.max(0, nextRun - Date.now()));
   }
 
@@ -112,20 +128,28 @@ export class PaperAutopilotScheduler {
       try {
         const now = Date.now();
         const due = new Set<Timeframe>();
+        const boundaries = new Map<Timeframe, number>();
         for (const timeframe of AUTOPILOT_TIMEFRAMES) {
           const boundary = latestClosedCandleTime(now, timeframe, traderConfig.CLOSE_GRACE_MS);
+          boundaries.set(timeframe, boundary);
           if (this.lastBoundaries.get(timeframe) !== boundary) due.add(timeframe);
-          this.lastBoundaries.set(timeframe, boundary);
         }
         if (due.size > 0) {
           const { data, error } = await getSupabaseClient().rpc('list_enabled_paper_autopilots');
           if (error) throw new Error('Could not list opted-in paper autopilot accounts.');
           const rows = (data ?? []) as PaperAutopilotConfig[];
-          await this.runAccounts(rows, due, now);
+          const result = await this.runAccounts(rows, due, now);
+          for (const timeframe of due) this.lastBoundaries.set(timeframe, boundaries.get(timeframe)!);
+          if (result.pausedReason) this.lastError = 'One or more autopilot accounts were paused after a safety failure.';
+          else this.lastError = null;
+        } else {
+          this.lastError = null;
         }
       } catch (error) {
+        this.lastError = error instanceof Error ? 'Scheduler cycle failed; inspect server logs.' : 'Scheduler cycle failed.';
         console.error('[paper-autopilot] scheduler cycle failed:', error instanceof Error ? error.message : 'unknown error');
       } finally {
+        this.lastCycleAt = new Date().toISOString();
         this.running = undefined;
         this.scheduleNext();
       }

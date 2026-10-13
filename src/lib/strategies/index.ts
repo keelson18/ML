@@ -51,7 +51,7 @@ export const STRATEGY_CATEGORIES: StrategyCategory[] = [
 ];
 
 export const STRATEGY_REGISTRY: Strategy[] = [...STRATEGY_LIBRARY, bollingerStrategy];
-const LIVE_STRATEGY_IDS = new Set(['ma-crossover', 'rsi-divergence', 'bollinger-volatility', 'trend-following', 'mean-reversion', 'donchian-breakout', 'support-resistance']);
+export const LIVE_STRATEGY_IDS = new Set(['ma-crossover', 'rsi-divergence', 'bollinger-volatility', 'trend-following', 'mean-reversion', 'donchian-breakout', 'support-resistance']);
 
 export function getStrategy(strategyId: string): Strategy | undefined {
   return STRATEGY_REGISTRY.find((strategy) => strategy.id === strategyId);
@@ -77,32 +77,61 @@ export function runStrategy(candles: Candle[], timeframe: Timeframe, strategyId:
   return strategy.detect(candles, timeframe).map((result) => ({ ...result, strategyId: strategy.id, strategyVersion: strategy.version }));
 }
 
-function collectStrategySignals(candles: Candle[], timeframe: Timeframe, strategies: Strategy[]): Signal[] {
+export interface StrategyExecutionFailure {
+  strategyId: string;
+  strategy: string;
+  message: string;
+}
+
+function collectStrategySignals(candles: Candle[], timeframe: Timeframe, strategies: Strategy[]): { signals: Signal[]; failures: StrategyExecutionFailure[] } {
   const signals: Signal[] = [];
+  const failures: StrategyExecutionFailure[] = [];
   for (const strategy of strategies) {
     if (getIneligibilityReason(strategy, candles, timeframe)) continue;
     try {
       signals.push(...strategy.detect(candles, timeframe).map((result) => ({ ...result, strategyId: strategy.id, strategyVersion: strategy.version })));
     } catch {
-      continue;
+      failures.push({
+        strategyId: strategy.id,
+        strategy: strategy.name,
+        message: 'Strategy detector threw an error.',
+      });
     }
   }
-  return signals;
+  return { signals, failures };
 }
 
 export function runAllLibraryStrategies(candles: Candle[], timeframe: Timeframe): Signal[] {
+  return runAllLibraryStrategiesWithDiagnostics(candles, timeframe).signals;
+}
+
+export function runAllLibraryStrategiesWithDiagnostics(candles: Candle[], timeframe: Timeframe): { signals: Signal[]; failures: StrategyExecutionFailure[] } {
   return collectStrategySignals(candles, timeframe, STRATEGY_REGISTRY);
 }
 
-export function runAllStrategies(candles: Candle[], timeframe: Timeframe): Signal[] {
-  const signals = collectStrategySignals(candles, timeframe, STRATEGY_REGISTRY.filter((strategy) => LIVE_STRATEGY_IDS.has(strategy.id)));
-  signals.push(...detectCandlestickPatterns(candles));
-  signals.push(...detectExtendedChartPatterns(candles));
-  for (const detector of [detectHeadShoulders, detectDoubleTopBottom, detectTriangleFlag]) {
-    const result = detector(candles);
-    if (result) signals.push(result);
+export function runAllStrategiesWithDiagnostics(candles: Candle[], timeframe: Timeframe): { signals: Signal[]; failures: StrategyExecutionFailure[] } {
+  const collection = collectStrategySignals(candles, timeframe, STRATEGY_REGISTRY.filter((strategy) => LIVE_STRATEGY_IDS.has(strategy.id)));
+  const signals = collection.signals;
+  const failures = collection.failures;
+  const detectors: Array<[string, () => Signal[] | Signal | null | undefined]> = [
+    ['candlestick-patterns', () => detectCandlestickPatterns(candles)],
+    ['extended-chart-patterns', () => detectExtendedChartPatterns(candles)],
+    ...[detectHeadShoulders, detectDoubleTopBottom, detectTriangleFlag].map((detector, index): [string, () => Signal | null] => [`legacy-pattern-${index + 1}`, () => detector(candles)]),
+  ];
+  for (const [strategyId, detect] of detectors) {
+    try {
+      const result = detect();
+      if (Array.isArray(result)) signals.push(...result);
+      else if (result) signals.push(result);
+    } catch {
+      failures.push({ strategyId, strategy: strategyId, message: 'Strategy detector threw an error.' });
+    }
   }
-  return signals;
+  return { signals, failures };
+}
+
+export function runAllStrategies(candles: Candle[], timeframe: Timeframe): Signal[] {
+  return runAllStrategiesWithDiagnostics(candles, timeframe).signals;
 }
 
 export function selectBestStrategy(candles: Candle[], timeframe: Timeframe): Strategy {

@@ -81,6 +81,24 @@ export class StreamGateway {
     return { clients: this.clients.size, symbols: this.refCounts.size, droppedUpdates: this.droppedUpdates };
   }
 
+  feedDiagnostics() {
+    return this.options.feeds.map((feed) => {
+      const symbols = [...this.refCounts.keys()].filter((symbol) => feed.supports(symbol));
+      const tickTimes = symbols.map((symbol) => this.lastTicks.get(symbol)?.timestamp).filter((value): value is number => value !== undefined);
+      const stats = feed.diagnostics?.();
+      return {
+        feed: feed.id,
+        status: feed.status(),
+        subscribedSymbols: stats?.subscribedSymbols ?? symbols.length,
+        connectedClients: [...this.clients].filter((client) => [...client.subscriptions.keys()].some((symbol) => symbols.includes(symbol))).length,
+        droppedUpdates: this.droppedUpdates,
+        reconnects: stats?.reconnects ?? 0,
+        gaps: stats?.gaps ?? 0,
+        lastTickAt: tickTimes.length ? Math.max(...tickTimes) : stats?.lastTickAt ?? null,
+      };
+    });
+  }
+
   async close(): Promise<void> {
     for (const client of this.clients) client.socket.close(1001);
     this.clients.clear();

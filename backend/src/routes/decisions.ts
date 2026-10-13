@@ -7,6 +7,8 @@ import { getMarket } from '../../../src/lib/markets';
 import { TIMEFRAMES, type Timeframe } from '../../../src/lib/types';
 import { config } from '../config.js';
 import { BoundedMap, WindowLimiter } from '../utils/limits';
+import { selectClosedCandles } from '../trader/candle-math';
+import { traderConfig } from '../trader/config';
 
 const VALID_TIMEFRAMES = new Set<string>(TIMEFRAMES.map((t) => t.value));
 const SYMBOL_PATTERN = /^[A-Z0-9._-]{1,20}$/;
@@ -47,9 +49,11 @@ export async function decisionRoutes(app: FastifyInstance, pipeline: AutonomousP
     }
     const { symbol, timeframe } = parsed;
 
+    let marketData: Awaited<ReturnType<typeof fetchMarketData>>;
     let candles;
     try {
-      candles = (await fetchMarketData(symbol, timeframe, ANALYSIS_CANDLES)).candles.slice(0, -1);
+      marketData = await fetchMarketData(symbol, timeframe, ANALYSIS_CANDLES);
+      candles = selectClosedCandles(marketData.candles, timeframe, Date.now(), traderConfig.CLOSE_GRACE_MS);
     } catch (error) {
       if (error instanceof MarketDataProviderError && error.status === 429) {
         if (error.retryAfter) reply.header('Retry-After', error.retryAfter);
@@ -70,7 +74,19 @@ export async function decisionRoutes(app: FastifyInstance, pipeline: AutonomousP
       return reply.code(429).send({ error: 'Analysis is busy. Try again shortly.' });
     }
     try {
-      const result = await analyze({ symbol, timeframe, candles }, userId);
+      const result = await analyze({
+        symbol,
+        timeframe,
+        candles,
+        candleClosure: 'verified_closed',
+        dataState: marketData.stale ? 'stale' : 'ready',
+        dataSource: {
+          provider: marketData.dataset.provider,
+          fetchedAt: marketData.fetchedAt,
+          datasetId: marketData.dataset.id,
+          marketType: marketData.instrument.marketType,
+        },
+      }, userId);
       const response = { ...result, cached: false };
       decisionCache.set(cacheKey, response);
       return response;

@@ -4,6 +4,7 @@ import { config } from '../config';
 import { fetchWithTimeout } from '../../../src/lib/providers/request';
 import { readJsonSafe } from '../../../shared/http';
 import { ProviderBudget, ProviderBudgetExhaustedError, type ProviderBudgetSnapshot } from './providerBudget';
+import { candleSeconds, selectClosedCandles } from '../trader/candle-math';
 
 // Provider base URLs — configurable via env for testing overrides
 const MASSIVE_REST = process.env.MASSIVE_REST_URL ?? 'https://api.massive.com';
@@ -84,6 +85,26 @@ export function resetMassiveBudgetForTests(): void {
 export function clearMarketDataCache(): void {
   marketDataCache.clear();
   inFlightMarketRequests.clear();
+}
+
+export function getCachedCandleFreshness(symbols: string[], timeframes: Timeframe[], staleMultiplier: number) {
+  const now = Date.now();
+  return [...new Set(symbols)].flatMap((symbol) => [...new Set(timeframes)].map((timeframe) => {
+    const cached = [...marketDataCache.entries()]
+      .filter(([key]) => {
+        const parsed = JSON.parse(key) as [string, Timeframe, number];
+        return parsed[0] === symbol && parsed[1] === timeframe;
+      })
+      .map(([, entry]) => entry)
+      .sort((left, right) => right.fetchedAt - left.fetchedAt)[0];
+    const checkedAt = new Date(now).toISOString();
+    const newestClosed = cached && selectClosedCandles(cached.series.candles, timeframe, now).at(-1);
+    if (!newestClosed) return { symbol, timeframe, status: 'unverified' as const, reason: 'No cached closed candle is available.', checkedAt, newestClosedCandleAt: null, ageMs: null };
+    const candleTime = newestClosed.time * 1000;
+    const ageMs = Math.max(0, now - candleTime - candleSeconds(timeframe, newestClosed.time) * 1000);
+    const stale = ageMs > candleSeconds(timeframe, newestClosed.time) * 1000 * staleMultiplier;
+    return { symbol, timeframe, status: stale ? 'degraded' as const : 'ok' as const, reason: stale ? 'Cached candle exceeds the configured age threshold.' : 'Cached closed candle is within the configured age threshold.', checkedAt, newestClosedCandleAt: new Date(candleTime).toISOString(), ageMs };
+  }));
 }
 
 export async function probeMarketData(canonicalSymbol: string): Promise<{ candleCount: number }> {

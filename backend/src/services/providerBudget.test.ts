@@ -50,6 +50,7 @@ describe('ProviderBudget', () => {
     const { budget, time } = clockBudget({ requestsPerWindow: 5, maxWaitMs: 5_000 });
     budget.backoff(3_000);
     expect(budget.snapshot().backoffUntil).toBe(new Date(3_000).toISOString());
+    expect(budget.snapshot().last429At).toBe(new Date(0).toISOString());
     await budget.acquire();
     expect(time()).toBe(3_000);
     expect(budget.snapshot().backoffUntil).toBeNull();

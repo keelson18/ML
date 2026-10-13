@@ -154,7 +154,19 @@ export class AutonomousPipeline {
 
     this.transition('DECIDING');
     try {
-      const result = await analyze({ symbol, timeframe, candles: series }, this.config.accountId);
+      const result = await analyze({
+        symbol,
+        timeframe,
+        candles: series,
+        candleClosure: 'verified_closed',
+        dataState: fetchedSeries?.stale ? 'stale' : fetchedSeries ? 'ready' : 'degraded',
+        dataSource: fetchedSeries ? {
+          provider: fetchedSeries.dataset.provider,
+          fetchedAt: fetchedSeries.fetchedAt,
+          datasetId: fetchedSeries.dataset.id,
+          marketType: fetchedSeries.instrument.marketType,
+        } : undefined,
+      }, this.config.accountId);
       const decision = result.decision.result;
       this.snapshot = { ...this.snapshot, state: 'MONITORING', lastRunAt: new Date().toISOString(), lastClosedCandle: { symbol, time: closedCandle.time }, processedDecisions: this.snapshot.processedDecisions + 1, consecutiveFailures: 0 };
       this.failures = 0;

@@ -13,6 +13,7 @@ import { riskIntelligenceEngine, type RiskEngineContext } from './risk-engine';
 export type TradeDecisionType = 'BUY' | 'SELL' | 'HOLD' | 'WATCH' | 'NO_TRADE';
 
 export interface DecisionEngineContext extends EngineContext {
+  entryZone?: { low: number; high: number };
   risk: RiskEngineContext['risk'];
   portfolio: PortfolioEngineContext['portfolio'];
   ml?: {
@@ -75,6 +76,7 @@ function directionalEvidence(signals: Signal[]): EngineEvidence[] {
       id: `${ENGINE_NAME}:signal:${index}`,
       kind: 'calculated',
       source: signal.strategy,
+      correlationGroup: 'ohlcv-derived-strategy-signals',
       direction: signal.side === 'buy' ? 'bullish' : 'bearish',
       score: signal.confidence,
       explanation: signal.reason,
@@ -106,9 +108,16 @@ export const masterDecisionEngine: IntelligenceEngine<TradeDecision> & {
       ? knowledgeIntelligenceEngine.analyze({ ...context, ...context.knowledge })
       : undefined;
     const signals = market.strategy.result.signals;
-    const scores = signalScore(signals);
+    const selectedStrategy = market.strategy.result.selectedStrategy;
+    const selectedSignals = signals.filter((signal) => signal.strategyId === selectedStrategy.id);
+    const scores = signalScore(selectedSignals);
     const evidence = directionalEvidence(signals);
-    const dataQualityBlocked = market.dataQuality.status === 'failed' || market.dataQuality.result.freshnessStatus === 'stale';
+    const dataQualityBlocked = market.dataQuality.status !== 'ok'
+      || market.dataQuality.result.freshnessStatus !== 'fresh'
+      || market.dataQuality.result.candleClosure !== 'verified_closed'
+      || market.dataQuality.result.dataState !== 'ready'
+      || !market.dataQuality.result.source;
+    const strategyExecutionBlocked = market.strategy.result.executionFailures.length > 0;
 
     const deterministicDirection = scores.buy > scores.sell && scores.buy > 0
       ? 'buy' as const
@@ -142,13 +151,14 @@ export const masterDecisionEngine: IntelligenceEngine<TradeDecision> & {
       ...risk.result.violatedRules,
       ...portfolio.result.violatedRules,
       ...(dataQualityBlocked ? market.dataQuality.result.anomalies : []),
+      ...(strategyExecutionBlocked ? market.strategy.result.executionFailures.map((failure) => `${failure.strategy} (${failure.strategyId}) failed: ${failure.message}`) : []),
     ])];
 
     const hasDirectionalEvidence = scores.buy > 0 || scores.sell > 0;
     const hasHighContradiction = contradictionResult.result.blocksDecision;
     let decision: TradeDecisionType = 'NO_TRADE';
 
-    if (!dataQualityBlocked && risk.result.approved && portfolio.result.approved && hasDirectionalEvidence && !hasHighContradiction) {
+    if (!dataQualityBlocked && !strategyExecutionBlocked && risk.result.approved && portfolio.result.approved && hasDirectionalEvidence && !hasHighContradiction) {
       decision = scores.buy > scores.sell ? 'BUY' : 'SELL';
     }
 
@@ -180,33 +190,22 @@ export const masterDecisionEngine: IntelligenceEngine<TradeDecision> & {
     });
     const confidence = confidenceResult.result.overall;
 
-    const selectedStrategy = market.strategy.result.selectedStrategy.name;
+    const strategyName = selectedStrategy.name;
     const explanation = decision === 'NO_TRADE'
-      ? contradictions.length > 0
+      ? !hasDirectionalEvidence
+        ? `No trade: selected strategy ${strategyName} has no confirmed directional trigger.${contradictions.length ? ` ${contradictions.join(' ')}` : ''}`
+        : contradictions.length > 0
         ? `No trade: ${contradictions.join(' ')}`
-        : 'No trade: insufficient directional evidence.'
-      : `${decision} from ${selectedStrategy} evidence after risk, portfolio, and contradiction review.`;
+        : `No trade: selected strategy ${strategyName} has no confirmed directional trigger.`
+      : `${decision} from the confirmed ${strategyName} setup after risk, portfolio, and contradiction review.`;
 
-    const latest = context.candles[context.candles.length - 1];
-    const latestAtrPct = market.context.result.atrPct ?? 0.005;
-    const entry = latest?.close;
-    const entryZone = entry !== undefined
-      ? { low: entry * (1 - latestAtrPct * 0.5), high: entry * (1 + latestAtrPct * 0.5) }
-      : undefined;
-    const invalidation = entry !== undefined
-      ? direction === 'buy'
-        ? entry * (1 - latestAtrPct * 1.5)
-        : direction === 'sell'
-          ? entry * (1 + latestAtrPct * 1.5)
-          : undefined
-      : undefined;
-    const targets = entry !== undefined && direction !== 'neutral'
-      ? [1, 2, 3].map((multiplier) => ({
-          price: direction === 'buy'
-            ? entry * (1 + latestAtrPct * 1.5 * multiplier)
-            : entry * (1 - latestAtrPct * 1.5 * multiplier),
-        }))
-      : undefined;
+    const latest = context.candles.at(-1);
+    // The risk gate and the published trade levels must refer to the same proposal.
+    // Analysis cannot invent ATR-based stops, targets, or entry zones when no plan exists.
+    const entry = decision === 'NO_TRADE' ? latest?.close : context.risk.trade.entryPrice;
+    const entryZone = decision === 'NO_TRADE' ? undefined : context.entryZone;
+    const invalidation = decision === 'NO_TRADE' ? undefined : context.risk.trade.stopLossPrice;
+    const targets = decision === 'NO_TRADE' ? undefined : [{ price: context.risk.trade.takeProfitPrice }];
 
     const engineVersions: Record<string, string> = {
       'master-decision': ENGINE_VERSION,
@@ -235,7 +234,7 @@ export const masterDecisionEngine: IntelligenceEngine<TradeDecision> & {
       entryZone,
       invalidation,
       targets,
-      strategy: selectedStrategy,
+      strategy: strategyName,
       supportingEvidence: evidence,
       contradictions,
       reasoning: reasoning.result.summary,
@@ -249,7 +248,7 @@ export const masterDecisionEngine: IntelligenceEngine<TradeDecision> & {
       engineVersion: ENGINE_VERSION,
       timestamp: new Date().toISOString(),
       inputContextId: context.inputContextId,
-      status: contradictionResult.status === 'failed' ? 'failed' : hasHighContradiction ? 'degraded' : 'ok',
+      status: contradictionResult.status === 'failed' ? 'failed' : hasHighContradiction || dataQualityBlocked || strategyExecutionBlocked ? 'degraded' : 'ok',
       result,
       confidence,
       evidence: [

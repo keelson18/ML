@@ -144,7 +144,24 @@ export function parseLiveFeedConfig(env: NodeJS.ProcessEnv) {
   };
 }
 
+const adminOverviewSettings = z.object({
+  APP_ENV: z.enum(['test', 'production']),
+  ADMIN_OVERVIEW_CACHE_TTL_MS: z.coerce.number().int().positive(),
+  ADMIN_OVERVIEW_REFRESH_MS: z.coerce.number().int().positive(),
+  ADMIN_CANDLE_STALE_MULTIPLIER: z.coerce.number().positive(),
+}).safeParse({
+  APP_ENV: process.env.APP_ENV ?? (process.env.NODE_ENV === 'production' ? 'production' : 'test'),
+  ADMIN_OVERVIEW_CACHE_TTL_MS: process.env.ADMIN_OVERVIEW_CACHE_TTL_MS ?? 15_000,
+  ADMIN_OVERVIEW_REFRESH_MS: process.env.ADMIN_OVERVIEW_REFRESH_MS ?? 30_000,
+  ADMIN_CANDLE_STALE_MULTIPLIER: process.env.ADMIN_CANDLE_STALE_MULTIPLIER ?? 3,
+});
+if (!adminOverviewSettings.success) throw new Error('Admin health environment settings are invalid.');
+
 export const config = {
+  appEnvironment: adminOverviewSettings.data.APP_ENV,
+  adminOverviewCacheTtlMs: adminOverviewSettings.data.ADMIN_OVERVIEW_CACHE_TTL_MS,
+  adminOverviewRefreshMs: adminOverviewSettings.data.ADMIN_OVERVIEW_REFRESH_MS,
+  adminCandleStaleMultiplier: adminOverviewSettings.data.ADMIN_CANDLE_STALE_MULTIPLIER,
   port: Number(process.env.BACKEND_PORT ?? 3001),
   corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
   supabaseUrl: process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL ?? '',

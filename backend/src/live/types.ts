@@ -28,5 +28,6 @@ export interface LiveFeed {
   onStatus(listener: (status: FeedStatus) => void): () => void;
   status(): FeedStatus;
   limits(): FeedLimits;
+  diagnostics?(): { gaps?: number; reconnects?: number; lastTickAt?: number | null; subscribedSymbols?: number };
   close(): Promise<void>;
 }

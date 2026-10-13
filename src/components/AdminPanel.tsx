@@ -7,10 +7,13 @@ import UserManagement from './Admin/UserManagement';
 import ModelManagement from './Admin/ModelManagement';
 import CMSManager from './CMS/CMSManager';
 import Logs from './Admin/Logs';
+import SystemHealth from './Admin/SystemHealth';
+import type { AdminOverview } from '../lib/backend-api';
 
-type AdminTab = 'metrics' | 'users' | 'models' | 'cms' | 'logs' | 'markets' | 'events' | 'settings';
+type AdminTab = 'health' | 'metrics' | 'users' | 'models' | 'cms' | 'logs' | 'markets' | 'events' | 'settings';
 
 const TABS: { key: AdminTab; label: string; icon: typeof Activity }[] = [
+  { key: 'health', label: 'System Health', icon: Activity },
   { key: 'metrics', label: 'System Metrics', icon: Activity },
   { key: 'users', label: 'User Management', icon: Users },
   { key: 'models', label: 'ML Models', icon: Brain },
@@ -22,7 +25,9 @@ const TABS: { key: AdminTab; label: string; icon: typeof Activity }[] = [
 ];
 
 export default function AdminPanel() {
-  const [activeTab, setActiveTab] = useState<AdminTab>('metrics');
+  const [activeTab, setActiveTab] = useState<AdminTab>('health');
+  const [environment, setEnvironment] = useState<AdminOverview['environment'] | null>(null);
+  const receiveEnvironment = useCallback((value: AdminOverview['environment']) => setEnvironment(value), []);
 
   return (
     <AdminRoute>
@@ -38,9 +43,10 @@ export default function AdminPanel() {
               <p className="text-xs text-muted mt-0.5">Manage access, research, and system operations.</p>
             </div>
           </div>
-          <span className="inline-flex items-center gap-2 rounded-full border border-success/25 bg-success/10 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-success">
-            <span className="w-1.5 h-1.5 rounded-full bg-success" /> Paper trading only
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center rounded-full border border-border bg-bg px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted">{environment?.toUpperCase() ?? 'ENVIRONMENT UNAVAILABLE'}</span>
+            <span className="inline-flex items-center gap-2 rounded-full border border-border bg-bg px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted">Paper trading only</span>
+          </div>
         </header>
 
         <div role="tablist" aria-label="Admin sections" className="flex overflow-x-auto border-b border-border bg-bg/50">
@@ -80,6 +86,7 @@ export default function AdminPanel() {
         </div>
 
         <div id="admin-tab-panel" role="tabpanel" aria-labelledby={`admin-tab-${activeTab}`} tabIndex={0} className="p-4 md:p-6 min-h-[420px]">
+          {activeTab === 'health' && <SystemHealth onEnvironment={receiveEnvironment} />}
           {activeTab === 'metrics' && <SystemMetrics />}
           {activeTab === 'users' && <UserManagement />}
           {activeTab === 'models' && <ModelManagement />}

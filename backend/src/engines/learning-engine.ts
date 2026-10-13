@@ -12,6 +12,17 @@ export interface LearningContext extends EngineContext {
   experimentCompleted: boolean;
   validationPassed: boolean;
   approved: boolean;
+  validationEvidence?: {
+    reportId: string;
+    strategyVersion: string;
+    datasetProvenance: string;
+    testWindow: { start: string; end: string };
+    costsIncluded: boolean;
+    sampleSize: number;
+    acceptanceChecksPassed: boolean;
+    metrics: { expectancyR: number; profitFactor: number; maxDrawdownR: number };
+  };
+  approvalEvidence?: { approvalId: string; approvedBy: string; approvedAt: string; rollbackVersion: string };
 }
 
 export interface LearningAnalysis {
@@ -40,12 +51,12 @@ export const learningIntelligenceEngine: IntelligenceEngine<LearningAnalysis> & 
     } else if (!context.experimentCompleted) {
       stage = 'hypothesis';
       nextAction = 'Run a reproducible experiment before drawing a conclusion.';
-    } else if (!context.validationPassed) {
+    } else if (!context.validationPassed || !hasValidValidationEvidence(context.validationEvidence)) {
       stage = 'rejected';
-      nextAction = 'Reject the hypothesis or revise it and run another validation experiment.';
-    } else if (!context.approved) {
+      nextAction = 'INSUFFICIENT_RESEARCH_EVIDENCE: provide a reproducible out-of-sample validation report with costs, sample size, metrics, and passed acceptance checks.';
+    } else if (!context.approved || !hasValidApprovalEvidence(context.approvalEvidence)) {
       stage = 'candidate';
-      nextAction = 'Submit the validated result for explicit approval.';
+      nextAction = 'Candidate is validated; record an attributable approval and rollback target before any promotion.';
     } else {
       stage = 'approved';
       nextAction = 'Promote a new versioned artifact through the controlled deployment workflow.';
@@ -71,10 +82,32 @@ export const learningIntelligenceEngine: IntelligenceEngine<LearningAnalysis> & 
       inputContextId: context.inputContextId,
       status: stage === 'rejected' ? 'degraded' : 'ok',
       result,
-      confidence: stage === 'approved' ? 0.8 : stage === 'candidate' ? 0.5 : 0.2,
+      confidence: stage === 'approved' ? 0.8 : stage === 'candidate' ? 0.5 : stage === 'rejected' ? 0 : 0.2,
       evidence,
       warnings: stage === 'rejected' ? [nextAction] : [],
       latencyMs: performance.now() - startedAt,
     };
   },
 };
+
+function hasValidValidationEvidence(evidence: LearningContext['validationEvidence']): boolean {
+  if (!evidence || typeof evidence.reportId !== 'string' || typeof evidence.strategyVersion !== 'string'
+    || typeof evidence.datasetProvenance !== 'string' || !evidence.reportId.trim()
+    || !evidence.strategyVersion.trim() || !evidence.datasetProvenance.trim()) return false;
+  if (!evidence.testWindow || typeof evidence.testWindow.start !== 'string' || typeof evidence.testWindow.end !== 'string'
+    || !evidence.metrics) return false;
+  const start = Date.parse(evidence.testWindow.start);
+  const end = Date.parse(evidence.testWindow.end);
+  return Number.isFinite(start) && Number.isFinite(end) && end > start
+    && evidence.costsIncluded && Number.isInteger(evidence.sampleSize) && evidence.sampleSize > 0
+    && evidence.acceptanceChecksPassed
+    && Number.isFinite(evidence.metrics.expectancyR) && Number.isFinite(evidence.metrics.profitFactor)
+    && Number.isFinite(evidence.metrics.maxDrawdownR);
+}
+
+function hasValidApprovalEvidence(evidence: LearningContext['approvalEvidence']): boolean {
+  return Boolean(evidence && typeof evidence.approvalId === 'string' && evidence.approvalId.trim()
+    && typeof evidence.approvedBy === 'string' && evidence.approvedBy.trim()
+    && typeof evidence.rollbackVersion === 'string' && evidence.rollbackVersion.trim()
+    && Number.isFinite(Date.parse(evidence.approvedAt)));
+}

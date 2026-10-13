@@ -49,31 +49,12 @@ export async function fetchAutonomyStatus(): Promise<AutonomyStatus> {
   return authenticatedBackendRequest<AutonomyStatus>('/api/v1/autonomy/status');
 }
 
-export async function requestBackendDecision(
-  symbol: string,
-  timeframe: Timeframe,
-  candles: Candle[],
-): Promise<BackendDecision | null> {
+export async function requestBackendDecision(symbol: string, timeframe: Timeframe): Promise<BackendDecision | null> {
   const payload = await authenticatedBackendRequest<{ decision?: { result?: BackendDecision } }>('/api/v1/decisions/analyze', {
-    method: 'POST',
-    body: JSON.stringify({ symbol, timeframe, candles }),
-  });
-  return payload.decision?.result ?? null;
-}
-
-export interface PaperOrderResult {
-  accepted: boolean;
-  status: 'filled' | 'rejected';
-  reason?: string;
-  fillPrice?: number;
-  fee?: number;
-}
-
-export async function executePaperTrade(symbol: string, timeframe: Timeframe): Promise<PaperOrderResult> {
-  return authenticatedBackendRequest<PaperOrderResult>('/api/v1/paper/execute', {
     method: 'POST',
     body: JSON.stringify({ symbol, timeframe }),
   });
+  return payload.decision?.result ?? null;
 }
 
 export interface PaperPosition {
@@ -181,6 +162,37 @@ export async function fetchActiveEventBlackouts(): Promise<EventBlackout[]> {
 export async function fetchAdminEventBlackouts(): Promise<EventBlackout[]> {
   const result = await authenticatedBackendRequest<{ events: EventBlackout[] }>('/api/v1/admin/event-blackouts');
   return result.events;
+}
+
+export interface AdminHealthTile {
+  status: 'ok' | 'degraded' | 'down' | 'unverified';
+  reason: string;
+  checkedAt: string;
+}
+
+export interface AdminOverview {
+  environment: 'test' | 'production';
+  generatedAt: string;
+  refreshIntervalMs: number;
+  schema: AdminHealthTile & { missing: string[] };
+  ledger: {
+    hashChain: AdminHealthTile & { checkedAccounts: number; brokenAccounts: number; checkedRows: number };
+    accounting: AdminHealthTile & { checkedAccounts: number; brokenAccounts: number };
+  };
+  scheduler: AdminHealthTile & { enabled: boolean; running: boolean; cycleInProgress: boolean; lastCycleAt: string | null; lastBoundaries: Record<string, number>; nextScheduledAt: string | null; lastError: string | null };
+  providers: Array<AdminHealthTile & { provider: 'Massive' | 'Twelve Data'; quota: number; windowMs: number; usedInWindow: number; queued: number; backoffUntil: string | null; last429At: string | null }>;
+  feeds: Array<AdminHealthTile & { feed: 'Coinbase' | 'Twelve Data'; subscribedSymbols: number; connectedClients: number; droppedUpdates: number; reconnects: number; gaps: number; lastTickAgeMs: number | null }>;
+  freshness: Array<{ symbol: string; timeframe: string; status: AdminHealthTile['status']; reason: string; checkedAt: string; newestClosedCandleAt: string | null; ageMs: number | null }>;
+  autopilot: AdminHealthTile & { enrolledAccounts: number; pausedAccounts: number; pausedReasons: string[]; symbolsInUse: number; symbolCap: number };
+  auditDenials24h: AdminHealthTile & { count: number };
+}
+
+export async function fetchAdminOverview(): Promise<AdminOverview> {
+  return authenticatedBackendRequest<AdminOverview>('/api/v1/admin/overview');
+}
+
+export async function requestFullLedgerReverification(reason: string): Promise<void> {
+  await authenticatedBackendRequest('/api/v1/admin/overview/ledger/reverify', { method: 'POST', body: JSON.stringify({ reason }) });
 }
 
 export async function createEventBlackout(input: { title: string; impact: EventBlackout['impact']; assetClasses: string[]; startsAt: string; endsAt: string }): Promise<string> {

@@ -4,10 +4,11 @@ import { registerAuthGuards } from './fastify-auth';
 
 const authState = vi.hoisted(() => ({
   role: 'admin', aal: 'aal2', factorStatus: 'verified' as string | null,
-  authenticated: true, unavailable: false,
+  authenticated: true, unavailable: false, denials: [] as string[],
 }));
 
 vi.mock('../db.js', () => ({
+  getSupabaseClient: vi.fn(() => ({ rpc: vi.fn(async (_name: string, args: { p_action: string }) => { authState.denials.push(args.p_action); return { error: null }; }) })),
   getSupabaseClientWithToken: vi.fn(() => {
     if (authState.unavailable) throw new Error('test-only auth outage');
     return {
@@ -34,6 +35,7 @@ beforeEach(() => {
   authState.factorStatus = 'verified';
   authState.authenticated = true;
   authState.unavailable = false;
+  authState.denials.length = 0;
   originalRequireAdminMfa = process.env.REQUIRE_ADMIN_MFA;
 });
 
@@ -82,6 +84,7 @@ describe('admin authentication assurance', () => {
     const response = await app.inject({ url: '/admin', headers: { authorization: 'Bearer valid-token' } });
     expect(response.statusCode).toBe(403);
     expect(response.json()).toEqual({ error: 'Two-factor authentication required' });
+    expect(authState.denials).toEqual(['admin.mfa_denied']);
     await app.close();
   });
 
@@ -92,6 +95,7 @@ describe('admin authentication assurance', () => {
     const app = await createApp();
     const response = await app.inject({ url: '/admin', headers: { authorization: 'Bearer valid-token' } });
     expect(response.statusCode).toBe(403);
+    expect(authState.denials).toEqual(['admin.mfa_denied']);
     await app.close();
   });
 
@@ -102,6 +106,7 @@ describe('admin authentication assurance', () => {
     authState.role = 'user';
     const denied = await app.inject({ url: '/admin', headers: { authorization: 'Bearer valid-token' } });
     expect(denied.statusCode).toBe(403);
+    expect(authState.denials).toContain('admin.access_denied');
     await app.close();
   });
 });

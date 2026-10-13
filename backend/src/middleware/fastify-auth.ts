@@ -1,7 +1,21 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { getSupabaseClientWithToken } from '../db.js';
+import { config } from '../config';
+import { getSupabaseClient, getSupabaseClientWithToken } from '../db.js';
+import { WindowLimiter } from '../utils/limits';
 
 type Guard = (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+const adminDenialLimiter = new WindowLimiter(20, config.rateLimitWindowMs);
+
+async function recordAdminDenial(request: FastifyRequest, action: 'admin.access_denied' | 'admin.mfa_denied') {
+  const actorId = request.authenticatedUserId;
+  if (!actorId || !adminDenialLimiter.consume(actorId)) return;
+  try {
+    const { error } = await getSupabaseClient().rpc('admin_record_access_denial', { p_actor_id: actorId, p_action: action });
+    if (error) request.log.warn('Admin access denial could not be recorded.');
+  } catch {
+    request.log.warn('Admin access denial audit service is unavailable.');
+  }
+}
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -48,6 +62,7 @@ export function registerAuthGuards(app: FastifyInstance) {
       const supabase = getSupabaseClientWithToken(request.accessToken);
       const { data, error } = await supabase.from('profiles').select('role').eq('id', request.authenticatedUserId).maybeSingle();
       if (error || data?.role !== 'admin') {
+        if (!error) await recordAdminDenial(request, 'admin.access_denied');
         reply.code(403).send({ error: 'Admin access required' });
         return;
       }
@@ -62,6 +77,7 @@ export function registerAuthGuards(app: FastifyInstance) {
       const hasVerifiedFactor = userData.user.factors?.some((factor) => factor.status === 'verified') ?? false;
       const currentLevel = claimsData.claims.aal;
       if ((process.env.REQUIRE_ADMIN_MFA === 'true' || hasVerifiedFactor) && currentLevel !== 'aal2') {
+        await recordAdminDenial(request, 'admin.mfa_denied');
         reply.code(403).send({ error: 'Two-factor authentication required' });
       }
     } catch {
