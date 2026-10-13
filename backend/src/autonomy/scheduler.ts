@@ -100,7 +100,7 @@ export class AutonomousScheduler {
           const candle = selected[index]!;
           const sourceIndex = closed.findIndex((item) => item.time === candle.time);
           const prefix = closed.slice(0, sourceIndex + 1);
-          const result = await this.pipeline.runOnce(symbol, job.timeframe, prefix, job.role, true);
+          const result = await this.pipeline.runOnce(symbol, job.timeframe, prefix, job.role);
           if (job.role === 'planner') {
             console.info(`[autonomy] ${result.plan ? `Plan created ${result.plan.id}` : result.planReason ?? 'No plan.'} for ${symbol}.`);
           }

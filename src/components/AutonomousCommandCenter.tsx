@@ -40,7 +40,7 @@ export default function AutonomousCommandCenter({ symbol, timeframe, marketType,
     return () => { cancelled = true; window.clearInterval(timer); };
   }, []);
 
-  const serverDirection = serverDecision?.decision === 'BUY' ? 'buy' : serverDecision?.decision === 'SELL' ? 'sell' : 'neutral';
+  const serverDirection = serverDecision?.marketBias ?? (serverDecision?.decision === 'BUY' ? 'buy' : serverDecision?.decision === 'SELL' ? 'sell' : 'neutral');
   const direction = serverDecision ? serverDirection : recommendation?.side ?? 'neutral';
   const confidence = serverDecision ? Math.round(serverDecision.confidence * 100) : recommendation ? Math.round(Math.abs(recommendation.score) * 100) : 0;
   const evidence = useMemo(() => signals.slice(0, 6), [signals]);
@@ -83,10 +83,13 @@ export default function AutonomousCommandCenter({ symbol, timeframe, marketType,
       <div className="command-decision-bar">
         <div className={`command-decision decision-${actionable ? serverDirection : 'neutral'}`}><span>ACTION</span><strong>{actionLabel}</strong></div>
         <div className="decision-explanation">{serverDecision?.explanation ?? (serverDecisionError ? `No actionable decision: ${serverDecisionError}. Local indicator output is bias context only.` : 'Waiting for the server decision. Local indicator output is bias context only.')}</div>
-        <div className="decision-risk"><span><ShieldCheck className="w-3.5 h-3.5" /> Risk gate</span><strong>{actionable ? 'APPROVED' : serverDecision ? 'BLOCKED' : 'WAITING'}</strong></div>
+        <div className="decision-risk"><span><ShieldCheck className="w-3.5 h-3.5" /> Risk capacity</span><strong>{serverDecision?.stages?.riskApproval.status.toUpperCase() ?? (actionable ? 'APPROVED' : serverDecision ? 'NOT CLEARED' : 'WAITING')}</strong></div>
         <div className="decision-risk"><span>Orders</span><strong>{status.executedOrders}</strong></div>
         {status.state === 'PAUSED' && <span title="Automatic engine paused after a safety event"><AlertTriangle className="w-4 h-4 text-warning" /></span>}
       </div>
+      {serverDecision?.stages && <div className="decision-explanation border-t border-border/50 px-3 py-2 text-xs text-muted" aria-label="Decision stages">
+        Setup: {serverDecision.stages.setupDetection.status.replaceAll('_', ' ')} · Entry: {serverDecision.stages.entryConfirmation.status.replaceAll('_', ' ')} · Final: {serverDecision.stages.finalDecision.action.replaceAll('_', ' ')}
+      </div>}
     </section>
   );
 }

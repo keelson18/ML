@@ -17,7 +17,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { computeResearchMetrics, createDailyReview, type JournalSample } from '../trader/research';
 import { getMarketAvailability } from './marketAvailability';
 import { evaluateEventEntryGate, getEventRiskStatus } from '../trader/event-risk';
-import { candleIndex } from '../trader/candle-math';
+import { candleIndex, isClosed } from '../trader/candle-math';
 
 const testAccounts = new Map<string, PaperAccountState>();
 
@@ -93,6 +93,9 @@ export async function advanceStoredTradePlans(input: {
   shadowMode?: boolean;
   entriesAllowed?: boolean;
 }): Promise<StoredPlanExecutionResult> {
+  if (!isClosed(input.candle, input.timeframe, Date.now(), traderConfig.CLOSE_GRACE_MS)) {
+    throw new Error('Paper execution requires a boundary-verified closed candle.');
+  }
   const eventRisk = await getEventRiskStatus(input.symbol);
   return updateAccount(input.accountId, (startingAccount) => {
     let account = startingAccount;

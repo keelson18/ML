@@ -1,4 +1,5 @@
 import type { EngineContext, EngineEvidence, EngineResult, IntelligenceEngine } from './contracts';
+import { traderConfig } from '../trader/config';
 
 export type LearningStage = 'observation' | 'hypothesis' | 'validated' | 'candidate' | 'approved' | 'rejected';
 
@@ -98,11 +99,14 @@ function hasValidValidationEvidence(evidence: LearningContext['validationEvidenc
     || !evidence.metrics) return false;
   const start = Date.parse(evidence.testWindow.start);
   const end = Date.parse(evidence.testWindow.end);
+  const windowDays = (end - start) / 86_400_000;
   return Number.isFinite(start) && Number.isFinite(end) && end > start
-    && evidence.costsIncluded && Number.isInteger(evidence.sampleSize) && evidence.sampleSize > 0
+    && windowDays >= traderConfig.MIN_FORWARD_DAYS
+    && evidence.costsIncluded && Number.isInteger(evidence.sampleSize) && evidence.sampleSize >= traderConfig.MIN_FORWARD_TRADES
     && evidence.acceptanceChecksPassed
-    && Number.isFinite(evidence.metrics.expectancyR) && Number.isFinite(evidence.metrics.profitFactor)
-    && Number.isFinite(evidence.metrics.maxDrawdownR);
+    && Number.isFinite(evidence.metrics.expectancyR) && evidence.metrics.expectancyR > 0
+    && Number.isFinite(evidence.metrics.profitFactor) && evidence.metrics.profitFactor > 1
+    && Number.isFinite(evidence.metrics.maxDrawdownR) && evidence.metrics.maxDrawdownR >= 0;
 }
 
 function hasValidApprovalEvidence(evidence: LearningContext['approvalEvidence']): boolean {

@@ -39,6 +39,7 @@ export default function StrategyLab({ signals, candles, timeframe }: Props) {
           <div className="page-eyebrow"><Zap className="w-3.5 h-3.5" /> Research workspace</div>
           <h1>Strategy Library</h1>
           <p>Browse executable rule definitions and current triggers from the active {timeframe} candle set. Signals show rule conditions, not calibrated probabilities or performance. Pattern detections remain evidence, not executable strategies.</p>
+          <p className="mt-2 text-xs text-warning">Diagnostics use boundary-closed candles. This browser view does not verify provider provenance or feed freshness and cannot authorize an entry.</p>
         </div>
         <div className="text-xs text-muted">{candles.length} candles loaded</div>
       </div>

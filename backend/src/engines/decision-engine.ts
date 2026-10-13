@@ -41,6 +41,13 @@ export interface DecisionEngineContext extends EngineContext {
 
 export interface TradeDecision {
   decision: TradeDecisionType;
+  marketBias: Side;
+  stages: {
+    setupDetection: { status: 'not_evaluated'; reason: string };
+    entryConfirmation: { status: 'not_confirmed'; reason: string };
+    riskApproval: { status: 'approved' | 'rejected'; reasons: string[] };
+    finalDecision: { action: 'NO_TRADE'; reason: string };
+  };
   confidence: number;
   entry?: number;
   entryZone?: { low: number; high: number };
@@ -81,12 +88,6 @@ function directionalEvidence(signals: Signal[]): EngineEvidence[] {
       score: signal.confidence,
       explanation: signal.reason,
     }));
-}
-
-function directionForDecision(decision: TradeDecisionType): Side {
-  if (decision === 'BUY') return 'buy';
-  if (decision === 'SELL') return 'sell';
-  return 'neutral';
 }
 
 export const masterDecisionEngine: IntelligenceEngine<TradeDecision> & {
@@ -156,13 +157,11 @@ export const masterDecisionEngine: IntelligenceEngine<TradeDecision> & {
 
     const hasDirectionalEvidence = scores.buy > 0 || scores.sell > 0;
     const hasHighContradiction = contradictionResult.result.blocksDecision;
-    let decision: TradeDecisionType = 'NO_TRADE';
-
-    if (!dataQualityBlocked && !strategyExecutionBlocked && risk.result.approved && portfolio.result.approved && hasDirectionalEvidence && !hasHighContradiction) {
-      decision = scores.buy > scores.sell ? 'BUY' : 'SELL';
-    }
-
-    const direction = directionForDecision(decision);
+    // A strategy signal establishes directional bias only. TradePlan detection and a
+    // closed-candle trigger are separate planner/executor responsibilities; this API
+    // cannot turn a directional vote directly into an entry decision.
+    const decision: TradeDecisionType = 'NO_TRADE';
+    const direction = deterministicDirection;
     const optionalEvidence = [
       ...(ml?.evidence ?? []),
       ...(historical?.evidence ?? []),
@@ -191,21 +190,16 @@ export const masterDecisionEngine: IntelligenceEngine<TradeDecision> & {
     const confidence = confidenceResult.result.overall;
 
     const strategyName = selectedStrategy.name;
-    const explanation = decision === 'NO_TRADE'
-      ? !hasDirectionalEvidence
-        ? `No trade: selected strategy ${strategyName} has no confirmed directional trigger.${contradictions.length ? ` ${contradictions.join(' ')}` : ''}`
-        : contradictions.length > 0
-        ? `No trade: ${contradictions.join(' ')}`
-        : `No trade: selected strategy ${strategyName} has no confirmed directional trigger.`
-      : `${decision} from the confirmed ${strategyName} setup after risk, portfolio, and contradiction review.`;
+    const riskApprovalReasons = [...new Set([...risk.result.violatedRules, ...portfolio.result.violatedRules])];
+    const setupReason = 'Directional strategy output is market bias only; a separately validated TradePlan is required.';
+    const confirmationReason = 'No executor-confirmed trigger on a verified closed candle was supplied to decision analysis.';
+    const finalReason = hasDirectionalEvidence
+      ? 'No trade: setup detection and closed-candle entry confirmation are separate required stages.'
+      : `No trade: selected strategy ${strategyName} has no directional bias signal.`;
+    const explanation = `${finalReason}${contradictions.length ? ` ${contradictions.join(' ')}` : ''}`;
 
-    const latest = context.candles.at(-1);
     // The risk gate and the published trade levels must refer to the same proposal.
     // Analysis cannot invent ATR-based stops, targets, or entry zones when no plan exists.
-    const entry = decision === 'NO_TRADE' ? latest?.close : context.risk.trade.entryPrice;
-    const entryZone = decision === 'NO_TRADE' ? undefined : context.entryZone;
-    const invalidation = decision === 'NO_TRADE' ? undefined : context.risk.trade.stopLossPrice;
-    const targets = decision === 'NO_TRADE' ? undefined : [{ price: context.risk.trade.takeProfitPrice }];
 
     const engineVersions: Record<string, string> = {
       'master-decision': ENGINE_VERSION,
@@ -229,11 +223,21 @@ export const masterDecisionEngine: IntelligenceEngine<TradeDecision> & {
 
     const result: TradeDecision = {
       decision,
+      marketBias: deterministicDirection,
+      stages: {
+        setupDetection: { status: 'not_evaluated', reason: setupReason },
+        entryConfirmation: { status: 'not_confirmed', reason: confirmationReason },
+        riskApproval: {
+          status: risk.result.approved && portfolio.result.approved && !dataQualityBlocked && !strategyExecutionBlocked && !hasHighContradiction ? 'approved' : 'rejected',
+          reasons: riskApprovalReasons.length ? riskApprovalReasons : contradictions,
+        },
+        finalDecision: { action: 'NO_TRADE', reason: finalReason },
+      },
       confidence,
-      entry,
-      entryZone,
-      invalidation,
-      targets,
+      entry: undefined,
+      entryZone: undefined,
+      invalidation: undefined,
+      targets: undefined,
       strategy: strategyName,
       supportingEvidence: evidence,
       contradictions,

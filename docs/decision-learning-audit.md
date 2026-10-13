@@ -39,3 +39,25 @@ Final focused run: `npx vitest run src/lib/backend-api.test.ts backend/src/engin
 - Non-crypto discontinuities are labeled as possible scheduled market-session gaps because instrument calendars are not part of the provider contract; market-session correctness remains unverified.
 - Full prompt coverage should not be inferred solely from passing unit/build checks; see command results in the final response for any incomplete stages.
 
+
+## Follow-up concern work (2026-10-13)
+
+- Decision analysis now reports `marketBias` separately from setup detection, entry confirmation, risk capacity, and final action. A strategy signal alone can no longer produce BUY/SELL from the master decision endpoint; without a planner-validated setup and executor-confirmed closed-bar trigger, final action remains NO_TRADE and no entry/stop/target is published.
+- Candle boundary logic is shared with the browser. Dashboard initialization, Strategy Lab and backtesting now receive boundary-closed candles rather than dropping the last array row. The autonomy pipeline always rechecks the boundary; scheduler callers cannot bypass it. Paper plan execution also checks the candle boundary immediately before processing.
+- Replay order IDs now derive from dataset, plan and bar identity. Repeat-run tests compare the complete replay output for equality.
+- Learning evidence must meet configured forward trade-count and test-window minima and show positive expectancy, profit factor above one, costs, and non-negative drawdown. It still does not enable production mutation.
+- Migration `20261017000000_health_empty_and_uncheckpointed_ledger.sql` changes hash-chain health so empty databases/accounts remain unverified and accounts without checkpoints receive a full verification before checkpointing. Verification uses the same per-account advisory lock as account writes.
+- `supabase/tests/ledger_health.test.sql` covers empty ledgers, event retries, stale account versions, empty-account health and privileged hash corruption. It is designed for `supabase test db`; it was NOT-VERIFIED here because `supabase`, `psql`, and Docker are not installed. Hosted Supabase state and concurrent two-session execution remain NOT-VERIFIED.
+
+### Follow-up verification status
+
+- `npm test` — PASS on final tree, 58 files / 321 tests. An earlier run performed alongside other CPU-heavy checks hit the existing import-boundary test's 5-second timeout; that test passed alone and the serialized full rerun passed.
+- `npm run typecheck` — PASS.
+- `npm run backend:typecheck` — PASS.
+- `npm run lint` — PASS.
+- `npm run build` — PASS after elevated retry for sandbox esbuild `spawn EPERM`; 1,615 modules transformed. Vite reports the `App` chunk at 921.69 kB (>500 kB advisory limit).
+- `npm run check:migration-versions` — PASS, 41 unique migration versions.
+- `npm run check:env` — PASS, 52 environment variables documented.
+- `git diff --check` — PASS with CRLF normalization warnings.
+- `supabase/tests/ledger_health.test.sql` and hosted Supabase schema/ledger/accounting state — NOT-VERIFIED. The environment has no `supabase`, `psql`, or Docker executable. Concurrent two-session database verification also remains NOT-VERIFIED.
+- Replay determinism is verified by unit tests on synthetic fixtures only. No claim is made about real trading effectiveness or actual production learning.

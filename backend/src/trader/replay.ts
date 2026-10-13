@@ -76,6 +76,7 @@ export function replayClosedCandles(input: {
         plan, candle, previousCandle: candles[index - 1], recentCandles: candles.slice(Math.max(0, index - 20), index + 1),
         barIndex: index, timeframe: plan.triggerTimeframe ?? '15m', pendingOrder: pending.get(plan.id),
         gate: (price) => input.gate?.(plan, price) ?? { approved: true, quantity: 1 },
+        orderIdFactory: () => `replay-${createHash('sha256').update(`${input.datasetId}:${plan.id}:${index}`).digest('hex').slice(0, 32)}`,
       });
       nextPlans[planIndex] = step.plan;
       if (step.pendingOrder) pending.set(plan.id, step.pendingOrder);

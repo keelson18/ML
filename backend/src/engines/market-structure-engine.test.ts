@@ -97,6 +97,17 @@ describe('marketStructureEngine', () => {
     }
   });
 
+  it.each([
+    ['stale provider fallback', { dataState: 'stale' as const, dataSource: { provider: 'fixture', fetchedAt: Date.now(), datasetId: 'synthetic-stale' } }],
+    ['missing provenance', { dataState: 'ready' as const, dataSource: undefined }],
+  ])('fails closed for %s data', (label, quality) => {
+    const context = closedDecisionInput(`decision-${label}`);
+    const result = masterDecisionEngine.analyze({ ...context, ...quality });
+    expect(result.result.decision).toBe('NO_TRADE');
+    expect(result.result.stages.riskApproval.status).toBe('rejected');
+    expect(result.status).toBe('degraded');
+  });
+
   it('reports strategy detector exceptions instead of treating them as no signal', () => {
     const strategy = STRATEGY_REGISTRY[0];
     const originalDetector = strategy.detect;
@@ -149,7 +160,7 @@ describe('marketStructureEngine', () => {
     }
   });
 
-  it('publishes the exact stop and target that passed risk approval', () => {
+  it('keeps market bias separate from setup, entry confirmation, risk, and final decision', () => {
     const context = closedDecisionInput('risk-level-consistency');
     const selected = selectBestStrategy(context.candles, context.timeframe);
     const strategy = STRATEGY_REGISTRY.find((item) => item.id === selected.id)!;
@@ -158,10 +169,14 @@ describe('marketStructureEngine', () => {
       STRATEGY_REGISTRY.forEach((item) => { item.detect = () => []; });
       strategy.detect = () => [{ strategy: strategy.name, side: 'buy', confidence: 0.8, reason: 'Synthetic selected setup trigger.' }];
       const result = masterDecisionEngine.analyze({ ...context, entryZone: { low: context.risk.trade.entryPrice - 0.25, high: context.risk.trade.entryPrice } });
-      expect(result.result.decision).toBe('BUY');
-      expect(result.result.entry).toBe(context.risk.trade.entryPrice);
-      expect(result.result.invalidation).toBe(context.risk.trade.stopLossPrice);
-      expect(result.result.targets).toEqual([{ price: context.risk.trade.takeProfitPrice }]);
+      expect(result.result.marketBias).toBe('buy');
+      expect(result.result.decision).toBe('NO_TRADE');
+      expect(result.result.stages.setupDetection.status).toBe('not_evaluated');
+      expect(result.result.stages.entryConfirmation.status).toBe('not_confirmed');
+      expect(result.result.stages.finalDecision.action).toBe('NO_TRADE');
+      expect(result.result.entry).toBeUndefined();
+      expect(result.result.invalidation).toBeUndefined();
+      expect(result.result.targets).toBeUndefined();
     } finally {
       STRATEGY_REGISTRY.forEach((item, index) => { item.detect = originalDetectors[index]; });
     }
@@ -497,6 +512,13 @@ describe('marketStructureEngine', () => {
       },
       decision: {
         decision: 'BUY',
+        marketBias: 'buy',
+        stages: {
+          setupDetection: { status: 'not_evaluated', reason: 'Recorded historic trade fixture.' },
+          entryConfirmation: { status: 'not_confirmed', reason: 'Recorded historic trade fixture.' },
+          riskApproval: { status: 'approved', reasons: [] },
+          finalDecision: { action: 'NO_TRADE', reason: 'Recorded historic trade fixture.' },
+        },
         confidence: 0.8,
         strategy: 'test',
         supportingEvidence: [],
@@ -826,12 +848,28 @@ describe('marketStructureEngine', () => {
       validationPassed: true, approved: true,
       validationEvidence: {
         reportId: 'report-1', strategyVersion: 'strategy-1', datasetProvenance: 'provider:dataset-version',
-        testWindow: { start: '2026-01-01T00:00:00Z', end: '2026-02-01T00:00:00Z' },
+        testWindow: { start: '2026-01-01T00:00:00Z', end: '2026-04-02T00:00:00Z' },
         costsIncluded: true, sampleSize: 100, acceptanceChecksPassed: true,
         metrics: { expectancyR: 0.1, profitFactor: 1.2, maxDrawdownR: 3 },
       },
     });
     expect(result.result.stage).toBe('candidate');
+    expect(result.result.productionMutationAllowed).toBe(false);
+  });
+
+  it('rejects an underpowered research report even when caller checks claim success', () => {
+    const result = learningIntelligenceEngine.analyze({
+      inputContextId: 'underpowered-learning-context', symbol: 'BTCUSD', timeframe: '1h', candles: [],
+      observation: { id: 'obs-underpowered', source: 'research', facts: {} },
+      hypothesis: 'This setup may outperform after fees.', experimentCompleted: true, validationPassed: true, approved: true,
+      validationEvidence: {
+        reportId: 'report-underpowered', strategyVersion: 'strategy-1', datasetProvenance: 'fixture:dataset-v1',
+        testWindow: { start: '2026-01-01T00:00:00Z', end: '2026-04-02T00:00:00Z' },
+        costsIncluded: true, sampleSize: 2, acceptanceChecksPassed: true,
+        metrics: { expectancyR: 1, profitFactor: 10, maxDrawdownR: 0 },
+      },
+    });
+    expect(result.result.stage).toBe('rejected');
     expect(result.result.productionMutationAllowed).toBe(false);
   });
 

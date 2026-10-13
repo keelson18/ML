@@ -23,6 +23,13 @@ export async function authenticatedBackendRequest<T>(path: string, init: Request
 
 export interface BackendDecision {
   decision: 'BUY' | 'SELL' | 'HOLD' | 'WATCH' | 'NO_TRADE';
+  marketBias?: 'buy' | 'sell' | 'neutral';
+  stages?: {
+    setupDetection: { status: 'not_evaluated'; reason: string };
+    entryConfirmation: { status: 'not_confirmed'; reason: string };
+    riskApproval: { status: 'approved' | 'rejected'; reasons: string[] };
+    finalDecision: { action: 'NO_TRADE'; reason: string };
+  };
   confidence: number;
   entry?: number;
   invalidation?: number;

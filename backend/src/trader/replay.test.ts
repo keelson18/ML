@@ -27,6 +27,13 @@ describe('shared replay core', () => {
     expect(result.trades[0]?.exitTime).toBe(2700);
     expect(result.datasetId).toBe('fixture-v1');
     expect(result.configHash).toMatch(/^[a-f0-9]{64}$/);
+    const repeated = replayClosedCandles({
+      candles: [bar(900), bar(1800, { open: 101, high: 105, low: 101, close: 104 }), bar(2700, { open: 104, high: 112, low: 103, close: 111 })],
+      datasetId: 'fixture-v1', shadowMode: false,
+      plansAt: (history) => history.length === 1 ? [plan] : [],
+      gate: () => ({ approved: true, quantity: 1 }),
+    });
+    expect(repeated).toEqual(result);
   });
 
   it('keeps cost sensitivity reproducible and records higher costs', () => {

@@ -77,6 +77,7 @@ export function advanceTradePlan(input: {
   timeframe: PlanEvent['timeframe'];
   pendingOrder?: PendingPaperOrder;
   gate: (entryPrice: number) => EntryGateResult;
+  orderIdFactory?: () => string;
 }): ExecutorStep {
   const { plan, candle, previousCandle, recentCandles, barIndex, timeframe, pendingOrder } = input;
   if (pendingOrder?.status === 'pending') {
@@ -131,7 +132,7 @@ export function advanceTradePlan(input: {
   }
   const event = eventFor(armedPlan, 'PENDING_ORDER', 'executor', 'Closed-candle trigger confirmed and entry gates passed.', candle, timeframe);
   const order: PendingPaperOrder = {
-    id: randomUUID(), planId: plan.id, accountId: plan.accountId, symbol: plan.symbol, side: plan.side,
+    id: input.orderIdFactory?.() ?? randomUUID(), planId: plan.id, accountId: plan.accountId, symbol: plan.symbol, side: plan.side,
     orderType: 'stop_entry', price: armedPlan.trigger.kind === 'close_above_level' ? armedPlan.trigger.level : armedPlan.zone.high,
     quantity: gate.quantity, createdAtBar: barIndex, expiresAtBar: Math.min(armedPlan.expiresAtBar, barIndex + traderConfig.PLAN_EXPIRY_BARS), status: 'pending',
   };

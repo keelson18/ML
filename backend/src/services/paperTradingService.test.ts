@@ -9,6 +9,13 @@ vi.mock('./marketAvailability', () => ({ getMarketAvailability: () => [{ symbol:
 function buyDecision(): TradeDecision {
   return {
     decision: 'BUY',
+    marketBias: 'buy',
+    stages: {
+      setupDetection: { status: 'not_evaluated', reason: 'Test fixture.' },
+      entryConfirmation: { status: 'not_confirmed', reason: 'Test fixture.' },
+      riskApproval: { status: 'approved', reasons: [] },
+      finalDecision: { action: 'NO_TRADE', reason: 'Test fixture.' },
+    },
     confidence: 0.9,
     entry: 100,
     invalidation: 95,
@@ -24,6 +31,14 @@ function buyDecision(): TradeDecision {
 }
 
 describe('backend paper position lifecycle', () => {
+  it('rejects a forming candle before loading plans or touching account state', async () => {
+    const accountId = `forming-execution-${Date.now()}`;
+    const forming = { time: Math.floor(Date.now() / 900_000) * 900, open: 99, high: 101, low: 98, close: 101, volume: 100 };
+    await expect(advanceStoredTradePlans({ accountId, symbol: 'BTCUSD', timeframe: '15m', candle: forming, candles: [forming], shadowMode: false }))
+      .rejects.toThrow('boundary-verified closed candle');
+    expect((await getAccount(accountId)).positions).toHaveLength(0);
+  });
+
   it('connects stored plans to gated, next-candle paper fills and records the order', async () => {
     const accountId = `plan-fill-${Date.now()}`;
     const oldPromotions = traderConfig.PROMOTED_SETUP_TYPES;

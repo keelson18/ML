@@ -69,11 +69,10 @@ export class AutonomousPipeline {
     timeframe: Timeframe = this.config.timeframe,
     candles?: Candle[],
     role: PipelineRole = 'executor',
-    candlesAreClosed = false,
   ): Promise<PipelineResult> {
     const fetchedSeries = candles ? undefined : await fetchMarketData(symbol, timeframe, 501, { priority: true });
     const rawCandles = candles ?? fetchedSeries!.candles;
-    const series = candlesAreClosed ? rawCandles : selectClosedCandles(rawCandles, timeframe, Date.now(), traderConfig.CLOSE_GRACE_MS);
+    const series = selectClosedCandles(rawCandles, timeframe, Date.now(), traderConfig.CLOSE_GRACE_MS);
     const closedCandle = series.at(-1);
     if (!closedCandle) throw new Error(`No closed candle available for ${symbol}.`);
     if (this.state === 'PAUSED' || this.state === 'PAUSED_BY_RISK' || this.state === 'OFFLINE') {

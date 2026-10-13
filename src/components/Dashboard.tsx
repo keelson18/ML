@@ -6,6 +6,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { TIMEFRAMES, MARKET_TYPES, type Candle, type Timeframe, type Signal, type Recommendation, type MLPrediction, type MarketType, type CMSContent } from '../lib/types';
+import { selectClosedCandles } from '../lib/candle-clock';
 import { getDataProvider } from '../lib/providers';
 import { runAllStrategies } from '../lib/strategies/index';
 import { combineSignals } from '../lib/backtest';
@@ -118,7 +119,7 @@ export default function Dashboard() {
     setLoading(true);
     candlesRef.current = cachedCandles;
     setCandles(cachedCandles);
-    setDecisionCandles(cachedCandles.slice(0, -1));
+    setDecisionCandles(selectClosedCandles(cachedCandles, timeframe));
     setLivePrice(cachedCandles.at(-1)?.close ?? null);
     setDataError(null);
     setWsStatus('connecting');
@@ -133,7 +134,7 @@ export default function Dashboard() {
         candlesRef.current = merged;
         candleCacheRef.current.set(cacheKey, merged);
         setCandles(merged);
-        setDecisionCandles(merged.slice(0, -1));
+        setDecisionCandles(selectClosedCandles(merged, timeframe));
         setLivePrice(merged.length ? merged[merged.length - 1].close : null);
       } catch (error) {
         if (!disposed) {
@@ -157,7 +158,7 @@ export default function Dashboard() {
         closedTime = null;
         setDecisionCandles((previous) => {
           if (previous.at(-1) && previous[previous.length - 1].time > time) return previous;
-          return arr.filter((item) => item.time <= time);
+          return selectClosedCandles(arr.filter((item) => item.time <= time), timeframe);
         });
       }
       if (latestPrice !== null) setLivePrice(latestPrice);
@@ -266,9 +267,9 @@ export default function Dashboard() {
 
     if (sidebarTab === 'markets') return <MarketsPage />;
     if (sidebarTab === 'ai-analysis') return <AIAnalysis signals={signals} ml={ml} mlStatus={mlStatus} recommendation={recommendation} onRefreshML={refreshML} mlLoading={mlLoading} candleCount={candles.length} marketLoading={loading} marketError={dataError} />;
-    if (sidebarTab === 'strategies') return <StrategyLab signals={signals} candles={candles} timeframe={timeframe} />;
+    if (sidebarTab === 'strategies') return <StrategyLab signals={signals} candles={decisionCandles} timeframe={timeframe} />;
     if (sidebarTab === 'portfolio') return <PortfolioPage />;
-    if (sidebarTab === 'backtesting') return <BacktestingCenter candles={candles} timeframe={timeframe} symbol={symbol} theme={theme} marketLoading={loading} marketError={dataError} onRetryMarketData={() => setReloadKey((key) => key + 1)} />;
+    if (sidebarTab === 'backtesting') return <BacktestingCenter candles={decisionCandles} timeframe={timeframe} symbol={symbol} theme={theme} marketLoading={loading} marketError={dataError} onRetryMarketData={() => setReloadKey((key) => key + 1)} />;
     if (sidebarTab === 'watchlists') return <WatchlistsPage key={user?.id ?? 'local'} userId={user?.id} />;
     if (sidebarTab === 'alerts') return <AlertsPage key={user?.id ?? 'local'} />;
     if (sidebarTab === 'news') return <NewsPage />;
