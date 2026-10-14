@@ -1,6 +1,6 @@
 // Validates stop-based equal-risk sizing, caps, and drawdown using marked equity.
 import { describe, expect, it } from 'vitest';
-import { calculatePositionSize, markToMarket } from './risk';
+import { calculatePositionSize, isLossStreakCooldownActive, markToMarket } from './risk';
 import { riskIntelligenceEngine } from '../engines/risk-engine';
 
 describe('Trader Desk risk calculations', () => {
@@ -64,6 +64,31 @@ describe('Trader Desk risk calculations', () => {
     expect(markToMarket(account, { BTCUSD: 0 }).missingMarkSymbols).toEqual(['BTCUSD']);
     expect(markToMarket(account, { BTCUSD: Number.POSITIVE_INFINITY }).missingMarkSymbols).toEqual(['BTCUSD']);
     expect(markToMarket(account, { BTCUSD: 80 }).missingMarkSymbols).toEqual([]);
+  });
+
+  it('starts a cooldown after the configured consecutive closed-position losses', () => {
+    const trades = [
+      { id: 't1', positionId: 'p1', symbol: 'BTCUSD', side: 'buy' as const, quantity: 1, entryPrice: 100, exitPrice: 99, fees: 0, slippage: 0, realizedPnl: -1, executionVersion: 'test', openedAt: '2026-01-01T00:00:00Z', closedAt: '2026-01-01T00:00:00Z', maeR: null, mfeR: null },
+      { id: 't2', positionId: 'p2', symbol: 'BTCUSD', side: 'buy' as const, quantity: 1, entryPrice: 100, exitPrice: 99, fees: 0, slippage: 0, realizedPnl: -1, executionVersion: 'test', openedAt: '2026-01-01T00:15:00Z', closedAt: '2026-01-01T00:15:00Z', maeR: null, mfeR: null },
+    ];
+    const input = { trades, closedPositionIds: new Set(['p1', 'p2']), asOfMs: Date.parse('2026-01-01T00:30:00Z'), timeframe: '15m' as const, limit: 2, cooldownBars: 2 };
+    expect(isLossStreakCooldownActive(input)).toBe(true);
+    expect(isLossStreakCooldownActive({ ...input, asOfMs: Date.parse('2026-01-01T00:45:00Z') })).toBe(false);
+  });
+
+  it('does not count partial, future, or wins preceding the current losing streak', () => {
+    const trade = (id: string, positionId: string, realizedPnl: number, closedAt: string) => ({
+      id, positionId, symbol: 'BTCUSD', side: 'buy' as const, quantity: 1, entryPrice: 100, exitPrice: 99,
+      fees: 0, slippage: 0, realizedPnl, executionVersion: 'test', openedAt: closedAt, closedAt, maeR: null, mfeR: null,
+    });
+    const trades = [
+      trade('old-loss', 'p1', -1, '2026-01-01T00:00:00Z'),
+      trade('win', 'p2', 1, '2026-01-01T00:15:00Z'),
+      trade('latest-loss', 'p3', -1, '2026-01-01T00:30:00Z'),
+      trade('future-loss', 'p4', -1, '2026-01-01T01:00:00Z'),
+    ];
+    expect(isLossStreakCooldownActive({ trades, closedPositionIds: new Set(['p1', 'p2', 'p3', 'p4']), asOfMs: Date.parse('2026-01-01T00:45:00Z'), timeframe: '15m', limit: 2, cooldownBars: 2 })).toBe(false);
+    expect(isLossStreakCooldownActive({ trades: trades.slice(2, 3), closedPositionIds: new Set(), asOfMs: Date.parse('2026-01-01T00:45:00Z'), timeframe: '15m', limit: 1, cooldownBars: 2 })).toBe(false);
   });
 
   it('blocks a new proposal when the configured weekly loss stop is reached', () => {

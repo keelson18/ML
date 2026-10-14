@@ -35,6 +35,7 @@ export interface PaperPosition {
   engineVersions?: Record<string, string>;
   planId?: string;
   managementEvents?: Array<{ occurredAt: string; action: string }>;
+  thesisInvalidatedAt?: string;
   status: PaperPositionStatus;
   openedAt: string;
   closedAt?: string;

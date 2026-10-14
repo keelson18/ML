@@ -1,6 +1,46 @@
 // Shared mark-to-market and stop-distance sizing calculations for paper and replay paths.
-import type { PaperAccountState } from '../engines/paper-execution';
+import type { PaperAccountState, PaperTrade } from '../engines/paper-execution';
+import type { Timeframe } from '../../../src/lib/types';
+import { candleSeconds } from './candle-math';
 import { traderConfig } from './config';
+
+export function isLossStreakCooldownActive(input: {
+  trades: PaperTrade[];
+  closedPositionIds: ReadonlySet<string>;
+  asOfMs: number;
+  timeframe: Timeframe;
+  limit?: number;
+  cooldownBars?: number;
+}): boolean {
+  const closedPositions = new Map<string, { pnl: number; closedAt: number }>();
+  for (const trade of input.trades) {
+    const closedAt = Date.parse(trade.closedAt);
+    if (!input.closedPositionIds.has(trade.positionId) || !Number.isFinite(closedAt) || closedAt > input.asOfMs) continue;
+    const aggregate = closedPositions.get(trade.positionId) ?? { pnl: 0, closedAt };
+    aggregate.pnl += trade.realizedPnl;
+    aggregate.closedAt = Math.max(aggregate.closedAt, closedAt);
+    closedPositions.set(trade.positionId, aggregate);
+  }
+  const latestFirst = [...closedPositions.entries()]
+    .sort(([leftId, left], [rightId, right]) => right.closedAt - left.closedAt || leftId.localeCompare(rightId))
+    .map(([, position]) => position);
+  let consecutiveLosses = 0;
+  for (const position of latestFirst) {
+    if (position.pnl >= 0) break;
+    consecutiveLosses += 1;
+  }
+  const lossLimit = input.limit ?? traderConfig.LOSS_STREAK_LIMIT;
+  const cooldownBars = input.cooldownBars ?? traderConfig.LOSS_STREAK_COOLDOWN_BARS;
+  if (consecutiveLosses < lossLimit) return false;
+  const mostRecentLoss = latestFirst[0];
+  const barSeconds = candleSeconds(input.timeframe, mostRecentLoss!.closedAt / 1000);
+  return (input.asOfMs - mostRecentLoss!.closedAt) < cooldownBars * barSeconds * 1000;
+}
+
+export function lossStreakCooldownReason(input: Parameters<typeof isLossStreakCooldownActive>[0]): string | undefined {
+  if (!isLossStreakCooldownActive(input)) return undefined;
+  return `Consecutive-loss lockout active for ${traderConfig.LOSS_STREAK_COOLDOWN_BARS} ${input.timeframe} bars after ${traderConfig.LOSS_STREAK_LIMIT} losing closed positions.`;
+}
 
 export interface PositionSizingInput {
   equity: number;

@@ -7,6 +7,7 @@ import { advanceTradePlan, type EntryGateResult } from './executor';
 import { managePaperPosition } from './manager';
 import type { TradePlan } from './types';
 import { calculatePositionSize, markToMarket } from './risk';
+import { candleSeconds } from './candle-math';
 
 export interface ReplayTrade {
   planId: string;
@@ -37,6 +38,7 @@ export interface ReplayResult {
 
 export function replayClosedCandles(input: {
   candles: Candle[];
+  invalidationCandles?: Candle[];
   datasetId: string;
   config?: { feeRate: number; slippageRate: number };
   plansAt?: (history: Candle[], barIndex: number) => TradePlan[];
@@ -143,7 +145,21 @@ export function replayClosedCandles(input: {
       if (position.status !== 'open') continue;
       if (openedOnBar.has(position.id)) { stillOpen.push(position); continue; }
       const plan = plans.find((candidate) => candidate.id === position.planId);
-      const managed = managePaperPosition({ position, candle, barIndex: index, feeRate: costs.feeRate });
+      const invalidationCandle = position.thesisInvalidatedAt || plan?.side !== 'long' || position.side !== 'buy'
+        ? undefined
+        : input.invalidationCandles?.find((candidate) =>
+          (candidate.time + candleSeconds('4h', candidate.time)) * 1000 > Date.parse(position.openedAt)
+          && (candidate.time + candleSeconds('4h', candidate.time)) * 1000 <= candle.time * 1000
+          && candidate.close < plan.invalidation);
+      const thesisInvalidatedAt = position.thesisInvalidatedAt ?? (invalidationCandle
+        ? new Date((invalidationCandle.time + candleSeconds('4h', invalidationCandle.time)) * 1000).toISOString()
+        : undefined);
+      const managed = managePaperPosition({
+        position: thesisInvalidatedAt ? { ...position, thesisInvalidatedAt } : position,
+        candle,
+        thesisInvalidatedAt,
+        feeRate: costs.feeRate,
+      });
       const managedPosition = { ...managed.position, quantity: position.quantity, entryFee: position.entryFee, entrySlippage: position.entrySlippage, status: 'open' as const };
       replayAccount = { ...replayAccount, positions: replayAccount.positions.map((candidate) => candidate.id === position.id ? managedPosition : candidate) };
       for (const exit of managed.exits) {

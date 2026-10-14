@@ -11,4 +11,6 @@ supabase test db
 
 `research_collection.test.sql` checks the service-only candle collection table/RPC, append-only triggers, an initial bounded four-timeframe baseline, and an idempotent retry. It runs in a transaction and rolls back its fixture. The local DB suite must be run after applying the forward-only `20261021000000_accumulate_research_holdout_candles.sql` migration.
 
+`paper_autopilot_management.test.sql` verifies that disabled accounts with open positions remain in the service-only worker account list for management, idle disabled accounts are excluded, enabled accounts remain scheduled, and authenticated clients cannot call the worker RPC. It runs in a transaction and rolls back its fixtures after applying `20261022000000_paper_autopilot_manage_open_positions_when_disabled.sql`.
+
 `scripts/test-research-holdout-concurrency.mjs` uses separate local PostgreSQL sessions to verify overlapping holdout claims serialize, adjacent intervals pass, and concurrent identical candle collection is idempotent. It refuses any database other than localhost port 54322. Account-write concurrency still needs a two-session integration run; the ledger SQL test verifies stale-version rejection but not overlapping transactions.

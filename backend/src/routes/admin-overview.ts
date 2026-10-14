@@ -5,8 +5,9 @@ import { getSupabaseClient, getSupabaseClientWithToken } from '../db';
 import { paperAutopilotScheduler, AUTOPILOT_TIMEFRAMES } from '../autonomy/paper-autopilot';
 import { getLiveFeedDiagnostics } from '../live/register-stream';
 import { getCachedCandleFreshness, getMassiveBudgetSnapshot, getTwelveDataBudgetSnapshot } from '../services/marketDataService';
-import { adminOverviewSchema, unverifiedTile, type AdminOverview, type HealthStatus } from '../services/adminOverview';
+import { adminOverviewSchema, autopilotEnrollmentStatus, paperWorkerHealth, paperWorkerState, unverifiedTile, type AdminOverview, type HealthStatus } from '../services/adminOverview';
 import { traderConfig } from '../trader/config';
+import { candleSeconds } from '../trader/candle-math';
 
 const reverifyBodySchema = z.object({ reason: z.string().trim().min(3).max(300) }).strict();
 const safeReason = (value: unknown): string => typeof value === 'string'
@@ -91,7 +92,7 @@ export async function buildAdminOverview(): Promise<AdminOverview> {
       const paused = enabled.filter((row) => Boolean(row.paused_reason));
       const configuredSymbols = [...new Set(enabled.flatMap((row) => row.symbols ?? []))];
       const cap = Number(settings.max_symbols_global);
-      return { status: enabled.length ? 'ok' as const : 'degraded' as const, enrolledAccounts: enabled.length, pausedAccounts: paused.length, pausedReasons: paused.map((row) => safeReason(row.paused_reason)), symbolsInUse: configuredSymbols.length, symbolCap: Number.isFinite(cap) ? cap : 0, configuredSymbols };
+      return { status: autopilotEnrollmentStatus(enabled.length, paused.length), enrolledAccounts: enabled.length, pausedAccounts: paused.length, pausedReasons: paused.map((row) => safeReason(row.paused_reason)), symbolsInUse: configuredSymbols.length, symbolCap: Number.isFinite(cap) ? cap : 0, configuredSymbols };
     } catch { return { status: 'unverified' as const, enrolledAccounts: 0, pausedAccounts: 0, pausedReasons: [], symbolsInUse: 0, symbolCap: 0, configuredSymbols: [] }; }
   })();
   const denialPromise = (async () => {
@@ -105,8 +106,11 @@ export async function buildAdminOverview(): Promise<AdminOverview> {
 
   const [schema, ledger, accounting, autopilot, denials] = await Promise.all([schemaPromise, ledgerPromise, accountPromise, autopilotPromise, denialPromise]);
   const schedulerDiagnostics = paperAutopilotScheduler.diagnostics();
-  const schedulerEnabled = process.env.AUTONOMOUS_TRADING === 'true';
-  const schedulerStatus: HealthStatus = !schedulerEnabled ? 'degraded' : schedulerDiagnostics.running ? 'ok' : 'down';
+  const schedulerEnabled = process.env.NODE_ENV !== 'test';
+  const schedulerState = paperWorkerState({ enabled: schedulerEnabled, schemaOk: schema.status === 'ok', running: schedulerDiagnostics.running,
+    lastCycleAt: schedulerDiagnostics.lastCycleAt, lastError: schedulerDiagnostics.lastError, nowMs: Date.now(),
+    maxCycleAgeMs: (candleSeconds(traderConfig.MGMT_TIMEFRAME as import('../../../src/lib/types').Timeframe) * 3_000) + traderConfig.CLOSE_GRACE_MS + traderConfig.SCHEDULER_JITTER_MS });
+  const schedulerHealth = paperWorkerHealth(schedulerState);
   const massive = getMassiveBudgetSnapshot();
   const twelveData = getTwelveDataBudgetSnapshot();
   const provider = (name: 'Massive' | 'Twelve Data', budget: typeof massive, configured: boolean) => ({
@@ -130,15 +134,16 @@ export async function buildAdminOverview(): Promise<AdminOverview> {
     schema,
     ledger: ledgerWithAccounting,
     scheduler: {
-      ...tile(schedulerStatus, schedulerEnabled ? schedulerDiagnostics.lastError ?? (schedulerDiagnostics.running ? 'Scheduler is running.' : 'Scheduler is not running.') : 'AUTONOMOUS_TRADING is disabled.', checkedAt),
-      enabled: schedulerEnabled, running: schedulerDiagnostics.running, cycleInProgress: schedulerDiagnostics.cycleInProgress, lastCycleAt: schedulerDiagnostics.lastCycleAt,
+      ...tile(schedulerHealth.status, schedulerHealth.reason, checkedAt),
+      state: schedulerState,
+      enabled: schedulerEnabled, entriesEnabled: config.autonomousTradingEnabled, running: schedulerDiagnostics.running, cycleInProgress: schedulerDiagnostics.cycleInProgress, lastCycleAt: schedulerDiagnostics.lastCycleAt,
       lastBoundaries: schedulerDiagnostics.lastBoundaries, nextScheduledAt: schedulerDiagnostics.nextScheduledAt,
       lastError: schedulerDiagnostics.lastError ? 'Scheduler cycle failed; inspect server logs.' : null,
     },
     providers: [provider('Massive', massive, Boolean(config.massiveApiKey)), provider('Twelve Data', twelveData, Boolean(config.twelveDataApiKey))],
     feeds,
     freshness,
-    autopilot: { ...tile(autopilot.status, autopilot.status === 'ok' ? 'Enrollment and global symbol usage are available.' : autopilot.status === 'degraded' ? 'No enabled autopilot accounts are enrolled.' : 'Autopilot summary is unavailable.', checkedAt), ...autopilotSummary, reason: autopilot.status === 'ok' ? 'Enrollment and global symbol usage are available.' : autopilot.status === 'degraded' ? 'No enabled autopilot accounts are enrolled.' : 'Autopilot summary is unavailable.' },
+    autopilot: { ...tile(autopilot.status, autopilot.status === 'ok' ? 'Enabled accounts are available and none are paused.' : autopilot.status === 'degraded' ? 'No enabled accounts are enrolled or at least one enrolled account is paused.' : 'Autopilot summary is unavailable.', checkedAt), ...autopilotSummary, reason: autopilot.status === 'ok' ? 'Enabled accounts are available and none are paused.' : autopilot.status === 'degraded' ? 'No enabled accounts are enrolled or at least one enrolled account is paused.' : 'Autopilot summary is unavailable.' },
     auditDenials24h: denials,
     refreshIntervalMs: config.adminOverviewRefreshMs,
   };

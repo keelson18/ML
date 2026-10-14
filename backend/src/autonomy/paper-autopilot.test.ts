@@ -1,9 +1,37 @@
-import { describe, expect, it } from 'vitest';
-import { entryCandleIsFresh, prioritizeSeriesRequests, providerRequestSpacingMs, replayCandlesAfter, replaySequentialCandles, uniqueSeriesRequests } from './paper-autopilot';
+import { describe, expect, it, vi } from 'vitest';
+import { accountEntriesAllowed, entryCandleIsFresh, PaperAutopilotScheduler, prioritizeSeriesRequests, providerRequestSpacingMs, replayCandlesAfter, replaySequentialCandles, uniqueSeriesRequests } from './paper-autopilot';
+import { config } from '../config';
+
+vi.mock('../db', () => ({
+  getSupabaseClient: () => ({
+    from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { enabled: true, paused_reason: 'operator pause' }, error: null }) }) }) }),
+  }),
+}));
 import { closePaperPosition, simulatePaperOrder, type PaperAccountState } from '../engines/paper-execution';
 import { traderConfig } from '../trader/config';
 
 describe('paper autopilot scheduling helpers', () => {
+  it('blocks on-demand scheduler cycles when the global autonomy switch is disabled', async () => {
+    const wasEnabled = config.autonomousTradingEnabled;
+    config.autonomousTradingEnabled = false;
+    try {
+      await expect(new PaperAutopilotScheduler().queueAccountRun('account-1'))
+        .rejects.toThrow('AUTONOMOUS_TRADING is disabled; paper autopilot runs are blocked.');
+    } finally {
+      config.autonomousTradingEnabled = wasEnabled;
+    }
+  });
+
+  it('does not queue a manual cycle for a paused account', async () => {
+    const wasEnabled = config.autonomousTradingEnabled;
+    config.autonomousTradingEnabled = true;
+    try {
+      await expect(new PaperAutopilotScheduler().queueAccountRun('account-1')).rejects.toThrow('Paper autopilot is paused: operator pause');
+    } finally {
+      config.autonomousTradingEnabled = wasEnabled;
+    }
+  });
+
   it('halves request spacing when the reserved quota doubles', () => {
     expect(providerRequestSpacingMs(5, 60_000, 2)).toBe(30_000);
     expect(providerRequestSpacingMs(10, 60_000, 4)).toBe(15_000);
@@ -54,6 +82,14 @@ describe('paper autopilot scheduling helpers', () => {
     expect(count).toBe(2);
     expect(account.trades[0]?.exitPrice).toBe(95);
     expect(account.trades[0]?.closedAt).toBe(new Date(900_000).toISOString());
+  });
+
+  it('blocks entries while globally disabled, account-paused, or missing required data', () => {
+    expect(accountEntriesAllowed({ autonomousEnabled: true, accountEnabled: true, pausedReason: null, dataFailure: undefined })).toBe(true);
+    expect(accountEntriesAllowed({ autonomousEnabled: false, accountEnabled: true, pausedReason: null, dataFailure: undefined })).toBe(false);
+    expect(accountEntriesAllowed({ autonomousEnabled: true, accountEnabled: false, pausedReason: null, dataFailure: undefined })).toBe(false);
+    expect(accountEntriesAllowed({ autonomousEnabled: true, accountEnabled: true, pausedReason: 'operator pause', dataFailure: undefined })).toBe(false);
+    expect(accountEntriesAllowed({ autonomousEnabled: true, accountEnabled: true, pausedReason: null, dataFailure: 'stale 15m data' })).toBe(false);
   });
 
   it('rejects entry triggers that exceed the configured candle-age limit', () => {

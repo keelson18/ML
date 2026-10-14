@@ -1,7 +1,45 @@
 import { z } from 'zod';
 
 export const healthStatusSchema = z.enum(['ok', 'degraded', 'down', 'unverified']);
+export const workerStateSchema = z.enum(['stopped', 'starting', 'running', 'paused', 'degraded', 'blocked', 'failed']);
 const healthTileSchema = z.object({ status: healthStatusSchema, reason: z.string(), checkedAt: z.string() }).strict();
+
+export type WorkerState = z.infer<typeof workerStateSchema>;
+
+export function paperWorkerState(input: {
+  enabled: boolean;
+  schemaOk: boolean;
+  running: boolean;
+  lastCycleAt: string | null;
+  lastError: string | null;
+  nowMs: number;
+  maxCycleAgeMs: number;
+}): WorkerState {
+  if (!input.enabled) return 'stopped';
+  if (!input.schemaOk) return 'blocked';
+  if (!input.running) return 'failed';
+  if (!input.lastCycleAt) return 'starting';
+  const lastCycleAt = Date.parse(input.lastCycleAt);
+  if (!Number.isFinite(lastCycleAt) || input.nowMs - lastCycleAt > input.maxCycleAgeMs) return 'degraded';
+  if (input.lastError) return 'degraded';
+  return 'running';
+}
+
+export function autopilotEnrollmentStatus(enrolledAccounts: number, pausedAccounts: number): 'ok' | 'degraded' {
+  return enrolledAccounts > 0 && pausedAccounts === 0 ? 'ok' : 'degraded';
+}
+
+export function paperWorkerHealth(state: WorkerState): { status: HealthStatus; reason: string } {
+  switch (state) {
+    case 'running': return { status: 'ok', reason: 'Paper worker completed a cycle without a reported scheduler failure.' };
+    case 'stopped': return { status: 'degraded', reason: 'The paper worker process is stopped.' };
+    case 'starting': return { status: 'degraded', reason: 'Paper worker started but has not completed its first cycle.' };
+    case 'paused': return { status: 'degraded', reason: 'Paper worker is paused.' };
+    case 'degraded': return { status: 'degraded', reason: 'Paper worker is active but its latest cycle failed, was safety-paused, or its heartbeat is stale.' };
+    case 'blocked': return { status: 'down', reason: 'Paper worker is blocked because the required database schema is unavailable.' };
+    case 'failed': return { status: 'down', reason: 'Paper worker is enabled but is not running.' };
+  }
+}
 
 export const adminOverviewSchema = z.object({
   environment: z.enum(['test', 'production']),
@@ -12,7 +50,8 @@ export const adminOverviewSchema = z.object({
     accounting: healthTileSchema.extend({ checkedAccounts: z.number().int().nonnegative(), brokenAccounts: z.number().int().nonnegative() }).strict(),
   }).strict(),
   scheduler: healthTileSchema.extend({
-    enabled: z.boolean(), running: z.boolean(), cycleInProgress: z.boolean(), lastCycleAt: z.string().nullable(), lastBoundaries: z.record(z.string(), z.number()),
+    state: workerStateSchema,
+    enabled: z.boolean(), entriesEnabled: z.boolean(), running: z.boolean(), cycleInProgress: z.boolean(), lastCycleAt: z.string().nullable(), lastBoundaries: z.record(z.string(), z.number()),
     nextScheduledAt: z.string().nullable(), lastError: z.string().nullable(),
   }).strict(),
   providers: z.array(z.object({

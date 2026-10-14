@@ -8,6 +8,12 @@ import { twelveDataSymbol } from './domain/LiveSymbolMap';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
+export function parseAutonomousTradingEnabled(value: string | undefined): boolean {
+  const parsed = z.enum(['true', 'false']).safeParse(value ?? 'false');
+  if (!parsed.success) throw new Error('AUTONOMOUS_TRADING must be either true or false.');
+  return parsed.data === 'true';
+}
+
 const rateLimitSettings = z.object({
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive(),
   MARKET_RATE_LIMIT_MAX: z.coerce.number().int().positive(),
@@ -160,6 +166,7 @@ const adminOverviewSettings = z.object({
 if (!adminOverviewSettings.success) throw new Error('Admin health environment settings are invalid.');
 
 export const config = {
+  autonomousTradingEnabled: parseAutonomousTradingEnabled(process.env.AUTONOMOUS_TRADING),
   appEnvironment: adminOverviewSettings.data.APP_ENV,
   adminOverviewCacheTtlMs: adminOverviewSettings.data.ADMIN_OVERVIEW_CACHE_TTL_MS,
   adminOverviewRefreshMs: adminOverviewSettings.data.ADMIN_OVERVIEW_REFRESH_MS,

@@ -1,4 +1,5 @@
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig } from 'vitest/config';
+import { loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import { assertSafeViteEnvironment } from './scripts/vite-env-safety';
 
@@ -23,6 +24,9 @@ export default defineConfig(({ mode }) => {
     },
     optimizeDeps: {
       exclude: ['lucide-react'],
+    },
+    test: {
+      maxWorkers: 4,
     },
   };
 });

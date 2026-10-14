@@ -36,6 +36,18 @@ describe('shared replay core', () => {
     expect(repeated).toEqual(result);
   });
 
+  it('replays a 4h thesis breach as an exit on the next management candle', () => {
+    const result = replayClosedCandles({
+      candles: [bar(900), bar(1800, { open: 101, high: 105, low: 101, close: 104 }), bar(14_100), bar(14_400)],
+      invalidationCandles: [bar(0, { open: 96, high: 97, low: 93, close: 94 })],
+      datasetId: 'thesis-invalidation-replay', shadowMode: false,
+      plansAt: (history) => history.length === 1 ? [plan] : [],
+      gate: () => ({ approved: true, quantity: 1 }),
+    });
+    expect(result.trades).toHaveLength(1);
+    expect(result.trades[0]).toMatchObject({ exitTime: 14_400, exitReason: 'thesis-invalidated' });
+  });
+
   it('keeps cost sensitivity reproducible and records higher costs', () => {
     const input = {
       candles: [bar(900), bar(1800, { open: 101, high: 105, low: 101, close: 104 }), bar(2700, { open: 104, high: 112, low: 103, close: 111 })],

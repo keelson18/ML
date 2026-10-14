@@ -90,7 +90,7 @@ export class AutonomousPipeline {
       return { role, symbol, timeframe, candle: closedCandle, skipped: 'Closed candle already processed.', closedTrades: [], state: this.state };
     }
     const closedTrades = role === 'manager'
-      ? await manageOpenPositions(this.config.accountId, symbol, closedCandle, series, false, timeframe)
+      ? await manageOpenPositions(this.config.accountId, symbol, closedCandle, series, [], timeframe)
       : [];
     const market = getMarket(symbol);
     const session = market ? evaluateMarketSession(market) : undefined;

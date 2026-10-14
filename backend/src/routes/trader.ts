@@ -88,7 +88,7 @@ export async function traderRoutes(app: FastifyInstance) {
     try { return await paperAutopilotScheduler.queueAccountRun(request.authenticatedUserId); }
     catch (error) {
       const message = error instanceof Error ? error.message : 'Autopilot run failed.';
-      return reply.code(message.startsWith('Enable paper autopilot') ? 409 : 503).send({ error: message });
+      return reply.code(message.startsWith('Enable paper autopilot') || message.startsWith('Paper autopilot is paused') || message.startsWith('AUTONOMOUS_TRADING is disabled') ? 409 : 503).send({ error: message });
     }
   });
 

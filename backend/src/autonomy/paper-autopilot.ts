@@ -64,6 +64,10 @@ export function entryCandleIsFresh(candle: Candle, timeframe: Timeframe, now: nu
   return now - (candle.time * 1000 + durationMs) <= traderConfig.MAX_ENTRY_AGE_BARS * durationMs;
 }
 
+export function accountEntriesAllowed(input: { autonomousEnabled: boolean; accountEnabled: boolean; pausedReason: string | null; dataFailure: string | undefined }): boolean {
+  return input.autonomousEnabled && input.accountEnabled && !input.pausedReason && !input.dataFailure;
+}
+
 export function isAutopilotSymbol(symbol: string): boolean {
   const market = getMarket(symbol);
   const availability = getMarketAvailability().find((item) => item.symbol === symbol)?.status;
@@ -106,9 +110,11 @@ export class PaperAutopilotScheduler {
   }
 
   async queueAccountRun(accountId: string): Promise<{ queued: true }> {
+    if (!config.autonomousTradingEnabled) throw new Error('AUTONOMOUS_TRADING is disabled; paper autopilot runs are blocked.');
     const { data, error } = await getSupabaseClient().from('paper_autopilot').select('*').eq('account_id', accountId).maybeSingle();
     if (error) throw new Error('Autopilot settings are unavailable.');
-    if (!data?.enabled) throw new Error(data?.paused_reason ?? 'Enable paper autopilot before running it.');
+    if (!data?.enabled) throw new Error('Enable paper autopilot before running it.');
+    if (data.paused_reason) throw new Error(`Paper autopilot is paused: ${data.paused_reason}`);
     if (this.manualRuns.has(accountId)) return { queued: true };
     this.manualRuns.add(accountId);
     void this.runAccounts([data as PaperAutopilotConfig], new Set(AUTOPILOT_TIMEFRAMES), Date.now())
@@ -193,8 +199,11 @@ export class PaperAutopilotScheduler {
         const required = new Set<Timeframe>();
         const combined = requestsBySymbol.get(symbol) ?? new Set<Timeframe>();
         const isConfigured = row.symbols.includes(symbol);
-        if (due.has(traderConfig.MGMT_TIMEFRAME as Timeframe) && openSymbols.has(symbol)) required.add(traderConfig.MGMT_TIMEFRAME as Timeframe);
-        if (isConfigured) {
+        if (due.has(traderConfig.MGMT_TIMEFRAME as Timeframe) && openSymbols.has(symbol)) {
+          required.add(traderConfig.MGMT_TIMEFRAME as Timeframe);
+          required.add('4h');
+        }
+        if (isConfigured && row.enabled) {
           for (const timeframe of traderConfig.TRIGGER_TIMEFRAMES as Timeframe[]) {
             if (due.has(timeframe as Timeframe) && activePlans.some((plan) => plan.symbol === symbol && (plan.triggerTimeframe ?? traderConfig.TRIGGER_TIMEFRAMES[0]) === timeframe)) required.add(timeframe as Timeframe);
           }
@@ -242,6 +251,7 @@ export class PaperAutopilotScheduler {
         const missing = [...accountRequests.entries()].flatMap(([symbol, timeframes]) =>
           [...timeframes].map((timeframe) => failuresByKey.get(`${symbol}:${timeframe}`)).filter((reason): reason is string => Boolean(reason)));
         const accountEntryPause = missing[0];
+        const entriesAllowed = accountEntriesAllowed({ autonomousEnabled: config.autonomousTradingEnabled, accountEnabled: row.enabled, pausedReason: row.paused_reason, dataFailure: accountEntryPause });
         const entryDataRequested = [...accountRequests.values()].some((timeframes) =>
           [...timeframes].some((timeframe) => timeframe !== traderConfig.MGMT_TIMEFRAME));
         if (accountEntryPause) {
@@ -254,7 +264,8 @@ export class PaperAutopilotScheduler {
           const managerTimeframe = traderConfig.MGMT_TIMEFRAME as Timeframe;
           if (due.has(managerTimeframe) && account.positions.some((position) => position.status === 'open' && position.symbol === symbol)) {
             const managerSeries = seriesByKey.get(`${symbol}:${managerTimeframe}`);
-            if (managerSeries) processed += await this.replayManagement(row.account_id, symbol, managerTimeframe, managerSeries, now);
+            const invalidationSeries = seriesByKey.get(`${symbol}:4h`);
+            if (managerSeries) processed += await this.replayManagement(row.account_id, symbol, managerTimeframe, managerSeries, invalidationSeries, now);
           }
         }
         for (const symbol of row.symbols) {
@@ -264,7 +275,7 @@ export class PaperAutopilotScheduler {
             const daily = seriesByKey.get(`${symbol}:1d`);
             const fourHour = seriesByKey.get(`${symbol}:4h`);
             const setupSeries = seriesByKey.get(`${symbol}:${traderConfig.SETUP_TIMEFRAME}`);
-            if (daily && fourHour && setupSeries && !accountEntryPause) {
+            if (daily && fourHour && setupSeries && entriesAllowed) {
               const existingPlans = await listStoredTradePlans(row.account_id);
               const trigger = traderConfig.TRIGGER_TIMEFRAMES[0] as Timeframe;
               if (!existingPlans.some((plan) => plan.symbol === symbol && (plan.triggerTimeframe ?? traderConfig.TRIGGER_TIMEFRAMES[0]) === trigger && ['WATCHING', 'ARMED', 'PENDING_ORDER'].includes(plan.status))) {
@@ -283,7 +294,7 @@ export class PaperAutopilotScheduler {
           for (const timeframe of traderConfig.TRIGGER_TIMEFRAMES as Timeframe[]) {
             if (!due.has(timeframe)) continue;
             const series = seriesByKey.get(`${symbol}:${timeframe}`);
-            if (!series || accountEntryPause) continue;
+            if (!series || !entriesAllowed) continue;
             processed += await this.replayEntries(row.account_id, symbol, timeframe, series, now);
           }
         }
@@ -298,12 +309,15 @@ export class PaperAutopilotScheduler {
     return { pausedReason, processed };
   }
 
-  private async replayManagement(accountId: string, symbol: string, timeframe: Timeframe, series: MarketDataSeries, now: number): Promise<number> {
+  private async replayManagement(accountId: string, symbol: string, timeframe: Timeframe, series: MarketDataSeries, invalidationSeries: MarketDataSeries | undefined, now: number): Promise<number> {
     const candles = selectClosedCandles(series.candles, timeframe, now, traderConfig.CLOSE_GRACE_MS);
+    const invalidationCandles = invalidationSeries
+      ? selectClosedCandles(invalidationSeries.candles, '4h', now, traderConfig.CLOSE_GRACE_MS)
+      : [];
     const account = await getAccount(accountId);
     const checkpoint = account.processedCandles?.[`${symbol}:manager:${timeframe}`];
     return replaySequentialCandles(candles, checkpoint, traderConfig.SCHEDULER_MAX_CATCH_UP_BARS,
-      (candle, history) => manageOpenPositions(accountId, symbol, candle, history, false, timeframe).then(() => undefined));
+      (candle, history) => manageOpenPositions(accountId, symbol, candle, history, invalidationCandles, timeframe).then(() => undefined));
   }
 
   private async replayEntries(accountId: string, symbol: string, timeframe: Timeframe, series: MarketDataSeries, now: number): Promise<number> {

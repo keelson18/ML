@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-14  
 **Starting revision:** `000dab1225c1522b7d5bbbf971aeadc672e20715` (`main`, clean worktree)
-**Final revision:** same commit; changes are present in the local worktree and are not committed.  
+**Final revision:** `256dd3f1351bfc34d71ba562ab1597bf0aebac97`; the verification worker-pool adjustment in `vite.config.ts` is uncommitted.
 **Scope:** source implementation, local automated checks, and source-level security/data-flow review. No hosted database or live provider was contacted.
 
 ## 1. Executive verdict
@@ -12,6 +12,10 @@ The planner now has an explicit 1D/4H context → closed 1H setup → closed 15M
 This does **not** establish trading effectiveness or readiness for further account-backed paper-trading validation. The former 1,000-bar research limitation is addressed in source by immutable incremental collection across bounded requests: the initial baseline must be saved before the registered holdout, later closed candles append to it, and replay waits for the full 90-day/8,640-bar 15m threshold. Collection only supports crypto until market-session calendars are verified; it has no background worker and must be polled before the 1,000-bar lookback is exceeded. A migration, pgTAP contract, and two-session concurrency harness were added, but none ran against PostgreSQL because Supabase CLI and a local database are unavailable. Provider mappings/freshness, end-to-end paper persistence, and independent hosted CI status remain unverified.
 
 ## 2. Architecture changes and root causes
+
+### Verification reliability
+
+The default Vitest run spawned one worker per test file (61 workers), causing a route test to exceed its unchanged five-second timeout under machine load. `vite.config.ts` now caps the worker pool at four. The full suite passes with this setting; no assertions or timeouts were weakened.
 
 ### Position management
 
@@ -70,14 +74,14 @@ No strategy effectiveness, profitability, or successful promotion was demonstrat
 | Command | Result | Evidence / limit |
 |---|---|---|
 | `npm ci` | PASS (baseline) | Installed 383 packages after sandbox EPERM required approved outside-sandbox retry; npm reported 8 advisories (2 moderate, 6 high). No dependency changes made. |
-| `npm run typecheck` | PASS (previous local run) | Frontend TypeScript check; not rerun in this follow-up. |
-| `npm run backend:typecheck` | PASS (rerun) | Executed after the research replay wiring changes. |
-| `npm run lint` | PASS (rerun) | Executed after the research replay wiring changes. |
-| `npm test` | PASS (rerun) | 61 files, 360 tests. Initial sandbox attempt failed at esbuild startup with `spawn EPERM`; rerun with process permission completed all tests. Includes a deterministic 8,640-bar/90-day collection stitching test. |
-| `npm run build` | PASS | 1,615 modules; Vite warns `App` chunk is 922.50 kB (>500 kB). |
+| `npm run typecheck` | PASS (2026-10-14) | Frontend TypeScript check on the reviewed worktree. |
+| `npm run backend:typecheck` | PASS (2026-10-14) | Backend TypeScript check on the reviewed worktree. |
+| `npm run lint` | PASS (2026-10-14) | ESLint on the reviewed worktree. |
+| `npm test` | PASS (2026-10-14) | 61 files, 360 tests with the four-worker config in the uncommitted worktree. Without the cap, the previous full run had one route-test timeout; that test passed alone. No assertions or timeouts were weakened. Includes a deterministic 8,640-bar/90-day collection stitching test. |
+| `npm run build` | PASS (2026-10-14) | 1,615 modules; Vite warns `App` chunk is 922.50 kB (>500 kB). |
 | `npm run check:env` | PASS | All 55 application variables are documented in `.env.example`. |
 | `npm run check:migration-versions` | PASS | 45 migration files have unique versions. |
-| `git diff --check` | PASS | No whitespace errors. |
+| `git diff --check` | PASS (2026-10-14) | No whitespace errors. |
 | `node --check scripts/test-research-holdout-concurrency.mjs` | PASS | Concurrency harness parses; it was not able to connect to a database. |
 | `npm run test:research-holdout-concurrency` | NOT-VERIFIED | Retried 2026-10-14; fails connecting to `127.0.0.1:54322` (`ECONNREFUSED`). No local DB service is listening. |
 | `supabase test db` | BLOCKED | Retried 2026-10-14; `supabase` command not found. Docker, Podman, and `psql` are also unavailable. |
@@ -111,6 +115,7 @@ Source paths continue to use authenticated routes, server-side provider fetches,
 - `backend/src/trader/manager.ts`, `backend/src/trader/manager.test.ts`, `backend/src/services/paperTradingService.ts` — side-aware position handling, short swing-high input, regression tests.
 - `backend/src/services/marketDataService.ts`, `backend/src/services/marketDataService.test.ts`, `backend/src/services/marketDataBudget.test.ts` — future/alignment validation and interval-aligned fixtures.
 - `src/components/pages/TraderDesk.tsx` — label the planner score as heuristic, not a percentage probability.
+- `vite.config.ts` — cap Vitest at four workers after the unbounded 61-worker run caused a test timeout under load.
 - `docs/RESEARCH.md` — document the 15m holdout/provider cap blocker.
 - `docs/multi-timeframe-audit.md` — initial repository/call-flow audit, updated with implementation and verification results.
 - `docs/multi-timeframe-implementation-report.md` — this report.

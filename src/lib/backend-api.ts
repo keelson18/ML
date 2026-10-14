@@ -186,7 +186,7 @@ export interface AdminOverview {
     hashChain: AdminHealthTile & { checkedAccounts: number; brokenAccounts: number; checkedRows: number };
     accounting: AdminHealthTile & { checkedAccounts: number; brokenAccounts: number };
   };
-  scheduler: AdminHealthTile & { enabled: boolean; running: boolean; cycleInProgress: boolean; lastCycleAt: string | null; lastBoundaries: Record<string, number>; nextScheduledAt: string | null; lastError: string | null };
+  scheduler: AdminHealthTile & { state: 'stopped' | 'starting' | 'running' | 'paused' | 'degraded' | 'blocked' | 'failed'; enabled: boolean; entriesEnabled: boolean; running: boolean; cycleInProgress: boolean; lastCycleAt: string | null; lastBoundaries: Record<string, number>; nextScheduledAt: string | null; lastError: string | null };
   providers: Array<AdminHealthTile & { provider: 'Massive' | 'Twelve Data'; quota: number; windowMs: number; usedInWindow: number; queued: number; backoffUntil: string | null; last429At: string | null }>;
   feeds: Array<AdminHealthTile & { feed: 'Coinbase' | 'Twelve Data'; subscribedSymbols: number; connectedClients: number; droppedUpdates: number; reconnects: number; gaps: number; lastTickAgeMs: number | null }>;
   freshness: Array<{ symbol: string; timeframe: string; status: AdminHealthTile['status']; reason: string; checkedAt: string; newestClosedCandleAt: string | null; ageMs: number | null }>;

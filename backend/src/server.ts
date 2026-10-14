@@ -224,7 +224,10 @@ export async function startServer() {
     }
     throw error;
   }
-  if (process.env.NODE_ENV !== 'test' && process.env.AUTONOMOUS_TRADING === 'true' && schema.ok) scheduler.start();
+  if (process.env.NODE_ENV !== 'test' && schema.ok) {
+    scheduler.start();
+    if (!config.autonomousTradingEnabled) app.log.info('Paper worker is active for existing-position management; new entries are disabled.');
+  }
   if (config.massiveApiKey) void probeAllMarkets().catch(() => app.log.warn('market availability probe failed'));
   const shutdown = async () => { scheduler.stop(); await app.close(); };
   process.once('SIGINT', shutdown);

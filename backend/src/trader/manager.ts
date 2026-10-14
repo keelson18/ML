@@ -25,8 +25,7 @@ export function managePaperPosition(input: {
   atr?: number;
   swingLow?: number;
   swingHigh?: number;
-  barIndex: number;
-  invalidationObservedAtBar?: number;
+  thesisInvalidatedAt?: string;
   feeRate?: number;
 }): ManagementResult {
   const { position, candle } = input;
@@ -54,7 +53,8 @@ export function managePaperPosition(input: {
     return { position: { ...updated, quantity: 0, status: 'closed' }, exits, actions: ['Initial or trailing stop touched.'] };
   }
 
-  if (input.invalidationObservedAtBar !== undefined && input.barIndex > input.invalidationObservedAtBar) {
+  const invalidationObservedAt = input.thesisInvalidatedAt ?? position.thesisInvalidatedAt;
+  if (invalidationObservedAt && candle.time * 1000 >= Date.parse(invalidationObservedAt)) {
     exits.push({ quantity: position.quantity, price: candle.open, reason: 'thesis-invalidated' });
     return { position: { ...updated, quantity: 0, status: 'closed' }, exits, actions: ['Thesis invalidation exited at the next bar open.'] };
   }

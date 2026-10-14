@@ -6,7 +6,7 @@ import { analyzeMarketStructure } from '../../../src/lib/market-structure';
 import { getSupabaseClient } from '../db';
 import { fetchMarketData } from './marketDataService';
 import { traderConfig } from '../trader/config';
-import { calculatePositionSize, markToMarket } from '../trader/risk';
+import { calculatePositionSize, lossStreakCooldownReason, markToMarket } from '../trader/risk';
 import { managePaperPosition } from '../trader/manager';
 import { advanceTradePlan, type EntryGateResult } from '../trader/executor';
 import { getCorrelationCluster } from '../trader/constants';
@@ -190,6 +190,13 @@ export async function advanceStoredTradePlans(input: {
         if (dailyPnl <= -(snapshot.equity * traderConfig.DAILY_LOSS_STOP_PCT / 100)) return gateResult = { approved: false, quantity: 0, reason: 'Daily loss limit reached.' };
         if (weeklyPnl <= -(snapshot.equity * traderConfig.WEEKLY_LOSS_STOP_PCT / 100)) return gateResult = { approved: false, quantity: 0, reason: 'Weekly loss limit reached.' };
         if (snapshot.drawdownPct >= traderConfig.MAX_DRAWDOWN_PCT) return gateResult = { approved: false, quantity: 0, reason: 'Maximum drawdown limit reached.' };
+        const cooldownReason = lossStreakCooldownReason({
+          trades: account.trades,
+          closedPositionIds: new Set(account.positions.filter((position) => position.status === 'closed').map((position) => position.id)),
+          asOfMs: (input.candle.time + candleSeconds(input.timeframe, input.candle.time)) * 1000,
+          timeframe: input.timeframe,
+        });
+        if (cooldownReason) return gateResult = { approved: false, quantity: 0, reason: cooldownReason };
         const sizing = calculatePositionSize({
           equity: snapshot.equity, entry: entryPrice, invalidation: plan.invalidation, cash: account.cash,
           grossExposure: snapshot.grossExposure,
@@ -363,7 +370,7 @@ export async function closeOpenPaperPosition(accountId: string, symbol: string):
   });
 }
 
-export async function manageOpenPositions(accountId: string, symbol: string, candle: Candle, history: Candle[] = [candle], thesisInvalidated = false, timeframe: Timeframe = traderConfig.MGMT_TIMEFRAME as Timeframe): Promise<PaperTrade[]> {
+export async function manageOpenPositions(accountId: string, symbol: string, candle: Candle, history: Candle[] = [candle], invalidationCandles: Candle[] = [], timeframe: Timeframe = traderConfig.MGMT_TIMEFRAME as Timeframe): Promise<PaperTrade[]> {
   return updateAccount(accountId, (startingAccount) => {
     const checkpoint = candleCheckpoint(symbol, timeframe, 'manager');
     if (startingAccount.processedCandles?.[checkpoint] === candle.time) return { account: startingAccount, result: [] };
@@ -376,14 +383,26 @@ export async function manageOpenPositions(accountId: string, symbol: string, can
     const swingLow = structure.lows.at(-1)?.value;
     const swingHigh = structure.highs.at(-1)?.value;
     for (const position of openPositions) {
+      const plan = position.planId ? account.tradePlans?.find((candidate) => candidate.id === position.planId) : undefined;
+      const invalidationCandle = position.thesisInvalidatedAt || plan?.side !== 'long' || position.side !== 'buy'
+        ? undefined
+        : invalidationCandles
+          .filter((candidate) => {
+            const closesAt = (candidate.time + candleSeconds('4h', candidate.time)) * 1000;
+            return closesAt > Date.parse(position.openedAt) && closesAt <= candle.time * 1000 && candidate.close < plan.invalidation;
+          })
+          .sort((left, right) => left.time - right.time)[0];
+      const thesisInvalidatedAt = position.thesisInvalidatedAt ?? (invalidationCandle
+        ? new Date((invalidationCandle.time + candleSeconds('4h', invalidationCandle.time)) * 1000).toISOString()
+        : undefined);
+      const observedPosition = thesisInvalidatedAt ? { ...position, thesisInvalidatedAt } : position;
       const managed = managePaperPosition({
-        position,
+        position: observedPosition,
         candle,
         atr: currentAtr,
         swingLow,
         swingHigh,
-        barIndex: (position.barsHeld ?? 0) + 1,
-        invalidationObservedAtBar: thesisInvalidated ? position.barsHeld ?? 0 : undefined,
+        thesisInvalidatedAt,
       });
       account = { ...account, positions: account.positions.map((candidate) => candidate.id === position.id
         ? {
@@ -393,6 +412,7 @@ export async function manageOpenPositions(accountId: string, symbol: string, can
             barsHeld: managed.position.barsHeld,
             maxFavorablePrice: managed.position.maxFavorablePrice,
             maxAdversePrice: managed.position.maxAdversePrice,
+            thesisInvalidatedAt: managed.position.thesisInvalidatedAt,
             managementEvents: [...(position.managementEvents ?? []), ...managed.actions.map((action) => ({
               occurredAt: new Date(candle.time * 1000).toISOString(),
               action,
