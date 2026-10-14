@@ -37,6 +37,16 @@ describe('Trader Desk planner', () => {
     expect(detectTrendPullbackSetup(setup, { low: 99, high: 100 }, 98)).toMatchObject({ valid: false, reason: expect.stringContaining('invalidation') });
   });
 
+  it('rejects a 1h setup snapshot that closes after the available 15m trigger candle', () => {
+    const result = createTradePlan({
+      accountId: 'account-1', symbol: 'BTCUSD',
+      htfCandles: { '1d': alignedBars(50, 86_400, 86_400), '4h': alignedBars(50, 14_400, 28_800) },
+      setupCandles: alignedBars(50, 3_600, 360_000), triggerCandles: alignedBars(50, 900, 360_000), datasetId: 'dataset-alignment',
+    });
+    expect(result.plan).toBeUndefined();
+    expect(result.reason).toContain('timeframe snapshots are incomplete');
+  });
+
   it('ranks watchlist candidates by quality before applying the configured cap', () => {
     const low = { bias: 'unclear' as const, regime: 'uncertain', keyLevels: [], qualityScore: 0.1, reason: 'low' };
     const high = { ...low, qualityScore: 0.9, reason: 'high' };

@@ -31,4 +31,6 @@ Until that evidence is supplied, duplicates remain in place. Applying files thro
 
 `supabase/migrations/20261019000000_reject_overlapping_research_holdouts.sql` adds a BEFORE INSERT trigger that locks by symbol/timeframe and rejects any intersecting `[start, end)` holdout range. The trigger preserves existing rows and permits adjacent non-overlapping intervals. Its concurrency harness is `scripts/test-research-holdout-concurrency.mjs`; run it against local Supabase only after `supabase start`. It explicitly refuses non-local hosts.
 
-`supabase/migrations/20261020000000_research_holdout_registration_window.sql` locks each draft's research split to a future test start recorded at experiment creation. Repeated requests return collecting status until the configured forward duration and trade-count minima are present; they do not complete the draft or persist partial outcome snapshots.
+`supabase/migrations/20261020000000_research_holdout_registration_window.sql` locks each draft's research split to a future test start recorded at experiment creation.
+
+`supabase/migrations/20261021000000_accumulate_research_holdout_candles.sql` adds the append-only bounded forward candle store and service-only batch RPC. Its migration contract is `supabase/tests/research_collection.test.sql`; run it only after applying earlier versions in order and inspecting the target project's history. The SQL has not been executed against local PostgreSQL or the hosted project in this session.

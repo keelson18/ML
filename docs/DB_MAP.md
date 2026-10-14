@@ -15,6 +15,8 @@ Status means: **authoritative** is read or written by active application paths; 
 | `research_experiments` | authoritative | Owner-created hypotheses and fixed costs plus a DB-validated future test start; registration time cannot be rewritten and parameters become immutable after a run is recorded. |
 | `research_runs` | authoritative | Server-created immutable replay lineage, seed, source revision, and run configuration. |
 | `research_results` | authoritative | Server-created immutable metrics and exact provider candle snapshots. |
+| `research_collection_state` | authoritative | Locks each collection to one owner, instrument, provider, continuity policy, and immutable registered holdout start. |
+| `research_collection_candles` | authoritative | Append-only, per-timeframe provider candles collected in bounded requests before and during forward research; authenticated clients cannot read or write it. |
 | `research_holdout_claims` | authoritative | Append-only claims; a transaction-locked trigger rejects any overlapping time interval for the same symbol/timeframe while allowing adjacent intervals. |
 | `strategy_promotions` | authoritative | Active/retired setup allowlist linked to the validated run, admin reviewer, and rollback target. |
 | `research_approvals` | authoritative | Append-only record of admin strategy promotion decisions. |

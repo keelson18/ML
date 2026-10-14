@@ -129,12 +129,21 @@ export function runResearchReplay(input: ResearchRunInput): ResearchRunArtifact 
     .sort((left, right) => left.timeframe.localeCompare(right.timeframe));
   const datasetId = `research:${hash(input.series.map(({ timeframe, provider, candles }) => ({ timeframe, provider, candles })))}`;
   const engineVersions: Record<string, string> = {};
-  const plannerAt = (allowedFrom: number, allowedThrough: number) => (history: Candle[], index: number) => {
+  const plannerAt = (allowedFrom: number, allowedThrough: number) => {
+    const evaluatedSetups = new Set<string>();
+    return (history: Candle[], index: number) => {
       if (index < allowedFrom || index > allowedThrough) return [];
       const triggerBar = history.at(-1)!;
       const triggerCloseMs = (triggerBar.time + candleSeconds(input.triggerTimeframe, triggerBar.time)) * 1000;
       const throughClosed = (series: ResearchSeriesSnapshot) => series.candles.filter((candle) =>
         (candle.time + candleSeconds(series.timeframe, candle.time)) * 1000 <= triggerCloseMs);
+      const latestSetup = throughClosed(setup).at(-1);
+      const latestDaily = throughClosed(daily).at(-1);
+      const latestFourHour = throughClosed(fourHour).at(-1);
+      if (!latestSetup || !latestDaily || !latestFourHour) return [];
+      const setupKey = `${latestDaily.time}:${latestFourHour.time}:${latestSetup.time}`;
+      if (evaluatedSetups.has(setupKey)) return [];
+      evaluatedSetups.add(setupKey);
       const result = createTradePlan({
         accountId: `research:${datasetId}`,
         symbol: input.symbol,
@@ -149,6 +158,7 @@ export function runResearchReplay(input: ResearchRunInput): ResearchRunArtifact 
       const deterministicTime = new Date(triggerBar.time * 1000).toISOString();
       return [{ ...result.plan, createdAt: deterministicTime, updatedAt: deterministicTime,
         createdAtBar: index, expiresAtBar: Math.min(result.plan.expiresAtBar, index + traderConfig.PLAN_EXPIRY_BARS) }];
+    };
   };
   const replayOptions = { datasetId, config: { feeRate: input.feeRate, slippageRate: input.slippageRate }, shadowMode: false as const };
   const trainingBars = bars.slice(0, input.trainingEndIndex + 1);

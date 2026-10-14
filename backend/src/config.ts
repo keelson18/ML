@@ -25,6 +25,7 @@ const rateLimitSettings = z.object({
   TWELVEDATA_BUDGET_WINDOW_MS: z.coerce.number().int().positive(),
   TWELVEDATA_BUDGET_MAX_WAIT_MS: z.coerce.number().int().nonnegative(),
   TWELVEDATA_BUDGET_MAX_QUEUE: z.coerce.number().int().nonnegative(),
+  RESEARCH_COLLECTION_START_LEAD_MS: z.coerce.number().int().positive(),
 }).safeParse({
   RATE_LIMIT_WINDOW_MS: process.env.RATE_LIMIT_WINDOW_MS ?? 60_000,
   MARKET_RATE_LIMIT_MAX: process.env.MARKET_RATE_LIMIT_MAX ?? 60,
@@ -42,6 +43,7 @@ const rateLimitSettings = z.object({
   TWELVEDATA_BUDGET_WINDOW_MS: process.env.TWELVEDATA_BUDGET_WINDOW_MS ?? 60_000,
   TWELVEDATA_BUDGET_MAX_WAIT_MS: process.env.TWELVEDATA_BUDGET_MAX_WAIT_MS ?? 5_000,
   TWELVEDATA_BUDGET_MAX_QUEUE: process.env.TWELVEDATA_BUDGET_MAX_QUEUE ?? 10,
+  RESEARCH_COLLECTION_START_LEAD_MS: process.env.RESEARCH_COLLECTION_START_LEAD_MS ?? 300_000,
 });
 
 const sessionCalendarEntry = z.object({
@@ -178,6 +180,7 @@ export const config = {
   analyzeRateLimitMax: rateLimitSettings.data.ANALYZE_RATE_LIMIT_MAX,
   marketDataCacheMaxEntries: rateLimitSettings.data.MARKET_DATA_CACHE_MAX_ENTRIES,
   marketDataMaxStaleTtlMultiplier: rateLimitSettings.data.MARKET_DATA_MAX_STALE_TTL_MULTIPLIER,
+  researchCollectionStartLeadMs: rateLimitSettings.data.RESEARCH_COLLECTION_START_LEAD_MS,
   marketProbeIntervalMs: rateLimitSettings.data.MARKET_PROBE_INTERVAL_MS,
   marketProbeRateLimitMax: rateLimitSettings.data.MARKET_PROBE_RATE_LIMIT_MAX,
   massiveRequestsPerWindow: rateLimitSettings.data.MASSIVE_REQUESTS_PER_WINDOW,

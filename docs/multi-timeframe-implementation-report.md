@@ -1,7 +1,7 @@
 # Multi-timeframe implementation report
 
-**Date:** 2026-10-13  
-**Starting revision:** `68442132464aff2c74c5656f76243f7f904cdfab` (`main`, clean worktree)  
+**Date:** 2026-10-14  
+**Starting revision:** `000dab1225c1522b7d5bbbf971aeadc672e20715` (`main`, clean worktree)
 **Final revision:** same commit; changes are present in the local worktree and are not committed.  
 **Scope:** source implementation, local automated checks, and source-level security/data-flow review. No hosted database or live provider was contacted.
 
@@ -9,7 +9,7 @@
 
 The planner now has an explicit 1D/4H context → closed 1H setup → closed 15M trigger flow. The paper simulator remains spot-long only. Position management now applies side-aware math when loading persisted short positions, without enabling short entries. Provider candles receive additional future-time and fixed-interval alignment checks. Local type checks, lint, unit tests, and production build passed.
 
-This does **not** establish trading effectiveness or readiness for further account-backed paper-trading validation. The current research endpoint cannot collect the required 90-day 15-minute holdout because its request limit is 1,000 bars. SQL migrations, RLS/grants, overlap locking, account concurrency, and end-to-end paper persistence were not run against PostgreSQL. Provider mappings and data freshness were not tested with authorized provider credentials. Deployment topology is still unknown.
+This does **not** establish trading effectiveness or readiness for further account-backed paper-trading validation. The former 1,000-bar research limitation is addressed in source by immutable incremental collection across bounded requests: the initial baseline must be saved before the registered holdout, later closed candles append to it, and replay waits for the full 90-day/8,640-bar 15m threshold. Collection only supports crypto until market-session calendars are verified; it has no background worker and must be polled before the 1,000-bar lookback is exceeded. A migration, pgTAP contract, and two-session concurrency harness were added, but none ran against PostgreSQL because Supabase CLI and a local database are unavailable. Provider mappings/freshness, end-to-end paper persistence, and independent hosted CI status remain unverified.
 
 ## 2. Architecture changes and root causes
 
@@ -61,7 +61,7 @@ Short entry, short sizing, and short lifecycle execution are still unsupported a
 
 The server-side replay accepts provider snapshots, binds dataset identity to candle content and provider/timeframe, uses chronological split boundaries, includes configured fees/slippage, and compares with buy-and-hold and seeded random-entry baselines. It rejects mixed-provider and duplicate-timeframe inputs. Existing research governance freezes experiment parameters and requires future registered holdouts; promotion depends on stored server-generated evidence.
 
-There is a concrete operational blocker: the research route now only accepts 15m, requires 90 forward days, and requests at most 1,000 candles. Ninety days at 15m requires at least 8,640 bars before training context. The route rejects that request, so it cannot presently accumulate an eligible 15m run. `docs/RESEARCH.md` records this. Do not lower the evidence threshold or substitute 1h/4h trigger data to work around it. Implement bounded immutable chunk collection and continuous replay, test it against local PostgreSQL, and keep promotion disabled until it produces eligible evidence.
+The route now accepts bounded collection batches and persists each candle once in `research_collection_candles` through service-only `append_research_collection_batch`. `research_collection_state` binds the owner, symbol, provider, continuity policy, and registered boundary. A pre-holdout baseline is required; future starts have a configurable `RESEARCH_COLLECTION_START_LEAD_MS` minimum. The SQL enforces closed/aligned OHLCV, immutable duplicate candles, exact continuity for 24/7 crypto, and a 20,000-candle per-experiment bound. Repeated requests return progress using SQL counts before loading the full dataset. After 90 days and 8,640 15m bars, the server stitches stored chunks with source-version lineage and runs the chronological replay. The owner must call the endpoint often enough to keep newly closed data within the provider's 1,000-bar lookback; missed crypto bars force a new experiment. There is no background collection worker. Non-crypto research is explicitly blocked until market-session calendars are verified. Unit tests include stitching a complete 8,640-bar holdout; SQL persistence/concurrency remains unverified, so no eligible experiment or promotion is claimed.
 
 No strategy effectiveness, profitability, or successful promotion was demonstrated.
 
@@ -70,25 +70,28 @@ No strategy effectiveness, profitability, or successful promotion was demonstrat
 | Command | Result | Evidence / limit |
 |---|---|---|
 | `npm ci` | PASS (baseline) | Installed 383 packages after sandbox EPERM required approved outside-sandbox retry; npm reported 8 advisories (2 moderate, 6 high). No dependency changes made. |
-| `npm run typecheck` | PASS | Final frontend TypeScript check. |
-| `npm run backend:typecheck` | PASS | Final backend TypeScript check. |
-| `npm run lint` | PASS | Final lint run. |
-| `npm test` | PASS | 60 files, 351 tests. First run exposed an old misaligned provider fixture; corrected fixture and reran full suite successfully. |
+| `npm run typecheck` | PASS (previous local run) | Frontend TypeScript check; not rerun in this follow-up. |
+| `npm run backend:typecheck` | PASS (rerun) | Executed after the research replay wiring changes. |
+| `npm run lint` | PASS (rerun) | Executed after the research replay wiring changes. |
+| `npm test` | PASS (rerun) | 61 files, 360 tests. Initial sandbox attempt failed at esbuild startup with `spawn EPERM`; rerun with process permission completed all tests. Includes a deterministic 8,640-bar/90-day collection stitching test. |
 | `npm run build` | PASS | 1,615 modules; Vite warns `App` chunk is 922.50 kB (>500 kB). |
-| `npm run check:env` | PASS | All 54 referenced variables documented in `.env.example`. |
-| `npm run check:migration-versions` | PASS | 44 migration files have unique versions. |
-| `git diff --check` | PASS | No whitespace errors; Git reports CRLF-to-LF normalization warnings for two edited files. |
-| `npm run test:research-holdout-concurrency` | NOT-VERIFIED | Fails connecting to `127.0.0.1:54322` (`ECONNREFUSED`). No local DB service is listening. |
-| SQL migrations / pgTAP / RLS / grants / DB concurrency | NOT-VERIFIED | Supabase CLI, `psql`, Docker, and Podman are unavailable. No hosted database was contacted. |
-| Authenticated browser / provider / paper lifecycle | NOT-VERIFIED | Provider credentials and running disposable DB/browser session were not exercised. |
+| `npm run check:env` | PASS | All 55 application variables are documented in `.env.example`. |
+| `npm run check:migration-versions` | PASS | 45 migration files have unique versions. |
+| `git diff --check` | PASS | No whitespace errors. |
+| `node --check scripts/test-research-holdout-concurrency.mjs` | PASS | Concurrency harness parses; it was not able to connect to a database. |
+| `npm run test:research-holdout-concurrency` | NOT-VERIFIED | Retried 2026-10-14; fails connecting to `127.0.0.1:54322` (`ECONNREFUSED`). No local DB service is listening. |
+| `supabase test db` | BLOCKED | Retried 2026-10-14; `supabase` command not found. Docker, Podman, and `psql` are also unavailable. |
+| SQL migrations / pgTAP / RLS / grants / DB concurrency | NOT-VERIFIED | No disposable PostgreSQL service is available. No hosted database was contacted. |
+| Independent GitHub Actions status for `000dab1225c1522b7d5bbbf971aeadc672e20715` | NOT-VERIFIED | `gh` is unavailable and the unauthenticated commit page could not be fetched in this environment. Local checks were executed by this agent; they are not independent CI evidence. |
+| Authenticated browser / provider / paper lifecycle | NOT-VERIFIED | Provider credentials and a running disposable DB/browser session were not exercised. |
 
 ## 8. Database migrations
 
-No migration was added or applied in this work. The migration version checker passes for the existing 44 files. Local SQL contract and concurrency tests cannot run because there is no local Supabase/PostgreSQL stack. The hosted database was not contacted, inspected, or modified.
+Added `20261021000000_accumulate_research_holdout_candles.sql`, a forward-only migration. It has not been applied. The migration version checker passes for all 45 files. The new pgTAP contract and concurrency test could not run because Supabase CLI/PostgreSQL are unavailable and localhost `54322` refuses connections. The hosted database was not contacted, inspected, or modified.
 
 ## 9. Security review
 
-Source paths continue to use authenticated routes, server-side provider fetches, owner-scoped experiment lookup, immutable run persistence, and a separate admin/MFA promotion path. The replay rejects mixed provider/timeframe inputs. Existing authenticated request schemas do not accept caller candles for decision analysis. This work did not change auth/RBAC or promotion authorization. Database-level grants, triggers, owner policies, concurrent holdout claims, and promotion behavior remain unverified until local SQL tests execute.
+Source paths continue to use authenticated routes, server-side provider fetches, owner-scoped experiment lookup, immutable run persistence, and a separate admin/MFA promotion path. The collection write RPC is service-role-only; both collection tables have RLS enabled and no direct client grants; collected candles have update/delete and truncate guards. The replay rejects mixed provider/timeframe inputs. Existing authenticated request schemas do not accept caller candles for decision analysis. This source review does not verify SQL execution, actual grants, triggers, or promotion behavior; run the added pgTAP contract locally.
 
 ## 10. Changed files
 
@@ -98,7 +101,13 @@ Source paths continue to use authenticated routes, server-side provider fetches,
 - `backend/src/routes/learning-research.ts`, `backend/src/routes/learning-research.test.ts` — research request requires 15M and includes 1H setup data.
 - `backend/src/trader/config.ts`, `backend/src/trader/config.test.ts`, `backend/src/trader/types.ts` — setup timeframe/expiry configuration and planner contract.
 - `backend/src/trader/planner.ts`, `backend/src/trader/planner.test.ts` — explicit 1H setup and 15M confirmation flow plus regression coverage.
-- `backend/src/trader/research-run.ts`, `backend/src/trader/research-run.test.ts` — setup series in chronological replay; reject mixed providers and duplicate timeframe inputs.
+- `backend/src/trader/research-run.ts`, `backend/src/trader/research-run.test.ts` — setup series in chronological replay; reject mixed providers and duplicate timeframe inputs; avoid repeated planner creation on the same setup.
+- `backend/src/trader/research-collection.ts`, `backend/src/trader/research-collection.test.ts` — stitch immutable collection rows, bind source lineage, calculate progress, and cover 90 days / 8,640 15m bars.
+- `backend/src/routes/learning-research.ts`, `backend/src/routes/learning-research.test.ts` — bounded collection/SQL pagination, progress before replay, immutable completed-run retries, configurable start lead, and quote-currency handling for USD markets.
+- `backend/src/config.ts`, `.env.example` — validated configurable holdout initialization lead time.
+- `supabase/migrations/20261021000000_accumulate_research_holdout_candles.sql`, `supabase/tests/research_collection.test.sql` — bounded append-only storage, service-only batch RPC, schema health inventory, and pgTAP contract.
+- `scripts/test-research-holdout-concurrency.mjs` — two-session collection append idempotency coverage alongside holdout overlap checks.
+- `scripts/verify-schema.sql`, `docs/DB_APPLY.md`, `docs/DB_MAP.md`, `docs/MIGRATIONS.md`, `docs/RESEARCH.md`, `supabase/tests/README.md` — schema inventory, apply order, data map, operating limits, and test instructions.
 - `backend/src/trader/manager.ts`, `backend/src/trader/manager.test.ts`, `backend/src/services/paperTradingService.ts` — side-aware position handling, short swing-high input, regression tests.
 - `backend/src/services/marketDataService.ts`, `backend/src/services/marketDataService.test.ts`, `backend/src/services/marketDataBudget.test.ts` — future/alignment validation and interval-aligned fixtures.
 - `src/components/pages/TraderDesk.tsx` — label the planner score as heuristic, not a percentage probability.
@@ -108,11 +117,10 @@ Source paths continue to use authenticated routes, server-side provider fetches,
 
 ## 11. Remaining risks and exact next steps
 
-1. Implement bounded immutable 15m holdout chunk collection with exact overlap/continuity checking and stable dataset lineage; test promotion remains blocked while evidence is incomplete.
-2. Start a disposable local Supabase/PostgreSQL stack, apply migrations forward-only, then run pgTAP and concurrent overlapping holdout claim tests. Do not reset or contact the hosted database.
+1. Run `supabase start`, apply the new migration forward-only to a disposable local database, run `supabase test db`, and run `npm run test:research-holdout-concurrency`. Do not reset or contact the hosted database.
 3. Add DB-level tests for RLS/grants, immutable results, promotion denial, duplicate paper cycles, account reconciliation, and concurrent account writes.
 4. Run an authenticated end-to-end paper lifecycle on a disposable account/provider fixture: valid closed setup → later 15m trigger → independent risk approval → later-candle simulated fill → management → ledger reconciliation. Preserve real provider data only; do not fabricate results.
 5. Establish the actual scheduler deployment topology. Add durable ownership only if multiple backend instances can run it.
 6. Verify active instrument/provider mappings and closed-candle freshness with authorized credentials, and verify authenticated Trader Desk and health UI behavior.
 
-**Readiness:** suitable for continued local code review and unit-level paper-path development; **not yet ready for further account-backed paper-trading validation** until the database, provider, research accumulation, and end-to-end lifecycle gaps above are resolved.
+**Readiness:** suitable for continued local code review and unit-level paper-path development. Research collection is implemented in source but **not operationally verified** until its migration and tests pass on local PostgreSQL. The system remains **not ready for account-backed paper-trading validation** until database, provider, and end-to-end lifecycle checks are complete.

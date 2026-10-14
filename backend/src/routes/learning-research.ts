@@ -11,6 +11,7 @@ import { SETUP_TYPES } from '../trader/constants';
 import { config } from '../config';
 import { candleSeconds } from '../trader/candle-math';
 import { createHash } from 'node:crypto';
+import { stitchResearchCollection, researchCollectionProgress, type StoredResearchCandle } from '../trader/research-collection';
 
 const learningEventSchema = z.object({
   sourceType: z.enum(['paper_trade', 'research', 'risk_event', 'data_quality']),
@@ -25,8 +26,8 @@ const researchExperimentSchema = z.object({
   datasetId: z.string().trim().min(1).max(500),
   parameters: z.object({
     setupType: z.enum(SETUP_TYPES).default(SETUP_TYPES[0]),
-    testStartTime: z.number().int().positive().refine((value) => value * 1000 > Date.now() + 30_000,
-      'The untouched test interval must be registered before its start time.'),
+    testStartTime: z.number().int().positive().refine((value) => value * 1000 > Date.now() + config.researchCollectionStartLeadMs,
+      'The untouched test interval must leave enough time to initialize its provider data collection.'),
     transactionCostRate: z.number().finite().nonnegative().max(1),
     slippageRate: z.number().finite().nonnegative().max(1),
   }).strict(),
@@ -45,6 +46,26 @@ function observationContainsSensitiveKey(value: unknown): boolean {
   return Object.entries(value).some(([key, child]) =>
     /(token|secret|password|credential|api.?key|authorization|cookie)/i.test(key)
     || observationContainsSensitiveKey(child));
+}
+
+async function loadResearchCollection(experimentId: string, timeframes: Timeframe[]): Promise<StoredResearchCandle[]> {
+  const client = getSupabaseClient();
+  const rows: StoredResearchCandle[] = [];
+  for (const timeframe of timeframes) {
+    let offset = 0;
+    while (true) {
+      const { data, error } = await client.from('research_collection_candles')
+        .select('timeframe,candle_time,candle,provider,source_data_version,source_fetched_at')
+        .eq('experiment_id', experimentId).eq('timeframe', timeframe)
+        .order('candle_time', { ascending: true }).range(offset, offset + 999);
+      if (error) throw new Error('Stored research collection could not be read.');
+      const page = (data ?? []) as StoredResearchCandle[];
+      rows.push(...page);
+      if (page.length < 1000) break;
+      offset += page.length;
+    }
+  }
+  return rows;
 }
 
 export async function learningResearchRoutes(app: FastifyInstance) {
@@ -109,7 +130,8 @@ export async function learningResearchRoutes(app: FastifyInstance) {
     const parsed = runResearchSchema.safeParse(request.body);
     if (!experimentId.success || !parsed.success) return reply.code(400).send({ error: 'Invalid research run request.' });
     const market = getMarket(parsed.data.symbol);
-    if (!market?.isActive || market.priceCurrency !== 'USD') return reply.code(400).send({ error: 'Research supports only active USD markets.' });
+    if (!market?.isActive || (market.priceCurrency ?? market.quoteAsset) !== 'USD') return reply.code(400).send({ error: 'Research supports only active USD markets.' });
+    if (market.marketType !== 'crypto') return reply.code(422).send({ error: 'Forward research collection requires a verified market-session calendar; this workflow currently supports continuous 24/7 crypto data only.' });
     try {
       const ownerClient = getSupabaseClientWithToken(request.accessToken);
       const { data: experiment, error: experimentError } = await ownerClient.from('research_experiments')
@@ -117,6 +139,17 @@ export async function learningResearchRoutes(app: FastifyInstance) {
         .eq('id', experimentId.data).eq('user_id', request.authenticatedUserId).maybeSingle();
       if (experimentError || !experiment) return reply.code(404).send({ error: 'Research experiment was not found.' });
       if (!['draft', 'completed'].includes(experiment.status)) return reply.code(409).send({ error: 'Only a draft experiment or an identical persisted run can be evaluated.' });
+      if (experiment.status === 'completed') {
+        const { data: run, error: runError } = await ownerClient.from('research_runs').select('id,run_version')
+          .eq('experiment_id', experiment.id).order('completed_at', { ascending: false }).limit(1).maybeSingle();
+        if (runError || !run) return reply.code(409).send({ error: 'The completed experiment has no readable immutable run.' });
+        const { data: result, error: resultError } = await ownerClient.from('research_results')
+          .select('metrics,artifacts').eq('run_id', run.id).maybeSingle();
+        if (resultError || !result) return reply.code(409).send({ error: 'The completed experiment result is unavailable.' });
+        const artifact = result.artifacts as { datasetId?: string; validation?: unknown };
+        return reply.code(200).send({ runId: run.id, runVersion: run.run_version, datasetId: artifact.datasetId,
+          metrics: result.metrics, validation: artifact.validation, persisted: true });
+      }
       const parameters = experiment.parameters as { testStartTime?: number; transactionCostRate?: number; slippageRate?: number };
       if (!Number.isInteger(parameters.testStartTime)
         || !Number.isFinite(parameters.transactionCostRate) || parameters.transactionCostRate! < 0 || parameters.transactionCostRate! >= 1
@@ -125,10 +158,6 @@ export async function learningResearchRoutes(app: FastifyInstance) {
         return reply.code(400).send({ error: 'Experiment must contain a future registered holdout start and fixed cost assumptions.' });
       }
       const triggerTimeframe = parsed.data.timeframe;
-      const minimumForwardBars = Math.ceil(traderConfig.MIN_FORWARD_DAYS * 86_400 / candleSeconds(triggerTimeframe, parameters.testStartTime!));
-      if (minimumForwardBars + 2 > parsed.data.historyLimit) {
-        return reply.code(422).send({ error: `This timeframe needs at least ${minimumForwardBars + 2} history bars to preserve the configured ${traderConfig.MIN_FORWARD_DAYS}-day holdout and training context.` });
-      }
       const timeframes = [...new Set<Timeframe>([triggerTimeframe, traderConfig.SETUP_TIMEFRAME, '4h', '1d'])];
       const fetched = await Promise.all(timeframes.map((timeframe) => fetchMarketData(parsed.data.symbol, timeframe, parsed.data.historyLimit)));
       if (fetched.some((series) => series.stale)) return reply.code(503).send({ error: 'Research requires a fresh provider response; stale cache data cannot be used.' });
@@ -147,21 +176,51 @@ export async function learningResearchRoutes(app: FastifyInstance) {
         const maximumAge = candleSeconds(series.timeframe, latest.time) * 1000 * config.marketDataMaxStaleTtlMultiplier;
         return now - closeTime > maximumAge;
       })) return reply.code(503).send({ error: 'Research requires recent closed provider candles for every requested timeframe.' });
-      const triggerCandles = snapshots.find((series) => series.timeframe === triggerTimeframe)?.candles ?? [];
-      if (triggerCandles[0] && triggerCandles[0].time * 1000 > parameters.testStartTime! * 1000) {
-        return reply.code(422).send({ error: 'The registered holdout start is outside the provider history window; register a new future holdout before collecting evidence.' });
+      const service = getSupabaseClient();
+      const { data: collectionResult, error: collectionError } = await service.rpc('append_research_collection_batch', {
+        p_experiment_id: experiment.id,
+        p_user_id: request.authenticatedUserId,
+        p_symbol: parsed.data.symbol,
+        p_continuous: true,
+        p_series: snapshots.map(({ timeframe, provider, dataVersion, fetchedAt, candles }) => ({
+          timeframe, provider, dataVersion, fetchedAt, candles,
+        })),
+      });
+      if (collectionError || !collectionResult) {
+        const invalidCollection = ['22023', '55000', '54000'].includes(collectionError?.code ?? '');
+        request.log.warn({ code: collectionError?.code, userId: request.authenticatedUserId }, 'Research collection append rejected');
+        return reply.code(invalidCollection ? 409 : 503).send({ error: invalidCollection
+          ? 'Research collection hit a data gap, late bootstrap, provider candle revision, identity change, or storage bound. Start a new experiment; collected evidence was not changed.'
+          : 'Research candle collection persistence is unavailable.' });
       }
-      const testStartIndex = triggerCandles.findIndex((candle) => candle.time >= parameters.testStartTime!);
-      if (testStartIndex < 0) {
-        return reply.code(202).send({ state: 'collecting', testStartTime: parameters.testStartTime, collectedDays: 0, collectedTrades: 0,
-          requiredDays: traderConfig.MIN_FORWARD_DAYS, requiredTrades: traderConfig.MIN_FORWARD_TRADES });
+      const minimumForwardBars = Math.ceil(traderConfig.MIN_FORWARD_DAYS * 86_400 / candleSeconds(triggerTimeframe, parameters.testStartTime!));
+      const collection = collectionResult as { newCandles?: number; counts?: Record<string, { bars?: number; lastTime?: number | null }> };
+      const triggerStats = collection.counts?.[triggerTimeframe];
+      const firstHoldoutBar = Math.ceil(parameters.testStartTime! / candleSeconds(triggerTimeframe, parameters.testStartTime!))
+        * candleSeconds(triggerTimeframe, parameters.testStartTime!);
+      const latestStoredBar = triggerStats?.lastTime ?? null;
+      const collectedBars = latestStoredBar !== null && latestStoredBar >= firstHoldoutBar
+        ? Math.floor((latestStoredBar - firstHoldoutBar) / candleSeconds(triggerTimeframe, firstHoldoutBar)) + 1 : 0;
+      const collectedDays = latestStoredBar !== null && latestStoredBar >= firstHoldoutBar
+        ? (latestStoredBar + candleSeconds(triggerTimeframe, latestStoredBar) - firstHoldoutBar) / 86_400 : 0;
+      if (collectedDays < traderConfig.MIN_FORWARD_DAYS || collectedBars < minimumForwardBars) {
+        return reply.code(202).send({ state: 'collecting', testStartTime: parameters.testStartTime,
+          initialized: true, newCandles: collection.newCandles ?? 0,
+          collectedDays, collectedBars,
+          requiredDays: traderConfig.MIN_FORWARD_DAYS, requiredBars: minimumForwardBars,
+          requiredTrades: traderConfig.MIN_FORWARD_TRADES });
       }
-      if (testStartIndex < 2) return reply.code(422).send({ error: 'Provider history does not contain enough pre-registration training candles.' });
+      const storedRows = await loadResearchCollection(experiment.id, timeframes);
+      const collectedSeries = stitchResearchCollection({ rows: storedRows, symbol: parsed.data.symbol, expectedTimeframes: timeframes });
+      const triggerCandles = collectedSeries.find((series) => series.timeframe === triggerTimeframe)?.candles ?? [];
+      const progress = researchCollectionProgress({ triggerCandles, triggerTimeframe, registeredStartTime: parameters.testStartTime! });
+      if (progress.testStartIndex < 2) return reply.code(422).send({ error: 'Provider collection does not contain enough pre-registration training candles.' });
+      const testStartIndex = progress.testStartIndex;
       const revision = process.env.APP_REVISION ?? 'unknown';
       const artifact = runResearchReplay({
         symbol: parsed.data.symbol,
         triggerTimeframe,
-        series: snapshots,
+        series: collectedSeries,
         trainingEndIndex: testStartIndex - 1,
         testStartIndex,
         experimentCreatedAt: experiment.created_at,
@@ -170,12 +229,12 @@ export async function learningResearchRoutes(app: FastifyInstance) {
         codeRevision: revision,
       });
       if (artifact.metrics.testDays < traderConfig.MIN_FORWARD_DAYS || artifact.metrics.tradeCount < traderConfig.MIN_FORWARD_TRADES) {
-        return reply.code(202).send({ state: 'collecting', collectedDays: artifact.metrics.testDays,
+        return reply.code(202).send({ state: 'collecting', initialized: true, collectedDays: artifact.metrics.testDays,
+          collectedBars: progress.collectedBars,
           requiredDays: traderConfig.MIN_FORWARD_DAYS, tradeThresholdMet: artifact.metrics.tradeCount >= traderConfig.MIN_FORWARD_TRADES,
           message: 'The fixed holdout is collecting forward candles. No run or holdout claim is persisted until the evidence window and trade minimum are reached.' });
       }
       const runVersion = createHash('sha256').update(JSON.stringify({ experimentId: experiment.id, datasetId: artifact.datasetId, configHash: artifact.configHash, codeRevision: artifact.codeRevision })).digest('hex');
-      const service = getSupabaseClient();
       const { data: runId, error: persistError } = await service.rpc('record_research_run', {
         p_experiment_id: experiment.id,
         p_user_id: request.authenticatedUserId,

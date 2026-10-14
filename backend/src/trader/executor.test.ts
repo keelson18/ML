@@ -90,4 +90,24 @@ describe('plan executor', () => {
     expect(result.pendingOrder).toBeUndefined();
     expect(result.reason).toBe('stale data');
   });
+
+  it('requires a strict 15m close beyond the trigger and expires plans at the configured bar boundary', () => {
+    const equalClose = bar(900, { close: 100 });
+    const waiting = advanceTradePlan({ plan, candle: equalClose, recentCandles: [equalClose], barIndex: 20, timeframe: '15m', gate: () => ({ approved: true, quantity: 1 }) });
+    expect(waiting.plan.status).toBe('ARMED');
+    expect(waiting.pendingOrder).toBeUndefined();
+
+    const expired = advanceTradePlan({ plan: { ...plan, expiresAtBar: 20 }, candle: equalClose,
+      recentCandles: [equalClose], barIndex: 21, timeframe: '15m', gate: () => ({ approved: true, quantity: 1 }) });
+    expect(expired.plan.status).toBe('EXPIRED');
+    expect(expired.events[0]?.reason).toContain('expired before a trigger');
+  });
+
+  it('invalidates a long setup when a closed confirmation candle closes through its stop', () => {
+    const invalidation = bar(900, { open: 96, high: 99, low: 94, close: 94 });
+    const result = advanceTradePlan({ plan, candle: invalidation, recentCandles: [invalidation], barIndex: 20, timeframe: '15m',
+      gate: () => ({ approved: true, quantity: 1 }) });
+    expect(result.plan.status).toBe('INVALIDATED');
+    expect(result.pendingOrder).toBeUndefined();
+  });
 });

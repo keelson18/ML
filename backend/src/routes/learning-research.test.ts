@@ -2,6 +2,9 @@ import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { learningResearchRoutes } from './learning-research';
 import { traderConfig } from '../trader/config';
+import type { Candle, Timeframe } from '../../../src/lib/types';
+import type { StoredResearchCandle } from '../trader/research-collection';
+import { config } from '../config';
 
 const dbMocks = vi.hoisted(() => ({ getSupabaseClient: vi.fn(), getSupabaseClientWithToken: vi.fn() }));
 const marketMocks = vi.hoisted(() => ({ fetchMarketData: vi.fn() }));
@@ -10,6 +13,45 @@ vi.mock('../services/marketDataService', () => ({ fetchMarketData: marketMocks.f
 
 const TEST_ID = 'a1b2c3d4-1111-4111-8111-111111111111';
 let insert: ReturnType<typeof vi.fn>;
+
+const INTERVALS: Record<Timeframe, number> = { '1m': 60, '3m': 180, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h': 14_400, '1d': 86_400, '1w': 604_800, '1M': 2_592_000 };
+
+function providerFixtures(countOverrides: Partial<Record<'15m' | '1h' | '4h' | '1d', number>> = {}) {
+  const now = Date.now();
+  return (async (_symbol: string, timeframe: '15m' | '1h' | '4h' | '1d') => {
+    const step = INTERVALS[timeframe];
+    const count = countOverrides[timeframe] ?? ({ '15m': 700, '1h': 500, '4h': 100, '1d': 120 }[timeframe]);
+    const latest = Math.floor(now / 1000 / step) * step - step * 2;
+    const candles = Array.from({ length: count }, (_, index): Candle => {
+      const close = 100 + index * 0.05;
+      return { time: latest - (count - index - 1) * step, open: close - 0.02, high: close + 0.1, low: close - 0.1, close, volume: 100 + index };
+    });
+    return { timeframe, candles, stale: false, fetchedAt: now,
+      dataset: { provider: 'unit-fixture', dataVersion: `${timeframe}-fixture-v1` } };
+  });
+}
+
+function collectionRowsFromProvider(fetcher: ReturnType<typeof providerFixtures>) {
+  return Promise.all((['15m', '1h', '4h', '1d'] as const).map(async (timeframe) => {
+    const response = await fetcher('BTCUSD', timeframe);
+    return response.candles.map((candle) => ({ timeframe, candle_time: candle.time, candle,
+      provider: response.dataset.provider, source_data_version: response.dataset.dataVersion,
+      source_fetched_at: new Date(response.fetchedAt).toISOString() } satisfies StoredResearchCandle));
+  })).then((groups) => groups.flat());
+}
+
+function mockCollectionReader(rows: StoredResearchCandle[]) {
+  return { from: vi.fn(() => {
+    let timeframe: Timeframe | undefined;
+    const builder = {
+      select: vi.fn(() => builder),
+      eq: vi.fn((column: string, value: string) => { if (column === 'timeframe') timeframe = value as Timeframe; return builder; }),
+      order: vi.fn(() => builder),
+      range: vi.fn((from: number, to: number) => Promise.resolve({ data: rows.filter((row) => row.timeframe === timeframe).slice(from, to + 1), error: null })),
+    };
+    return builder;
+  }) };
+}
 
 async function createApp() {
   const app = Fastify();
@@ -77,7 +119,7 @@ describe('learning and research persistence routes', () => {
       method: 'POST', url: '/api/v1/research/experiments', headers: { authorization: 'Bearer session-token' },
       payload: {
         name: 'test-run', hypothesis: 'Test the setup', datasetId: 'provider:dataset-v1',
-        parameters: { testStartTime: Math.ceil(Date.now() / 1000) + 120, transactionCostRate: 0.001, slippageRate: 0.001 },
+        parameters: { testStartTime: Math.ceil((Date.now() + config.researchCollectionStartLeadMs + 120_000) / 1000), transactionCostRate: 0.001, slippageRate: 0.001 },
       },
     });
     expect(response.statusCode).toBe(201);
@@ -98,24 +140,47 @@ describe('learning and research persistence routes', () => {
     await app.close();
   });
 
-  it('refuses a trigger timeframe whose bounded provider history cannot hold the full forward window', async () => {
+  it('requires enough future lead time to initialize the immutable provider baseline', async () => {
+    const app = await createApp();
+    const response = await app.inject({
+      method: 'POST', url: '/api/v1/research/experiments', headers: { authorization: 'Bearer session-token' },
+      payload: { name: 'too-soon', hypothesis: 'Initialize first', datasetId: 'new', parameters: {
+        testStartTime: Math.ceil(Date.now() / 1000) + 60, transactionCostRate: 0.001, slippageRate: 0.001,
+      } },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(insert).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('initializes a durable collection from bounded provider responses before the registered holdout', async () => {
+    const fetcher = providerFixtures();
+    const rows = await collectionRowsFromProvider(fetcher);
+    const start = Math.ceil(Date.now() / 1000 / 900) * 900 + 1800;
     const query = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
       maybeSingle: vi.fn().mockResolvedValue({ data: {
-        id: TEST_ID, user_id: 'authenticated-user', name: 'too-short', hypothesis: 'test', status: 'draft',
+        id: TEST_ID, user_id: 'authenticated-user', name: 'collection', hypothesis: 'test', status: 'draft',
         created_at: new Date(Date.now() - 60_000).toISOString(),
-        parameters: { testStartTime: Math.ceil(Date.now() / 1000) + 120, transactionCostRate: 0.001, slippageRate: 0.0005 },
+        parameters: { testStartTime: start, transactionCostRate: 0.001, slippageRate: 0.0005 },
       }, error: null }),
     };
     dbMocks.getSupabaseClientWithToken.mockReturnValue({ from: vi.fn().mockReturnValue(query) });
+    const serviceRpc = vi.fn().mockResolvedValue({ data: { newCandles: 1_420, initialized: true }, error: null });
+    dbMocks.getSupabaseClient.mockReturnValue({ rpc: serviceRpc, ...mockCollectionReader(rows) });
+    marketMocks.fetchMarketData.mockImplementation(fetcher);
     const app = await createApp();
     const response = await app.inject({
       method: 'POST', url: `/api/v1/research/experiments/${TEST_ID}/run`, headers: { authorization: 'Bearer session-token' },
       payload: { symbol: 'BTCUSD', timeframe: '15m', historyLimit: 1000 },
     });
-    expect(response.statusCode).toBe(422);
-    expect(marketMocks.fetchMarketData).not.toHaveBeenCalled();
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({ state: 'collecting', initialized: true, collectedDays: 0, requiredDays: 90, requiredBars: 8_640 });
+    expect(serviceRpc).toHaveBeenCalledWith('append_research_collection_batch', expect.objectContaining({
+      p_experiment_id: TEST_ID, p_user_id: 'authenticated-user', p_symbol: 'BTCUSD', p_continuous: true,
+    }));
+    expect(serviceRpc).toHaveBeenCalledTimes(1);
     await app.close();
   });
 
@@ -130,11 +195,24 @@ describe('learning and research persistence routes', () => {
     await app.close();
   });
 
+  it('fails closed for non-crypto research until a provider session calendar is verified', async () => {
+    const app = await createApp();
+    const response = await app.inject({
+      method: 'POST', url: `/api/v1/research/experiments/${TEST_ID}/run`, headers: { authorization: 'Bearer session-token' },
+      payload: { symbol: 'XAUUSD', timeframe: '15m', historyLimit: 1000 },
+    });
+    expect(response.statusCode).toBe(422);
+    expect(marketMocks.fetchMarketData).not.toHaveBeenCalled();
+    await app.close();
+  });
+
   it('collects future holdout candles over time without persisting an underpowered run', async () => {
     const timeframe = '15m' as const;
     const step = 900;
     const latest = Math.floor(Date.now() / 1000 / step) * step - step * 2;
     const testStartTime = latest - 20 * step;
+    const fetcher = providerFixtures();
+    const rows = await collectionRowsFromProvider(fetcher);
     const query = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
@@ -145,19 +223,9 @@ describe('learning and research persistence routes', () => {
       }, error: null }),
     };
     dbMocks.getSupabaseClientWithToken.mockReturnValue({ from: vi.fn().mockReturnValue(query) });
-    const serviceRpc = vi.fn();
-    dbMocks.getSupabaseClient.mockReturnValue({ rpc: serviceRpc });
-    marketMocks.fetchMarketData.mockImplementation(async (_symbol: string, requestedTimeframe: '15m' | '4h' | '1d' | '1h') => {
-      const count = requestedTimeframe === '15m' ? 700 : requestedTimeframe === '1h' ? 500 : requestedTimeframe === '4h' ? 100 : 120;
-      const interval = requestedTimeframe === '15m' ? step : requestedTimeframe === '1h' ? 3_600 : requestedTimeframe === '4h' ? 14_400 : 86_400;
-      const end = Math.floor(Date.now() / 1000 / interval) * interval - interval * 2;
-      const candles = Array.from({ length: count }, (_, index) => {
-        const close = 100 + index * 0.01;
-        return { time: end - (count - index - 1) * interval, open: close - 0.01, high: close + 0.1, low: close - 0.1, close, volume: 100 + index };
-      });
-      return { timeframe: requestedTimeframe, candles, stale: false, fetchedAt: Date.now(),
-        dataset: { provider: 'unit-fixture', dataVersion: `${requestedTimeframe}-v1` } };
-    });
+    const serviceRpc = vi.fn().mockResolvedValue({ data: { newCandles: 1, initialized: true }, error: null });
+    dbMocks.getSupabaseClient.mockReturnValue({ rpc: serviceRpc, ...mockCollectionReader(rows) });
+    marketMocks.fetchMarketData.mockImplementation(fetcher);
     const app = await createApp();
     const oldRevision = process.env.APP_REVISION;
     const oldDays = traderConfig.MIN_FORWARD_DAYS;
@@ -169,9 +237,11 @@ describe('learning and research persistence routes', () => {
         payload: { symbol: 'BTCUSD', timeframe, historyLimit: 700 },
       });
       expect(response.statusCode).toBe(202);
-      expect(response.json()).toMatchObject({ state: 'collecting', requiredDays: traderConfig.MIN_FORWARD_DAYS, tradeThresholdMet: false });
+      expect(response.json()).toMatchObject({ state: 'collecting', initialized: true, requiredDays: traderConfig.MIN_FORWARD_DAYS });
+      expect(response.json().collectedDays).toBeLessThan(traderConfig.MIN_FORWARD_DAYS);
       expect(response.json()).not.toHaveProperty('metrics');
-      expect(serviceRpc).not.toHaveBeenCalled();
+      expect(serviceRpc).toHaveBeenCalledTimes(1);
+      expect(serviceRpc.mock.calls[0]?.[0]).toBe('append_research_collection_batch');
     } finally {
       if (oldRevision === undefined) delete process.env.APP_REVISION;
       else process.env.APP_REVISION = oldRevision;
@@ -185,6 +255,8 @@ describe('learning and research persistence routes', () => {
     const step = 900;
     const latest = Math.floor(Date.now() / 1000 / step) * step - step * 2;
     const testStartTime = latest - 20 * step;
+    const fetcher = providerFixtures();
+    const rows = await collectionRowsFromProvider(fetcher);
     const query = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
@@ -195,19 +267,11 @@ describe('learning and research persistence routes', () => {
       }, error: null }),
     };
     dbMocks.getSupabaseClientWithToken.mockReturnValue({ from: vi.fn().mockReturnValue(query) });
-    const serviceRpc = vi.fn().mockResolvedValue({ data: TEST_ID, error: null });
-    dbMocks.getSupabaseClient.mockReturnValue({ rpc: serviceRpc });
-    marketMocks.fetchMarketData.mockImplementation(async (_symbol: string, requestedTimeframe: '15m' | '4h' | '1d' | '1h') => {
-      const count = requestedTimeframe === '15m' ? 700 : requestedTimeframe === '1h' ? 500 : requestedTimeframe === '4h' ? 100 : 120;
-      const interval = requestedTimeframe === '15m' ? step : requestedTimeframe === '1h' ? 3_600 : requestedTimeframe === '4h' ? 14_400 : 86_400;
-      const end = Math.floor(Date.now() / 1000 / interval) * interval - interval * 2;
-      const candles = Array.from({ length: count }, (_, index) => {
-        const close = 100 + index * 0.05;
-        return { time: end - (count - index - 1) * interval, open: close - 0.02, high: close + 0.1, low: close - 0.1, close, volume: 100 + index };
-      });
-      return { timeframe: requestedTimeframe, candles, stale: false, fetchedAt: Date.now(),
-        dataset: { provider: 'unit-fixture', dataVersion: `${requestedTimeframe}-v1` } };
-    });
+    const serviceRpc = vi.fn()
+      .mockResolvedValueOnce({ data: { newCandles: 0, initialized: true }, error: null })
+      .mockResolvedValueOnce({ data: TEST_ID, error: null });
+    dbMocks.getSupabaseClient.mockReturnValue({ rpc: serviceRpc, ...mockCollectionReader(rows) });
+    marketMocks.fetchMarketData.mockImplementation(fetcher);
     const oldDays = traderConfig.MIN_FORWARD_DAYS;
     const oldTrades = traderConfig.MIN_FORWARD_TRADES;
     traderConfig.MIN_FORWARD_DAYS = 0;
@@ -222,6 +286,7 @@ describe('learning and research persistence routes', () => {
       });
       expect(response.statusCode).toBe(201);
       expect(marketMocks.fetchMarketData).toHaveBeenCalledTimes(4);
+      expect(serviceRpc.mock.calls.map(([name]) => name)).toEqual(['append_research_collection_batch', 'record_research_run']);
       expect(serviceRpc).toHaveBeenCalledWith('record_research_run', expect.objectContaining({
         p_experiment_id: TEST_ID, p_user_id: 'authenticated-user', p_artifacts: expect.objectContaining({
           codeRevision: 'test-revision', strategyVersion: 'trend-pullback-v1',
