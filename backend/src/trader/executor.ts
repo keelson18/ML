@@ -94,7 +94,9 @@ export function advanceTradePlan(input: {
     }
     const rawPrice = fillPrice(pendingOrder, candle);
     if (rawPrice === undefined) return { plan, pendingOrder, events: [], reason: 'Pending order was not touched by this candle.' };
-    const fillGate = input.gate(pendingOrder.price);
+    // Re-evaluate at the candle's actual modeled execution price. A gap can
+    // materially change reward/risk and stop-based sizing from the order level.
+    const fillGate = input.gate(rawPrice);
     if (!fillGate.approved || !Number.isFinite(fillGate.quantity) || fillGate.quantity <= 0) {
       const reason = fillGate.reason ?? 'Entry gates rejected this pending fill.';
       return { plan: { ...plan, lastReason: reason, activeEventIds: fillGate.activeEventIds ?? [] }, pendingOrder, events: [gateEvent(plan, reason, fillGate.activeEventIds ?? [], candle, timeframe)], reason };

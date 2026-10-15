@@ -30,30 +30,28 @@ function importsOf(file: string): string[] {
   return [...source.matchAll(importPattern)].map((match) => match[1] ?? match[2] ?? match[3]).filter((value): value is string => Boolean(value));
 }
 
-function reachableFrom(start: string): Set<string> {
-  const seen = new Set<string>();
-  const queue = [start];
-  while (queue.length > 0) {
-    const file = queue.pop() as string;
-    if (seen.has(file)) continue;
-    seen.add(file);
-    for (const specifier of importsOf(file)) {
-      const resolved = resolveRelativeImport(file, specifier);
-      if (resolved) queue.push(resolved);
-    }
-  }
-  return seen;
-}
-
 describe('decision code import boundary', () => {
   it('keeps trader and engines free of live/** modules in their transitive import graph', () => {
     const decisionFiles = decisionRoots.flatMap(listSourceFiles);
     expect(decisionFiles.length).toBeGreaterThan(0);
 
-    const violations = decisionFiles.flatMap((file) => {
-      const reached = reachableFrom(file);
-      return [...reached].filter((reachedFile) => reachedFile.startsWith(liveDir + path.sep)).map((liveFile) => `${path.relative(backendSrc, file)} -> ${path.relative(backendSrc, liveFile)}`);
-    });
+    const seen = new Set<string>();
+    const queue = [...decisionFiles];
+    const violations: string[] = [];
+    while (queue.length > 0) {
+      const file = queue.pop()!;
+      if (seen.has(file)) continue;
+      seen.add(file);
+      for (const specifier of importsOf(file)) {
+        const resolved = resolveRelativeImport(file, specifier);
+        if (!resolved) continue;
+        if (resolved.startsWith(liveDir + path.sep)) {
+          violations.push(`${path.relative(backendSrc, file)} -> ${path.relative(backendSrc, resolved)}`);
+        } else if (!seen.has(resolved)) {
+          queue.push(resolved);
+        }
+      }
+    }
     expect(violations).toEqual([]);
   });
 });

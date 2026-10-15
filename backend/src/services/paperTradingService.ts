@@ -6,7 +6,7 @@ import { analyzeMarketStructure } from '../../../src/lib/market-structure';
 import { getSupabaseClient } from '../db';
 import { fetchMarketData } from './marketDataService';
 import { traderConfig } from '../trader/config';
-import { calculatePositionSize, lossStreakCooldownReason, markToMarket } from '../trader/risk';
+import { calculatePositionSize, estimateOpenLongStopRisk, lossStreakCooldownReason, markToMarket } from '../trader/risk';
 import { managePaperPosition } from '../trader/manager';
 import { advanceTradePlan, type EntryGateResult } from '../trader/executor';
 import { getCorrelationCluster } from '../trader/constants';
@@ -203,9 +203,9 @@ export async function advanceStoredTradePlans(input: {
           symbolExposure: snapshot.positions.filter((position) => position.position.symbol === plan.symbol).reduce((sum, position) => sum + position.currentPrice * position.position.quantity, 0),
         });
         if (!sizing.accepted) return gateResult = { approved: false, quantity: 0, reason: sizing.reason };
-        const openRisk = openPositions.reduce((sum, position) => sum + Math.max(0, (position.entryPrice - (position.stopLoss ?? position.entryPrice)) * position.quantity), 0);
+        const openRisk = openPositions.reduce((sum, position) => sum + estimateOpenLongStopRisk(position), 0);
         const heatHeadroom = Math.max(0, snapshot.equity * traderConfig.MAX_PORTFOLIO_HEAT_PCT / 100 - openRisk);
-        const quantity = Math.min(sizing.quantity, heatHeadroom / stopDistance);
+        const quantity = Math.min(sizing.quantity, heatHeadroom / sizing.perUnitRisk);
         if (quantity <= 0) return gateResult = { approved: false, quantity: 0, reason: 'Portfolio heat limit reached.' };
         gateResult = { approved: true, quantity };
         return gateResult;

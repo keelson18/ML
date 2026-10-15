@@ -138,8 +138,12 @@ export function simulatePaperOrder(
   if (!validPositive(request.quantity) || !validPositive(request.requestedPrice)) {
     return rejected(account, request.orderId, 'Quantity and requested price must be greater than zero.');
   }
-  if (!Number.isFinite(request.feeRate) || request.feeRate < 0 || !Number.isFinite(request.slippageRate) || request.slippageRate < 0) {
-    return rejected(account, request.orderId, 'Fee and slippage rates must be non-negative numbers.');
+  if (!Number.isFinite(request.feeRate) || request.feeRate < 0 || request.feeRate >= 1
+    || !Number.isFinite(request.slippageRate) || request.slippageRate < 0 || request.slippageRate >= 1) {
+    return rejected(account, request.orderId, 'Fee and slippage rates must be finite values in [0, 1).');
+  }
+  if (!Number.isFinite(account.cash) || account.cash < 0) {
+    return rejected(account, request.orderId, 'Paper account cash must be finite and non-negative.');
   }
   if (account.positions.some((position) => position.status === 'open' && position.symbol === request.symbol)) {
     return rejected(account, request.orderId, 'Only one open paper position per symbol is supported by this simulator.');
@@ -228,8 +232,8 @@ export function reducePaperPosition(
 ): { account: PaperAccountState; trade: PaperTrade } | { account: PaperAccountState; error: string } {
   const position = account.positions.find((candidate) => candidate.status === 'open' && candidate.id === positionId);
   if (!position) return { account, error: 'No open paper position exists for this symbol.' };
-  if (!validPositive(requestedQuantity) || !validPositive(exitPrice) || !Number.isFinite(feeRate) || feeRate < 0 || !Number.isFinite(slippageRate) || slippageRate < 0 || slippageRate >= 1) {
-    return { account, error: 'Exit price must be positive and fee rate must be non-negative.' };
+  if (!validPositive(requestedQuantity) || !validPositive(exitPrice) || !Number.isFinite(feeRate) || feeRate < 0 || feeRate >= 1 || !Number.isFinite(slippageRate) || slippageRate < 0 || slippageRate >= 1) {
+    return { account, error: 'Exit quantity and price must be positive; fee and slippage rates must be finite values in [0, 1).' };
   }
 
   const quantity = Math.min(position.quantity, requestedQuantity);

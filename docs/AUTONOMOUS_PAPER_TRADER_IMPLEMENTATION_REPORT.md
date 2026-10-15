@@ -1,5 +1,37 @@
 # Autonomous paper trader implementation report
 
+## Verification addendum — 2026-10-15 checkout
+
+This addendum records a fresh check of the repository at `d9356030222762da17eaa1a06d7d8defb7164166` (branch `main`). The working tree was already dirty, including untracked `backend/src/db/postgres.ts`; the commit SHA alone does not identify that file or other pre-existing local changes. No database, provider, deployment, migration application, or browser session was used. `AUTONOMOUS_TRADING` was not enabled.
+
+### Implemented in this continuation
+
+`backend/src/trader/executor.ts` now reruns the entry gate at the actual modeled fill price for a later candle, including a gap open, instead of the stale pending-order level. This prevents reward/risk and sizing approval at a price the paper simulator will not receive. `backend/src/trader/risk.ts` now budgets per-unit stop risk for configured entry/exit fees and slippage; portfolio heat uses cost-inclusive risk in the stored-plan path and replay, and replay passes its selected cost configuration into sizing. `backend/src/trader/executor.test.ts` covers a gapped fill denied by the actual-price gate, and `backend/src/trader/risk.test.ts` checks cost-inclusive sizing and heat. Lifecycle fixtures now use a fill at the planned level when expecting approval. The live-import boundary regression test traverses the decision-code import graph once rather than repeat overlapping walks, removing its parallel-suite timeout without weakening the assertion. The pre-existing PostgreSQL pool source lost its local `pg` suppression during this continuation; `@types/pg` is now a dev dependency so the backend typecheck covers that file. These changes do not establish PostgreSQL atomicity, broker execution, or real market fills.
+
+| Command | Result |
+|---|---|
+| `npm run backend:typecheck` | PASS, exit 0. |
+| `npm run typecheck` | PASS, exit 0 on rerun. |
+| `npm run lint` | PASS, exit 0. |
+| `npm run check:env` | Initially failed (exit 1): `DATABASE_URL` read by the pre-existing untracked `backend/src/db/postgres.ts` was undocumented. `.env.example` now documents it as a direct PostgreSQL URL; rerun passed, all 56 reads documented. |
+| `npm run check:migration-versions` | PASS, exit 0; 46 migration files, unique versions. |
+| `npm test` | FAIL, exit 1; 374 passed / 1 failed of 375. The market route authentication test timed out during high parallel startup. |
+| `npm test -- --maxWorkers=4` (first run after fill-gate change) | FAIL, exit 1; exposed four lifecycle fixtures that assumed a gapped fill remained eligible, then the live-import scan exceeded its timeout. Fixtures and the redundant scan were corrected. |
+| `npm test -- --maxWorkers=4` (final run) | PASS, exit 0; 63 files / 377 tests. |
+| `npx vitest run backend/src/trader/risk.test.ts backend/src/trader/replay.test.ts backend/src/services/paperTradingService.test.ts backend/src/trader/executor.test.ts --maxWorkers=1` | PASS, exit 0; 4 files / 36 tests, including cost-aware sizing and actual gap-price gating. |
+| `npx vitest run backend/src/live/import-boundary.test.ts --maxWorkers=1` | PASS, exit 0; 1 test after reducing repeated graph traversal. |
+| `npm run build` | Initial sandbox run failed at esbuild startup with `spawn EPERM`. Rerun outside the sandbox passed, exit 0; 1,615 modules transformed. Existing `App` chunk warning remains (~922.62 kB minified). |
+| `npm run lint` | PASS, exit 0 after implementation edits. |
+| `npm run typecheck` | PASS, exit 0. |
+| `npm run backend:typecheck` | PASS, exit 0 after implementation edits. |
+| `npm install --save-dev @types/pg` | PASS after sandbox cache miss; added only the type package to `package.json` and lockfile. Subsequent `npm audit` reported zero vulnerabilities. |
+| `npm ls --depth=0` | PASS, exit 0; installed top-level dependency tree resolved. |
+| `npm audit` | PASS, exit 0; zero vulnerabilities reported by npm audit for the lockfile state inspected. |
+| `npm run test:research-holdout-concurrency` | BLOCKED, exit 1; connection refused at `127.0.0.1:54322`. No database test was run. |
+| `git diff --check` | PASS, exit 0 after edits. |
+
+The existing P0 limitations below remain: no disposable Supabase/PostgreSQL migration, RLS/grant, concurrency, restore, or candle-to-ledger integration run; no live provider or deployed worker verification; and no evidence supporting profitability. The checkout is **not verified as an autonomous paper trader**. The environment example addition documents the already-present local pool source; it does not enable or connect that pool.
+
 **Audit revision:** `256dd3f1351bfc34d71ba562ab1597bf0aebac97`  
 **Verification environment:** Node `v24.15.0`, npm `11.12.1`  
 **Overall status:** **Partial implementation; not a fully validated autonomous trader.** The repository contains a meaningful server-side paper lifecycle and governed research code, but provider-, database-, deployment-, and browser-level operation was not verified in this session. Paper profitability is **not proven**.

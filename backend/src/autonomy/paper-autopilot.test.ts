@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { accountEntriesAllowed, entryCandleIsFresh, PaperAutopilotScheduler, prioritizeSeriesRequests, providerRequestSpacingMs, replayCandlesAfter, replaySequentialCandles, uniqueSeriesRequests } from './paper-autopilot';
+import { accountEntriesAllowed, entryCandleIsFresh, PaperAutopilotScheduler, prioritizeSeriesRequests, providerRequestSpacingMs, replayCandlesAfter, replaySequentialCandles, uniqueSeriesRequests, verifiedAutopilotSymbols } from './paper-autopilot';
 import { config } from '../config';
 
 vi.mock('../db', () => ({
@@ -7,10 +7,20 @@ vi.mock('../db', () => ({
     from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { enabled: true, paused_reason: 'operator pause' }, error: null }) }) }) }),
   }),
 }));
+vi.mock('../services/marketAvailability', () => ({
+  getMarketAvailability: () => [
+    { symbol: 'BTCUSD', status: 'unverified', checkedAt: null },
+    { symbol: 'ETHUSD', status: 'available', checkedAt: 1 },
+  ],
+}));
 import { closePaperPosition, simulatePaperOrder, type PaperAccountState } from '../engines/paper-execution';
 import { traderConfig } from '../trader/config';
 
 describe('paper autopilot scheduling helpers', () => {
+  it('keeps unverified markets out of planner and entry scheduling', () => {
+    expect(verifiedAutopilotSymbols(['BTCUSD', 'ETHUSD', 'BTCUSD'])).toEqual(['ETHUSD']);
+  });
+
   it('blocks on-demand scheduler cycles when the global autonomy switch is disabled', async () => {
     const wasEnabled = config.autonomousTradingEnabled;
     config.autonomousTradingEnabled = false;

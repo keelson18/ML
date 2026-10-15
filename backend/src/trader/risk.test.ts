@@ -1,6 +1,6 @@
 // Validates stop-based equal-risk sizing, caps, and drawdown using marked equity.
 import { describe, expect, it } from 'vitest';
-import { calculatePositionSize, isLossStreakCooldownActive, markToMarket } from './risk';
+import { calculatePositionSize, estimateOpenLongStopRisk, isLossStreakCooldownActive, markToMarket } from './risk';
 import { riskIntelligenceEngine } from '../engines/risk-engine';
 
 describe('Trader Desk risk calculations', () => {
@@ -17,6 +17,24 @@ describe('Trader Desk risk calculations', () => {
     expect(cashCapped.quantity * 100).toBeLessThan(500);
     const exposureCapped = calculatePositionSize({ equity: 100_000, entry: 100, invalidation: 99, cash: 100_000, grossExposure: 50_000, symbolExposure: 0 });
     expect(exposureCapped.accepted).toBe(false);
+  });
+
+  it('sizes new risk and portfolio heat after entry and stop-exit costs', () => {
+    const costs = { feeRate: 0.01, slippageRate: 0.02 };
+    const sizing = calculatePositionSize({
+      equity: 100_000, entry: 100, invalidation: 90, cash: 100_000, grossExposure: 0, symbolExposure: 0,
+      ...costs,
+    });
+    const entryFill = 100 * (1 + costs.slippageRate);
+    const stopFill = 90 * (1 - costs.slippageRate);
+    const roundTripLoss = entryFill * (1 + costs.feeRate) - stopFill * (1 - costs.feeRate);
+
+    expect(sizing.accepted).toBe(true);
+    expect(sizing.perUnitRisk).toBeCloseTo(roundTripLoss);
+    expect(sizing.perUnitRisk).toBeGreaterThan(10);
+    expect(sizing.quantity * sizing.perUnitRisk).toBeCloseTo(sizing.riskCash);
+    expect(estimateOpenLongStopRisk({ entryPrice: entryFill, stopLoss: 90, quantity: 1 }, costs))
+      .toBeCloseTo(entryFill - stopFill * (1 - costs.feeRate));
   });
 
   it('rejects a zero stop distance', () => {

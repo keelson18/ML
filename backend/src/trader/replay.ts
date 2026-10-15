@@ -6,7 +6,7 @@ import { traderConfig } from './config';
 import { advanceTradePlan, type EntryGateResult } from './executor';
 import { managePaperPosition } from './manager';
 import type { TradePlan } from './types';
-import { calculatePositionSize, markToMarket } from './risk';
+import { calculatePositionSize, estimateOpenLongStopRisk, markToMarket } from './risk';
 import { candleSeconds } from './candle-math';
 
 export interface ReplayTrade {
@@ -95,13 +95,13 @@ export function replayClosedCandles(input: {
       if (marked.drawdownPct >= traderConfig.MAX_DRAWDOWN_PCT) return { approved: false, quantity: 0, reason: 'Replay maximum drawdown reached.' };
       const sizing = calculatePositionSize({ equity: marked.equity, entry: price, invalidation: plan.invalidation,
         cash: replayAccount.cash, grossExposure: marked.grossExposure,
-        symbolExposure: marked.positions.filter(({ position }) => position.symbol === plan.symbol).reduce((sum, item) => sum + item.currentPrice * item.position.quantity, 0) });
+        symbolExposure: marked.positions.filter(({ position }) => position.symbol === plan.symbol).reduce((sum, item) => sum + item.currentPrice * item.position.quantity, 0),
+        feeRate: costs.feeRate, slippageRate: costs.slippageRate });
       if (!sizing.accepted) return { approved: false, quantity: 0, reason: sizing.reason };
       const openRisk = positions.filter((position) => position.status === 'open')
-        .reduce((sum, position) => sum + Math.max(0, (position.entryPrice - (position.stopLoss ?? position.entryPrice)) * position.quantity), 0);
-      const stopDistance = price - plan.invalidation;
+        .reduce((sum, position) => sum + estimateOpenLongStopRisk(position, costs), 0);
       const heatHeadroom = Math.max(0, marked.equity * traderConfig.MAX_PORTFOLIO_HEAT_PCT / 100 - openRisk);
-      const quantity = Math.min(sizing.quantity, heatHeadroom / stopDistance);
+      const quantity = Math.min(sizing.quantity, heatHeadroom / sizing.perUnitRisk);
       if (!Number.isFinite(quantity) || quantity <= 0) return { approved: false, quantity: 0, reason: 'Replay portfolio heat limit reached.' };
       entryReservations.set(plan.id, plan.symbol);
       return { approved: true, quantity };

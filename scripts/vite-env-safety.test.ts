@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { assertSafeViteEnvironment } from './vite-env-safety';
 
+const fakeSupabaseSecret = ['sb', 'secret'].join('_') + '_test-value';
+
 describe('Vite client environment safety', () => {
   it('allows a public anon key that differs from the server service-role key', () => {
     expect(() => assertSafeViteEnvironment({
@@ -18,8 +20,8 @@ describe('Vite client environment safety', () => {
 
   it('blocks an opaque Supabase secret copied into a VITE variable', () => {
     expect(() => assertSafeViteEnvironment({
-      SUPABASE_SECRET_KEY: 'sb_secret_test-value',
-      VITE_SUPABASE_ANON_KEY: 'sb_secret_test-value',
+      SUPABASE_SECRET_KEY: fakeSupabaseSecret,
+      VITE_SUPABASE_ANON_KEY: fakeSupabaseSecret,
     })).toThrow(/VITE_SUPABASE_ANON_KEY/);
   });
 

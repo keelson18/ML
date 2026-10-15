@@ -78,7 +78,7 @@ describe('backend paper position lifecycle', () => {
       await storeTradePlan(accountId, firstPlan);
       const candle = { time, open: 99, high: 101, low: 98, close: 101, volume: 100 };
       expect((await advanceStoredTradePlans({ accountId, symbol: 'BTCUSD', timeframe: '15m', candle, candles: [candle], shadowMode: false })).orders).toHaveLength(1);
-      const next = { ...candle, time: time + 900, open: 101, high: 105, low: 101, close: 104 };
+      const next = { ...candle, time: time + 900, open: 100, high: 105, low: 100, close: 104 };
       expect((await advanceStoredTradePlans({ accountId, symbol: 'BTCUSD', timeframe: '15m', candle: next, candles: [candle, next], shadowMode: false })).filled).toBe(1);
       const secondPlan = makePlan('ETHUSD');
       await storeTradePlan(accountId, secondPlan);
@@ -120,7 +120,7 @@ describe('backend paper position lifecycle', () => {
       await storeTradePlan(accountId, firstPlan);
       const trigger = { time: start, open: 99, high: 101, low: 98, close: 101, volume: 100 };
       await advanceStoredTradePlans({ accountId, symbol: firstPlan.symbol, timeframe: '15m', candle: trigger, candles: [trigger], shadowMode: false });
-      const fill = { time: start + 900, open: 101, high: 104, low: 100, close: 103, volume: 100 };
+      const fill = { time: start + 900, open: 100, high: 104, low: 100, close: 103, volume: 100 };
       expect((await advanceStoredTradePlans({ accountId, symbol: firstPlan.symbol, timeframe: '15m', candle: fill, candles: [trigger, fill], shadowMode: false })).filled).toBe(1);
       const stop = { time: start + 1800, open: 94, high: 96, low: 93, close: 94, volume: 100 };
       expect(await manageOpenPositions(accountId, firstPlan.symbol, stop, [stop], [], '5m')).toHaveLength(1);
@@ -170,7 +170,7 @@ describe('backend paper position lifecycle', () => {
       expect(armed.orders[0]?.status).toBe('pending');
       expect((await getAccount(accountId)).positions).toHaveLength(0);
 
-      const next = { time: triggerTime + timeframeSeconds, open: 101, high: 105, low: 101, close: 104, volume: 100 };
+      const next = { time: triggerTime + timeframeSeconds, open: 100, high: 105, low: 100, close: 104, volume: 100 };
       const filled = await advanceStoredTradePlans({ accountId, symbol: plan.symbol, timeframe: '15m', candle: next, candles: [first, next], shadowMode: false });
       expect(filled.filled).toBe(1);
       expect(filled.plans[0]?.status).toBe('OPEN');
@@ -217,7 +217,7 @@ describe('backend paper position lifecycle', () => {
       await storeTradePlan(accountId, plan);
       const trigger = { time: triggerTime, open: 99, high: 101, low: 98, close: 101, volume: 100 };
       await advanceStoredTradePlans({ accountId, symbol: plan.symbol, timeframe: '15m', candle: trigger, candles: [trigger], shadowMode: false });
-      const fill = { time: triggerTime + 900, open: 101, high: 104, low: 100, close: 103, volume: 100 };
+      const fill = { time: triggerTime + 900, open: 100, high: 104, low: 100, close: 103, volume: 100 };
       expect((await advanceStoredTradePlans({ accountId, symbol: plan.symbol, timeframe: '15m', candle: fill, candles: [trigger, fill], shadowMode: false })).filled).toBe(1);
 
       const invalidation = { time: fourHourStart, open: 96, high: 97, low: 93, close: 94, volume: 100 };

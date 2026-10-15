@@ -42,13 +42,35 @@ describe('plan executor', () => {
       gate: () => ({ approved: true, quantity: 2 }),
     });
     const nextBar = bar(1800, { open: 102, high: 104, low: 101, close: 103 });
+    let checkedEntryPrice: number | undefined;
     const filled = advanceTradePlan({
       plan: created.plan, pendingOrder: created.pendingOrder, candle: nextBar, recentCandles: [triggerBar, nextBar], barIndex: 21, timeframe: '15m',
-      gate: () => ({ approved: true, quantity: 2 }),
+      gate: (entryPrice) => { checkedEntryPrice = entryPrice; return { approved: true, quantity: 2 }; },
     });
     expect(filled.plan.status).toBe('OPEN');
     expect(filled.pendingOrder?.status).toBe('filled');
     expect(filled.fill?.price).toBe(nextBar.open);
+    expect(checkedEntryPrice).toBe(nextBar.open);
+  });
+
+  it('rechecks risk at the gapped execution price and rejects an unsafe fill', () => {
+    const pendingOrder: PendingPaperOrder = {
+      id: 'gap-risk-order', planId: plan.id, accountId: plan.accountId, symbol: plan.symbol, side: 'long',
+      orderType: 'stop_entry', price: 100, quantity: 2, createdAtBar: 19, expiresAtBar: 50, status: 'pending',
+    };
+    const gapBar = bar(900, { open: 102, high: 104, low: 101, close: 103 });
+    const result = advanceTradePlan({
+      plan: { ...plan, status: 'PENDING_ORDER' }, pendingOrder, candle: gapBar, recentCandles: [gapBar],
+      barIndex: 20, timeframe: '15m',
+      gate: (entryPrice) => entryPrice > 101
+        ? { approved: false, quantity: 0, reason: 'Risk/reward fails at the gapped execution price.' }
+        : { approved: true, quantity: 2 },
+    });
+
+    expect(result.fill).toBeUndefined();
+    expect(result.pendingOrder?.status).toBe('pending');
+    expect(result.plan.status).toBe('PENDING_ORDER');
+    expect(result.plan.lastReason).toBe('Risk/reward fails at the gapped execution price.');
   });
 
   it('fills a gapped limit order at the raw open price', () => {

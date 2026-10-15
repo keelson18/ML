@@ -74,6 +74,10 @@ export function isAutopilotSymbol(symbol: string): boolean {
   return Boolean(market?.isActive && market.provider === 'massive' && market.marketType === 'crypto' && market.priceCurrency === 'USD' && availability === 'available');
 }
 
+export function verifiedAutopilotSymbols(symbols: readonly string[]): string[] {
+  return [...new Set(symbols)].filter(isAutopilotSymbol);
+}
+
 export class PaperAutopilotScheduler {
   private timer?: ReturnType<typeof setTimeout>;
   private active = false;
@@ -192,13 +196,14 @@ export class PaperAutopilotScheduler {
       const account = snapshots.get(row.account_id)!;
       const activePlans = (account.tradePlans ?? []).filter((plan) => ['WATCHING', 'ARMED', 'PENDING_ORDER'].includes(plan.status));
       const openSymbols = new Set(account.positions.filter((position) => position.status === 'open').map((position) => position.symbol));
-      const managedSymbols = new Set([...row.symbols, ...openSymbols]);
+      const entrySymbols = verifiedAutopilotSymbols(row.symbols);
+      const managedSymbols = new Set([...entrySymbols, ...openSymbols]);
       const accountRequests = new Map<string, Set<Timeframe>>();
       managedSymbolsByAccount.set(row.account_id, managedSymbols);
       for (const symbol of managedSymbols) {
         const required = new Set<Timeframe>();
         const combined = requestsBySymbol.get(symbol) ?? new Set<Timeframe>();
-        const isConfigured = row.symbols.includes(symbol);
+        const isConfigured = entrySymbols.includes(symbol);
         if (due.has(traderConfig.MGMT_TIMEFRAME as Timeframe) && openSymbols.has(symbol)) {
           required.add(traderConfig.MGMT_TIMEFRAME as Timeframe);
           required.add('4h');
@@ -268,7 +273,7 @@ export class PaperAutopilotScheduler {
             if (managerSeries) processed += await this.replayManagement(row.account_id, symbol, managerTimeframe, managerSeries, invalidationSeries, now);
           }
         }
-        for (const symbol of row.symbols) {
+        for (const symbol of verifiedAutopilotSymbols(row.symbols)) {
           const plannerDue = (traderConfig.HTF_TIMEFRAMES as Timeframe[]).some((timeframe) => due.has(timeframe))
             || due.has(traderConfig.SETUP_TIMEFRAME as Timeframe);
           if (plannerDue) {

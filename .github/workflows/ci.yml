@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
 
 permissions:
   contents: read
@@ -12,6 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 20.19
@@ -19,15 +23,16 @@ jobs:
       - run: npm ci
       - run: npm run check:migration-versions
       - run: npm run check:env
+      - run: npm run check:secrets
       - run: npm run typecheck
       - run: npm run backend:typecheck
       - run: npm run lint
-      - run: npm test
+      - run: npm run test -- --maxWorkers=4
       - run: npm run build
       - name: Record production dependency audit
         if: always()
         run: |
-          npm audit --omit=dev --json > npm-audit-report.json || true
+          npm audit --audit-level=high --json > npm-audit-report.json || true
           node --input-type=commonjs -e "try { const report=require('./npm-audit-report.json'); console.log(JSON.stringify({metadata:report.metadata?.vulnerabilities ?? null, advisories:Object.keys(report.vulnerabilities ?? {}), error:report.error ?? null},null,2)) } catch (error) { console.log('Dependency audit report could not be parsed; see npm-audit-report.json artifact.', String(error)) }"
       - uses: actions/upload-artifact@v4
         if: always()

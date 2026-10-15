@@ -1,5 +1,5 @@
 // Shared mark-to-market and stop-distance sizing calculations for paper and replay paths.
-import type { PaperAccountState, PaperTrade } from '../engines/paper-execution';
+import type { PaperAccountState, PaperPosition, PaperTrade } from '../engines/paper-execution';
 import type { Timeframe } from '../../../src/lib/types';
 import { candleSeconds } from './candle-math';
 import { traderConfig } from './config';
@@ -49,6 +49,8 @@ export interface PositionSizingInput {
   cash: number;
   grossExposure: number;
   symbolExposure: number;
+  feeRate?: number;
+  slippageRate?: number;
 }
 
 export interface PositionSizingResult {
@@ -60,11 +62,19 @@ export interface PositionSizingResult {
 }
 
 export function calculatePositionSize(input: PositionSizingInput): PositionSizingResult {
-  const perUnitRisk = Math.abs(input.entry - input.invalidation);
+  const feeRate = input.feeRate ?? traderConfig.FEE_RATE;
+  const slippageRate = input.slippageRate ?? traderConfig.SLIPPAGE_RATE;
+  const entryFill = input.entry * (1 + slippageRate);
+  const stopFill = input.invalidation * (1 - slippageRate);
+  // Include both sides' execution costs in the risk budget, as the simulator
+  // charges entry and exit fees and applies adverse slippage to each fill.
+  const perUnitRisk = entryFill * (1 + feeRate) - stopFill * (1 - feeRate);
   const riskCash = input.equity * traderConfig.RISK_PER_TRADE_PCT / 100;
   if (![input.equity, input.entry, input.invalidation, input.cash, input.grossExposure, input.symbolExposure].every(Number.isFinite)
     || input.entry <= 0 || input.invalidation <= 0 || input.invalidation >= input.entry || perUnitRisk <= 0
-    || input.grossExposure < 0 || input.symbolExposure < 0) {
+    || input.grossExposure < 0 || input.symbolExposure < 0
+    || !Number.isFinite(feeRate) || feeRate < 0 || feeRate >= 1
+    || !Number.isFinite(slippageRate) || slippageRate < 0 || slippageRate >= 1) {
     return { accepted: false, quantity: 0, riskCash, perUnitRisk, reason: 'Invalid stop distance.' };
   }
   if (input.equity <= 0 || input.cash <= 0) {
@@ -80,6 +90,17 @@ export function calculatePositionSize(input: PositionSizingInput): PositionSizin
     return { accepted: false, quantity: 0, riskCash, perUnitRisk, reason: 'Exposure or cash limits leave no available position size.' };
   }
   return { accepted: true, quantity, riskCash, perUnitRisk };
+}
+
+export function estimateOpenLongStopRisk(position: Pick<PaperPosition, 'entryPrice' | 'stopLoss' | 'quantity'>, costs: { feeRate?: number; slippageRate?: number } = {}): number {
+  const feeRate = costs.feeRate ?? traderConfig.FEE_RATE;
+  const slippageRate = costs.slippageRate ?? traderConfig.SLIPPAGE_RATE;
+  if (![position.entryPrice, position.quantity, feeRate, slippageRate].every(Number.isFinite)
+    || position.entryPrice <= 0 || position.quantity <= 0 || feeRate < 0 || feeRate >= 1 || slippageRate < 0 || slippageRate >= 1) return Number.POSITIVE_INFINITY;
+  const stop = position.stopLoss ?? position.entryPrice;
+  if (!Number.isFinite(stop) || stop <= 0) return Number.POSITIVE_INFINITY;
+  const stopProceedsAfterCosts = stop * (1 - slippageRate) * (1 - feeRate);
+  return Math.max(0, position.entryPrice - stopProceedsAfterCosts) * position.quantity;
 }
 
 export interface MarkToMarketSnapshot {
