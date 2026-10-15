@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { accountEntriesAllowed, entryCandleIsFresh, PaperAutopilotScheduler, prioritizeSeriesRequests, providerRequestSpacingMs, replayCandlesAfter, replaySequentialCandles, uniqueSeriesRequests, verifiedAutopilotSymbols } from './paper-autopilot';
+import { hasFreshClosedCandleData } from '../trader/market-data-quality';
 import { config } from '../config';
 
 vi.mock('../db', () => ({
@@ -107,5 +108,14 @@ describe('paper autopilot scheduling helpers', () => {
     const maximumAge = traderConfig.MAX_ENTRY_AGE_BARS * 900_000;
     expect(entryCandleIsFresh(candle, '15m', 900_000 + maximumAge)).toBe(true);
     expect(entryCandleIsFresh(candle, '15m', 900_001 + maximumAge)).toBe(false);
+  });
+
+  it('accepts a recent closed series and rejects stale or missing closed candles', () => {
+    const now = Date.now();
+    const lastClosedTime = Math.floor(now / 3_600_000) * 3600 - 3600;
+    const candle = (time: number) => ({ time, open: 1, high: 1, low: 1, close: 1, volume: 1 });
+    expect(hasFreshClosedCandleData([candle(lastClosedTime)], '1h', now, 3)).toBe(true);
+    expect(hasFreshClosedCandleData([candle(lastClosedTime - 4 * 3600)], '1h', now, 3)).toBe(false);
+    expect(hasFreshClosedCandleData([], '1h', now, 3)).toBe(false);
   });
 });

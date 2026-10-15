@@ -408,6 +408,25 @@ export default function Dashboard() {
               <span className="font-semibold tracking-tight text-sm hidden sm:inline">Quantum Intelligence</span>
             </div>
           </div>
+          {sidebarTab !== 'dashboard' && <div className="hidden md:flex min-w-0 flex-1 items-center justify-center gap-2 px-3">
+            <label className="sr-only" htmlFor="global-market-type">Market type</label>
+            <select id="global-market-type" aria-label="Market type" value={marketType} onChange={(event) => {
+              const nextType = event.target.value as MarketType;
+              setMarketType(nextType);
+              const nextMarkets = getMarketsByType(nextType);
+              if (nextMarkets.length && !nextMarkets.some((market) => market.symbol === symbol)) setSymbol(nextMarkets[0].symbol);
+            }} className="max-w-28 truncate rounded-lg border border-border bg-bg px-2 py-1.5 text-xs text-text">
+              {MARKET_TYPES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            </select>
+            <label className="sr-only" htmlFor="global-market-symbol">Market symbol</label>
+            <select id="global-market-symbol" aria-label="Market symbol" value={symbol} onChange={(event) => setSymbol(event.target.value)} className="max-w-36 truncate rounded-lg border border-border bg-bg px-2 py-1.5 text-xs text-text">
+              {availableMarkets.map((market) => <option key={market.symbol} value={market.symbol}>{market.label}</option>)}
+            </select>
+            <label className="sr-only" htmlFor="global-timeframe">Analysis timeframe</label>
+            <select id="global-timeframe" aria-label="Analysis timeframe" value={timeframe} onChange={(event) => setTimeframe(event.target.value as Timeframe)} className="rounded-lg border border-border bg-bg px-2 py-1.5 text-xs text-text">
+              {TIMEFRAMES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            </select>
+          </div>}
           <div className="flex items-center gap-2.5">
             <WsIndicator status={wsStatus} />
             <button onClick={toggle} aria-label="Toggle theme" className="p-2 rounded-lg hover:bg-bg transition-colors text-muted hover:text-text" title="Toggle theme">
@@ -419,6 +438,25 @@ export default function Dashboard() {
         </header>
 
         <main className="flex-1 overflow-y-auto">
+          {sidebarTab !== 'dashboard' && <div className="flex md:hidden items-center gap-1.5 border-b border-border bg-surface px-2 py-2">
+            <label className="sr-only" htmlFor="mobile-market-type">Market type</label>
+            <select id="mobile-market-type" aria-label="Market type" value={marketType} onChange={(event) => {
+              const nextType = event.target.value as MarketType;
+              setMarketType(nextType);
+              const nextMarkets = getMarketsByType(nextType);
+              if (nextMarkets.length && !nextMarkets.some((market) => market.symbol === symbol)) setSymbol(nextMarkets[0].symbol);
+            }} className="min-w-0 flex-1 rounded-lg border border-border bg-bg px-2 py-1.5 text-[10px] text-text">
+              {MARKET_TYPES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            </select>
+            <label className="sr-only" htmlFor="mobile-market-symbol">Market symbol</label>
+            <select id="mobile-market-symbol" aria-label="Market symbol" value={symbol} onChange={(event) => setSymbol(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-border bg-bg px-2 py-1.5 text-[10px] text-text">
+              {availableMarkets.map((market) => <option key={market.symbol} value={market.symbol}>{market.label}</option>)}
+            </select>
+            <label className="sr-only" htmlFor="mobile-timeframe">Analysis timeframe</label>
+            <select id="mobile-timeframe" aria-label="Analysis timeframe" value={timeframe} onChange={(event) => setTimeframe(event.target.value as Timeframe)} className="w-16 rounded-lg border border-border bg-bg px-2 py-1.5 text-[10px] text-text">
+              {TIMEFRAMES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            </select>
+          </div>}
           {renderContent()}
           {perfOverlayEnabled && <PerfOverlay candleCount={candles.length} />}
         </main>

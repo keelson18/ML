@@ -24,6 +24,8 @@ jobs:
       - run: npm run check:migration-versions
       - run: npm run check:env
       - run: npm run check:secrets
+      - run: npm run check:priority-test-stubs
+      - run: npm run typecheck:scripts
       - run: npm run typecheck
       - run: npm run backend:typecheck
       - run: npm run lint

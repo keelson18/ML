@@ -94,7 +94,7 @@ A PostgreSQL/Supabase RLS integration test was not run, so owner/admin/anon beha
 **Result: NOT-VERIFIED.** No signed-in browser account or confirmed live Massive market probe was available, and the preview screenshot tool was unavailable. Do not treat the steps below as completed.
 
 1. Sign in with a test user.
-2. Open a Massive crypto market and verify availability shows `available`; if not, stop and record the provider result.
+2. Open a configured USD crypto market and verify Admin availability shows its selected provider, source instrument, and `available`; if not, stop and record the per-timeframe provider result.
 3. Load candles and confirm symbol/timeframe labels and latest candle timestamps.
 4. Open Trader Desk and confirm account, plans, and risk status load.
 5. Refresh plans; record the scan count and any per-symbol provider errors.
@@ -262,3 +262,121 @@ A previously tracked `supabase/.temp` pooler URL contains remote database creden
 ### Gate status
 
 Phase 1 is **NOT GREEN**: local code checks pass, but provider coverage is not verified, branch protection is not configured, and historical credential remediation is outstanding. Phases 2â€“5 remain gated. No hosted database was contacted or modified by the local tests in this run.
+
+## Follow-up remediation check — 2026-10-15 01:51 UTC
+
+- Repeated configured Massive probe: results are still not eligible for planning. BTCUSD 4h and 1h returned empty series; 15m and 5m returned HTTP 429; 1d returned five closed candles, with the latest at `2026-10-11T00:00:00Z` and age about 265,899 seconds, still stale. Twelve Data remains unprobed because no configured autonomy symbol uses it.
+- The secret scanner now checks for remote database URLs with embedded credentials and fails if `supabase/.temp` appears anywhere in reachable Git history. `npm run check:secrets`: **EXPECTED FAIL / REMEDIATION REQUIRED** because historical Supabase CLI state remains in this repository's reachable commits. No secret value is printed. CI checkout now fetches full history so the historical-path check is meaningful.
+- Repository access to `origin` could not reach GitHub from this environment. Remote credential rotation, history rewrite/push, and branch-protection settings remain **NOT COMPLETED**. Do not treat removing the local cache or passing unit tests as remediation of the exposed credential.
+
+### Corrected provider probe — 2026-10-15 01:54–01:56 UTC
+
+The probe now spaces Massive requests according to the configured reserved request budget (30 seconds), rather than the one-second general probe interval. The earlier 429 results were caused by the probe cadence and are superseded. With compliant spacing, results were: BTCUSD 4h empty, 1d stale (same five candles ending `2026-10-11T00:00:00Z`), 1h empty, and HTTP 403 for both 15m and 5m. The returned error body was intentionally not logged, so the specific 403 cause is **NOT-VERIFIED**. No timeframe set is fully usable; keep entries blocked until the provider account/instrument coverage is resolved and a fresh probe passes.
+
+The latest local test run after the remediation edits passed **64 files / 407 tests**; lint, `node --check scripts/check-secrets.mjs`, and `npm run check:env` also passed. The secret scan intentionally remains failing on the known historical `.temp` paths; current tracked/non-ignored files contain no detected remote credential URL.
+
+## Local database proof attempt — 2026-10-15
+
+`npm run test:research-holdout-concurrency` was attempted against its guarded local-only URL and failed with `ECONNREFUSED 127.0.0.1:54322`. Docker, Podman, and the Supabase CLI are unavailable in this workspace, so the local Supabase database cannot be started here. No hosted database was contacted. Migration/RLS execution, concurrent persisted writes, and restart recovery remain **NOT-VERIFIED**; do not infer them from the mocked TypeScript lifecycle tests.
+
+## Route-level market data fail-closed follow-up — 2026-10-15
+
+- The plan refresh route selects planner candidates only from selected, active USD crypto markets mapped to a supported provider (Massive or Twelve Data) whose availability status is `available`. It blocks registry entries still marked unverified before they can reach planning. Regression tests cover filtering unverified and unavailable symbols.
+- Decision analysis now requires the market status to be `available`, rejects provider responses marked stale, and rejects a response when its newest confirmed closed candle exceeds the configured maximum age. Regression tests verify the unverified, stale-fallback, and old-candle rejection paths. The analysis service receives `dataState: ready` only after those checks pass.
+- Focused decision and planner route suites: **PASS**, 12 tests. Full Vitest suite: **PASS**, 65 files / 418 tests. `npm run lint`, `npm run backend:typecheck`, `npm run check:env` (56 documented reads), `npm run check:migration-versions` (46 unique versions), `npm run build`, and `git diff --check`: **PASS**. Build warning remains for the existing 922.62 kB `App` chunk. The Vite/Vitest subprocesses required execution outside the workspace sandbox (`spawn EPERM` in sandbox).
+- `npm run check:secrets`: **EXPECTED FAIL / REMEDIATION REQUIRED**; it detects historic `supabase/.temp` paths in reachable commits. No secret value is emitted. The working-tree scan did not report a current remote credential URL, but reachable history still needs remote remediation.
+- No new real-provider probe or database integration was run in this follow-up. Prior corrected Massive probe evidence and the local PostgreSQL refusal above still apply. No hosted service was contacted.
+
+Phase 1 remains **NOT GREEN**. CI workflow has not run on GitHub and branch protection is not configured; provider coverage, database runtime behavior, and remote credential/history remediation remain unresolved. Phases 2–5 remain gated.
+
+## Autopilot candle-freshness follow-up — 2026-10-15
+
+- The active paper-autopilot scheduler now checks every requested timeframe's latest closed candle against `MARKET_DATA_MAX_STALE_TTL_MULTIPLIER`, in addition to rejecting stale-cache responses. An absent closed candle or an over-age close is treated as a data failure, so the account entry path pauses and does not plan or replay entries from that series.
+- Added helper coverage for recent, stale, and missing closed candles. Focused autopilot suite: **PASS**, 11 tests. Full suite: **PASS**, 65 files / 419 tests. `npm run backend:typecheck` and `npm run lint`: **PASS**.
+- This remains code-level protection using mocked provider series. It does not verify configured provider coverage or persistence behavior; the corrected live probe and local database limitations above remain applicable. Phase 1 is **NOT GREEN**.
+
+The freshness rule is now shared as `backend/src/trader/market-data-quality.ts` and also protects manual trader plan refresh and server-side decision analysis. Verification after that consolidation: focused suites **PASS**, 23 tests; full suite **PASS**, 65 files / 419 tests; backend typecheck and lint **PASS**. This does not change the external Phase 1 blockers.
+
+The configured provider probe now requests 50 candles per configured symbol/timeframe, requires at least 50 fresh closed candles, and uses the same shared freshness rule as the entry paths. This checks enough history for the planner's 50-candle minimum. Prior live-probe rows above were collected with the former five-candle probe and therefore establish connectivity/freshness at that time only, not sufficient history depth; rerun the stricter probe when provider access is authorized. Added `npm run typecheck:scripts` and a CI step to keep the probe script typed. The script typecheck, frontend/backend typechecks, lint, and `git diff --check` pass locally; no provider request was made during this follow-up.
+
+Repository hygiene recheck: no environment files other than `.env.example` are tracked, `supabase/.temp/` is ignored and untracked in the current checkout, and the current secret scan still fails specifically on historic `supabase/.temp` paths in reachable commits. No secret values were printed. Local cache cleanup does not remediate those commits.
+
+Additional local gate recheck: `npm run check:env` **PASS** (56 variables), `npm run check:migration-versions` **PASS** (46 versions), production build **PASS** (1,615 modules, existing 922.62 kB `App` chunk warning), and `git diff --check` **PASS**. Vite required the already-used out-of-sandbox retry because esbuild cannot spawn inside the sandbox. No local PostgreSQL, Docker, Podman, or Supabase CLI executable was found, so database concurrency proof remains unavailable.
+
+### Strict live provider probe — 2026-10-15 02:27–02:29 UTC
+
+The updated `npm run probe:markets` requested 50 candles for each configured BTCUSD timeframe and used the shared trading freshness rule. It exited nonzero because every timeframe failed eligibility:
+
+| Symbol | Provider | Timeframe | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| BTCUSD | Massive | 4h | UNVERIFIED | Empty candle series; checked `02:27:24Z` |
+| BTCUSD | Massive | 1d | UNVERIFIED | 50 closed candles, but stale; latest `2026-09-19T00:00:00Z`, age `2,168,877,024 ms`; checked `02:27:55Z` |
+| BTCUSD | Massive | 1h | UNVERIFIED | Empty candle series; checked `02:28:27Z` |
+| BTCUSD | Massive | 15m | UNVERIFIED | 3 closed candles (50 required), stale; latest `2026-10-14T00:30:00Z`, age `92,639,862 ms`; checked `02:28:58Z` |
+| BTCUSD | Massive | 5m | UNVERIFIED | 10 closed candles (50 required), stale; latest `2026-10-14T00:45:00Z`, age `92,370,877 ms`; checked `02:29:29Z` |
+
+No Twelve Data symbol is configured for autonomy. The probe observed no rate-limit response during this run. BTCUSD remains ineligible for planner entries; do not add it to a verified trading set until a repeat probe returns sufficient fresh closed history across all required timeframes.
+
+The `MARKETS_VERIFIED_OVERRIDE` configuration bypass has been removed from the application, `.env.example`, and the ignored local `.env`; markets now start `unverified` and require the runtime provider probe to become `available`. The effective local config has `AUTONOMOUS_TRADING=false` and no retired verification override. This prevents a local configuration value from substituting for provider evidence. The Admin panel now explains that provider responsiveness alone is insufficient for planning and shows the basic probe's 1m candle count. Failed probes clear any prior candle count. The admin probe also spaces standard requests according to the Massive request window while retaining the priority reservation; with default 5 requests/minute and 2 reserved, its spacing is 20 seconds. A CI check scans 27 priority test files for todo, skipped, focused, and conditional tests. It passes on the current suite and rejected a temporary `it.skipIf` fixture as expected. Verification: market-availability suite **PASS**, 2 tests; full suite **PASS**, 65 files / 420 tests; frontend/backend/probe-script typechecks, lint, `npm run check:env` (**55** documented variables), migrations (**46 unique versions**), production build (**PASS**, 1,615 modules with the existing 922.93 kB `App` chunk warning), and `git diff --check` **PASS**. This does not change the unresolved historical secret, database-runtime, or GitHub branch-protection blockers.
+
+The server no longer starts an unrequested market-universe probe on startup. Provider checks begin only through the authenticated Admin probe action, which now checks only symbols in `AUTONOMY_SYMBOLS`; all other registry symbols stay unverified. This avoids consuming the standard provider budget during startup and bounds the Admin probe to the configured paper-trading set. The basic Admin probe still checks only 1m provider responsiveness; the strict per-timeframe probe script is the evidence for planner history coverage. Backend typecheck, frontend typecheck, lint, environment check, priority test-stub check, and the full suite (**PASS**, 65 files / 420 tests) pass after this change.
+
+## Current goal continuation — 2026-10-15
+
+Expanded `backend/src/engines/paper-execution.test.ts` to cover infinite fee/slippage rejection, zero-cost entry fills, and reductions larger than the remaining quantity. The focused file passes 34 tests. Current full suite: **PASS**, 64 files / 412 tests; `npm run lint`: **PASS**. These remain unit-level proofs and do not establish persisted database lifecycle behavior.
+
+The Phase 1 external blockers remain: reachable history still contains `supabase/.temp`, live Massive coverage remains incomplete (fresh spaced probe returned empty 4h/1h, stale 1d, and 403 for 15m/5m), no local PostgreSQL/Supabase runtime is available, and GitHub branch protection/workflow status are unverified. `AUTONOMOUS_TRADING=false` remains set locally.
+
+### Strict Admin probe and blocker recheck — 2026-10-15
+
+- The authenticated Admin probe now checks all unique configured planner, trigger, and management timeframes (currently 4h, 1d, 1h, 15m, 5m), requesting 50 candles per timeframe and spacing every request within the Massive standard-request budget. A market is `available` only if every timeframe has at least 50 fresh closed candles. Per-timeframe counts, timestamps, and generic failure reasons are returned to the UI; provider error bodies are not exposed. This closes the previous UI gap where a short 1m response could appear available despite unusable planner frames.
+- The strict probe's known BTCUSD result still means it must remain unverified. This code change makes the authenticated Admin probe enforce and display that failure; it does not repair Massive's missing, stale, or forbidden data. No new live provider call was made during this change.
+- Focused market availability tests pass (3 tests), including mixed-frame rejection. Frontend and backend typechecks and lint pass.
+- `npm run check:secrets` still fails specifically because reachable Git history contains `supabase/.temp` paths. The directory remains ignored and untracked in the current index. Credential rotation and history rewriting require external Supabase/GitHub administration and have not been performed; local-only work cannot safely clear this finding.
+- The local database runtime is still unavailable: `psql`, `postgres`, Docker, Podman, and Supabase CLI are not installed in this workspace, and the recorded guarded integration attempt refused `127.0.0.1:54322`. No hosted database was contacted. Runtime/concurrency proof remains outstanding.
+
+### Strict configured-provider rerun — 2026-10-15 03:08–03:10 UTC
+
+`npm run probe:markets` completed against the configured Massive endpoint and exited `1` because every configured BTCUSD timeframe failed the 50-fresh-closed-candle gate:
+
+| Symbol | Provider | Timeframe | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| BTCUSD | Massive | 4h | UNVERIFIED | Empty candle series; checked `03:08:15Z` |
+| BTCUSD | Massive | 1d | UNVERIFIED | 50 closed candles, stale; latest `2026-09-19T00:00:00Z`, age `2,171,327,420 ms`; checked `03:08:46Z` |
+| BTCUSD | Massive | 1h | UNVERIFIED | Empty candle series; checked `03:09:17Z` |
+| BTCUSD | Massive | 15m | UNVERIFIED | 3 closed candles (50 required), stale; latest `2026-10-14T00:30:00Z`, age `95,089,377 ms`; checked `03:09:48Z` |
+| BTCUSD | Massive | 5m | UNVERIFIED | 10 closed candles (50 required), stale; latest `2026-10-14T00:45:00Z`, age `94,820,257 ms`; checked `03:10:19Z` |
+
+No HTTP 429 or 404 occurred during this probe. No Twelve Data autonomy symbol is configured, so it was not probed. Keep BTCUSD blocked for entries; this rerun confirms the provider/account coverage issue remains and does not supply an application-code workaround.
+
+### Local PostgreSQL runtime recheck — 2026-10-15 03:11 UTC
+
+The host does have PostgreSQL 18.6 running on `127.0.0.1:5432`; the `.env` `DATABASE_URL` points to a local database named `quantum`. A read-only transaction connected as the local `postgres` role and confirmed only the `public` schema; the Supabase `auth` and `storage` schemas and the project's expected research/paper tables are absent. Port `54322` remains closed and `LOCAL_SUPABASE_DB_URL` is unset. The guarded `test:research-holdout-concurrency` intentionally refuses port 5432 because it requires a disposable local Supabase instance on 54322. I did not bypass that guard, apply migrations, or mutate the `quantum` database. This establishes local PostgreSQL connectivity only; Supabase migrations, RLS, privileged RPCs, and concurrency behavior remain **NOT-VERIFIED**.
+
+### Historical secret scan refinement — 2026-10-15
+
+The secret check now inspects reachable historical `supabase/.temp` files for remote database URLs and reports findings without printing their contents. The check confirms that the historical `pooler-url` contains a remote PostgreSQL URL with non-placeholder user information; parsing found no password component in that URL. Treat its associated database access material as requiring rotation before any history rewrite, consistent with the existing remediation requirement. `npm run check:secrets` remains **FAIL** for both the historical CLI state and this remote URL. The present checkout still ignores `.env` and `supabase/.temp/`; neither path is tracked. No credentials were used, rotated, or emitted, and no history was rewritten.
+
+The scheduler now has a slow-fetch regression test: while the first provider request is held open, candle-close timers fire and enqueue additional work; observed in-flight provider requests never exceed one. The focused test passes, and the full suite passes **66 files / 424 tests**. This verifies in-process queue serialization only; it does not establish cross-process or multi-host scheduler exclusion, and it does not test persisted ledger recovery.
+
+A fresh read-only inspection of the configured loopback `DATABASE_URL` connected to PostgreSQL 18.6 (`quantum`) in a read-only transaction. The database still has no Supabase `auth` or `storage` schema and no `paper_accounts` or `research_experiments` table. The guarded Supabase concurrency test still cannot connect at `127.0.0.1:54322` (`ECONNREFUSED`). No migration or write was attempted. PostgreSQL connectivity is verified; project schema, Supabase RLS, and persisted concurrency remain **NOT-VERIFIED**.
+
+### BTCUSD Twelve Data provider switch and strict verification — 2026-10-15 03:19–03:20 UTC
+
+Massive remained unusable for configured BTCUSD, so the registry now maps only BTCUSD to Twelve Data (`BTC/USD`); other crypto mappings are unchanged. The app's Twelve Data adapter validated the provider instrument metadata, candle ordering, OHLC values, timestamp alignment, closed-candle count, and freshness on all five required frames. The official `npm run probe:markets` then exited successfully with 50+ fresh closed candles on every frame:
+
+| Symbol | Provider | Timeframe | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| BTCUSD | Twelve Data | 4h | AVAILABLE | 60 returned, 59 closed; latest `2026-10-14T20:00:00Z`; checked `03:19:38Z` |
+| BTCUSD | Twelve Data | 1d | AVAILABLE | 60 returned, 59 closed; latest `2026-10-14T00:00:00Z`; checked `03:19:46Z` |
+| BTCUSD | Twelve Data | 1h | AVAILABLE | 60 returned, 59 closed; latest `2026-10-15T02:00:00Z`; checked `03:19:54Z` |
+| BTCUSD | Twelve Data | 15m | AVAILABLE | 60 returned, 59 closed; latest `2026-10-15T03:00:00Z`; checked `03:20:02Z` |
+| BTCUSD | Twelve Data | 5m | AVAILABLE | 60 returned, 60 closed; latest `2026-10-15T03:15:00Z`; checked `03:20:10Z` |
+
+The registry, strict probe, authenticated Admin availability service, planner selection, and autopilot eligibility now accept configured Massive or Twelve Data USD crypto only after the per-timeframe status is `available`. The Admin probe requests 60 candles to account for a forming bar and uses each provider's configured standard-request budget. It stores the selected provider and source instrument in status for inspection. `AUTONOMOUS_TRADING` remains false; this is provider coverage evidence, not evidence that a paper trade was entered or completed. A single successful probe does not prove sustained provider uptime or quota capacity.
+
+Regression coverage includes Twelve Data BTCUSD mapping, strict multi-timeframe availability, verified planner/autopilot selection, and Coinbase's independent live-price mapping: focused suites **PASS**, 43 tests; full suite **PASS**, 65 files / 423 tests. Frontend/backend/probe-script typechecks, lint, environment and migration checks, priority-test-stub scan, and production build **PASS**. The existing `App` chunk warning remains (~937 kB). `git diff --check` passes with only Git's CRLF normalization notices.
+
+### Strict provider freshness rerun — 2026-10-15 03:32–03:33 UTC
+
+The configured strict probe was rerun from the current worktree. BTCUSD/Twelve Data returned 60 candles with at least 59 closed and fresh on each required frame: 4h latest close `2026-10-14T20:00:00Z` (checked `03:32:31Z`); 1d `2026-10-14T00:00:00Z` (`03:32:40Z`); 1h `2026-10-15T02:00:00Z` (`03:32:48Z`); 15m `2026-10-15T03:15:00Z` (`03:32:56Z`); 5m `2026-10-15T03:25:00Z` (`03:33:04Z`). The probe exited **0**. This is a second successful point-in-time probe; `AUTONOMOUS_TRADING=false` remains set, so it still does not prove order execution or sustained availability.

@@ -8,6 +8,7 @@ import { TIMEFRAMES, type Timeframe } from '../../../src/lib/types';
 import { config } from '../config.js';
 import { BoundedMap, WindowLimiter } from '../utils/limits';
 import { selectClosedCandles } from '../trader/candle-math';
+import { hasFreshClosedCandleData } from '../trader/market-data-quality';
 import { traderConfig } from '../trader/config';
 
 const VALID_TIMEFRAMES = new Set<string>(TIMEFRAMES.map((t) => t.value));
@@ -28,8 +29,8 @@ function validateDecisionRequest(body: DecisionRequest | undefined): { symbol: s
   if (typeof body.symbol !== 'string' || !SYMBOL_PATTERN.test(body.symbol)) return 'Invalid symbol.';
   if (typeof body.timeframe !== 'string' || !VALID_TIMEFRAMES.has(body.timeframe)) return 'Invalid timeframe.';
   if (!getMarket(body.symbol)) return 'Unknown market symbol.';
-  if (getMarketAvailability().find((market) => market.symbol === body.symbol)?.status === 'unavailable') {
-    return 'Market not available.';
+  if (getMarketAvailability().find((market) => market.symbol === body.symbol)?.status !== 'available') {
+    return 'Market is not verified as available.';
   }
   return { symbol: body.symbol, timeframe: body.timeframe as Timeframe };
 }
@@ -62,6 +63,10 @@ export async function decisionRoutes(app: FastifyInstance, pipeline: AutonomousP
       request.log.error({ userId, symbol, timeframe, err: error instanceof Error ? error.message : 'unknown' }, 'decision candle fetch failed');
       return reply.code(502).send({ error: 'Market data unavailable.' });
     }
+    const latestClosed = candles.at(-1);
+    if (marketData.stale || !latestClosed || !hasFreshClosedCandleData(marketData.candles, timeframe)) {
+      return reply.code(503).send({ error: 'Fresh market data is unavailable; analysis is blocked.' });
+    }
     if (candles.length < MIN_ANALYSIS_CANDLES) return reply.code(400).send({ error: 'Not enough closed candles for analysis.' });
 
     const lastClosedTime = candles[candles.length - 1].time;
@@ -79,7 +84,7 @@ export async function decisionRoutes(app: FastifyInstance, pipeline: AutonomousP
         timeframe,
         candles,
         candleClosure: 'verified_closed',
-        dataState: marketData.stale ? 'stale' : 'ready',
+        dataState: 'ready',
         dataSource: {
           provider: marketData.dataset.provider,
           fetchedAt: marketData.fetchedAt,

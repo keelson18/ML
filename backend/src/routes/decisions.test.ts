@@ -4,13 +4,16 @@ import { AutonomousPipeline } from '../autonomy/pipeline';
 import { config } from '../config';
 import { decisionRoutes } from './decisions';
 
-const mocks = vi.hoisted(() => ({ fetchMarketData: vi.fn(), analyze: vi.fn() }));
+const mocks = vi.hoisted(() => ({ fetchMarketData: vi.fn(), analyze: vi.fn(), availabilityStatus: 'available' as 'available' | 'unavailable' | 'unverified' }));
 
 vi.mock('../services/marketDataService', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../services/marketDataService')>()),
   fetchMarketData: mocks.fetchMarketData,
 }));
 vi.mock('../services/decisionService', () => ({ analyze: mocks.analyze }));
+vi.mock('../services/marketAvailability', () => ({
+  getMarketAvailability: () => [{ symbol: 'BTCUSD', status: mocks.availabilityStatus, checkedAt: 1 }],
+}));
 
 let lastClosedTime = 0;
 
@@ -60,6 +63,7 @@ function analyzeRequest(app: Awaited<ReturnType<typeof createApp>>, token: strin
 describe('server-side decision analysis', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.availabilityStatus = 'available';
     lastClosedTime = Math.floor(Date.now() / 3_600_000) * 3_600 - 3_600;
     mocks.fetchMarketData.mockImplementation(async () => series());
     mocks.analyze.mockImplementation(async () => ({ decision: { result: { decision: 'NO_TRADE' } } }));
@@ -79,6 +83,39 @@ describe('server-side decision analysis', () => {
     const response = await analyzeRequest(app, 'user-unknown', { symbol: 'NOTREAL', timeframe: '1h' });
     expect(response.statusCode).toBe(400);
     expect(mocks.fetchMarketData).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('blocks an unverified market before fetching or analysis', async () => {
+    mocks.availabilityStatus = 'unverified';
+    const app = await createApp();
+    const response = await analyzeRequest(app, 'user-unverified');
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: 'Market is not verified as available.' });
+    expect(mocks.fetchMarketData).not.toHaveBeenCalled();
+    expect(mocks.analyze).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('blocks a fresh provider response whose latest closed candle is too old', async () => {
+    // Keep the synthetic forming candle old too, so it cannot be mistaken for
+    // a newly closed bar after the fixture is shifted backwards.
+    lastClosedTime -= 30 * 3_600;
+    const app = await createApp();
+    const response = await analyzeRequest(app, 'user-old-candles');
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ error: 'Fresh market data is unavailable; analysis is blocked.' });
+    expect(mocks.analyze).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('blocks the stale-cache fallback flag even when its candle timestamps look recent', async () => {
+    mocks.fetchMarketData.mockImplementation(async () => ({ ...series(), stale: true }));
+    const app = await createApp();
+    const response = await analyzeRequest(app, 'user-stale-fallback');
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ error: 'Fresh market data is unavailable; analysis is blocked.' });
+    expect(mocks.analyze).not.toHaveBeenCalled();
     await app.close();
   });
 
@@ -107,21 +144,34 @@ describe('server-side decision analysis', () => {
   });
 
   it('charges the quota only for uncached analyses', async () => {
-    const app = await createApp();
     const max = config.analyzeRateLimitMax;
-    for (let index = 0; index < max + 5; index += 1) {
-      expect((await analyzeRequest(app, 'user-quota')).statusCode).toBe(200);
+    const originalWindowMs = config.rateLimitWindowMs;
+    config.rateLimitWindowMs = 24 * 60 * 60 * 1000;
+    const app = await createApp();
+    const clock = vi.spyOn(Date, 'now');
+    const realNow = Date.now();
+    let elapsedMs = 0;
+    clock.mockImplementation(() => realNow + elapsedMs);
+    try {
+      for (let index = 0; index < max + 5; index += 1) {
+        expect((await analyzeRequest(app, 'user-quota')).statusCode).toBe(200);
+      }
+      for (let index = 1; index < max; index += 1) {
+        lastClosedTime += 3600;
+        elapsedMs += 3_600_000;
+        expect((await analyzeRequest(app, 'user-quota')).statusCode).toBe(200);
+      }
+      lastClosedTime += 3600;
+      elapsedMs += 3_600_000;
+      const limited = await analyzeRequest(app, 'user-quota');
+      expect(limited.statusCode).toBe(429);
+      expect(limited.json()).toEqual({ error: 'Analysis is busy. Try again shortly.' });
+      expect(mocks.analyze).toHaveBeenCalledTimes(max);
+    } finally {
+      config.rateLimitWindowMs = originalWindowMs;
+      clock.mockRestore();
+      await app.close();
     }
-    for (let index = 1; index < max; index += 1) {
-      lastClosedTime -= 3600;
-      expect((await analyzeRequest(app, 'user-quota')).statusCode).toBe(200);
-    }
-    lastClosedTime -= 3600;
-    const limited = await analyzeRequest(app, 'user-quota');
-    expect(limited.statusCode).toBe(429);
-    expect(limited.json()).toEqual({ error: 'Analysis is busy. Try again shortly.' });
-    expect(mocks.analyze).toHaveBeenCalledTimes(max);
-    await app.close();
   });
 
   it('keeps cache entries separate per user', async () => {

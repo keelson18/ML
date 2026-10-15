@@ -21,11 +21,11 @@ describe('crypto market universe', () => {
     expect(cryptoMarkets.every((m) => m.quoteAsset !== 'USDT')).toBe(true);
   });
 
-  it('every crypto market has provider massive and sourceSymbol starting with X:', () => {
+  it('configures every crypto market with a provider and source instrument', () => {
     const cryptoMarkets = MARKET_UNIVERSE.filter((m) => m.marketType === 'crypto');
     expect(cryptoMarkets.length).toBeGreaterThan(0);
-    expect(cryptoMarkets.every((m) => m.provider === 'massive')).toBe(true);
-    expect(cryptoMarkets.every((m) => m.sourceSymbol?.startsWith('X:'))).toBe(true);
+    expect(cryptoMarkets.every((m) => ['massive', 'twelvedata'].includes(m.provider) && Boolean(m.sourceSymbol))).toBe(true);
+    expect(cryptoMarkets.find((market) => market.symbol === 'BTCUSD')).toMatchObject({ provider: 'twelvedata', sourceSymbol: 'BTC/USD' });
   });
 
   it('hides confirmed unavailable markets from market pickers but retains unknown markets', () => {

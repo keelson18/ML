@@ -59,8 +59,7 @@ Provider keys stay server-side. Trader decisions use market and risk data only; 
 
 - Node.js 20.19+
 - A Supabase project (free tier works)
-- Massive API key for the configured crypto markets; verify markets with the admin probe before relying on them
-- Twelve Data API key only for symbols assigned to that provider
+- Massive and/or Twelve Data API keys for registry-assigned instruments; verify each configured market with the admin probe before relying on it
 - Optional Google Gemini API key for Kinetic Coach
 
 ### 1. Clone & install

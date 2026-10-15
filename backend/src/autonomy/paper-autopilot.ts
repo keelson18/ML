@@ -8,6 +8,7 @@ import { getMarketAvailability } from '../services/marketAvailability';
 import { createTradePlan } from '../trader/planner';
 import { traderConfig } from '../trader/config';
 import { candleSeconds, latestClosedCandleTime, selectClosedCandles } from '../trader/candle-math';
+import { hasFreshClosedCandleData } from '../trader/market-data-quality';
 import { nextScheduledRunAt } from './candle-clock';
 
 export function providerRequestSpacingMs(requestsPerWindow = config.massiveRequestsPerWindow, windowMs = config.massiveBudgetWindowMs, traderReservedRequests = config.massiveTraderReservedRequests): number {
@@ -71,7 +72,8 @@ export function accountEntriesAllowed(input: { autonomousEnabled: boolean; accou
 export function isAutopilotSymbol(symbol: string): boolean {
   const market = getMarket(symbol);
   const availability = getMarketAvailability().find((item) => item.symbol === symbol)?.status;
-  return Boolean(market?.isActive && market.provider === 'massive' && market.marketType === 'crypto' && market.priceCurrency === 'USD' && availability === 'available');
+  return Boolean(market?.isActive && ['massive', 'twelvedata'].includes(market.provider)
+    && market.marketType === 'crypto' && market.priceCurrency === 'USD' && availability === 'available');
 }
 
 export function verifiedAutopilotSymbols(symbols: readonly string[]): string[] {
@@ -240,6 +242,7 @@ export class PaperAutopilotScheduler {
         const series = await fetchMarketData(symbol, timeframe, 1000, { priority: true });
         previousRequestWasFresh = series.fetchedAt >= startedAt;
         if (series.stale) throw new Error(`Stale ${timeframe} market data for ${symbol}.`);
+        if (!hasFreshClosedCandleData(series.candles, timeframe, now)) throw new Error(`Stale or missing closed ${timeframe} market data for ${symbol}.`);
         seriesByKey.set(key, series);
       } catch (error) {
         previousRequestWasFresh = true;

@@ -6,6 +6,7 @@ import { fetchWithTimeout } from '../../../src/lib/providers/request';
 import { readJsonSafe } from '../../../shared/http';
 import { ProviderBudget, ProviderBudgetExhaustedError, type ProviderBudgetSnapshot } from './providerBudget';
 import { candleSeconds, selectClosedCandles } from '../trader/candle-math';
+import { traderConfig } from '../trader/config';
 
 // Provider base URLs — configurable via env for testing overrides
 const MASSIVE_REST = process.env.MASSIVE_REST_URL ?? 'https://api.massive.com';
@@ -108,15 +109,37 @@ export function getCachedCandleFreshness(symbols: string[], timeframes: Timefram
   }));
 }
 
-export async function probeMarketData(canonicalSymbol: string): Promise<{ candleCount: number }> {
+export async function probeMarketData(canonicalSymbol: string, timeframe: Timeframe = '1m', requestedLimit = 60): Promise<{
+  candleCount: number;
+  closedCandleCount: number;
+  latestClosedCandleAt: string | null;
+  ageMs: number | null;
+  stale: boolean;
+  provider: string;
+  sourceInstrument: string;
+}> {
   const instrument = getMarket(canonicalSymbol);
-  if (!instrument || instrument.marketType !== 'crypto' || instrument.provider !== 'massive' || !instrument.sourceSymbol) {
+  if (!instrument || instrument.marketType !== 'crypto' || !['massive', 'twelvedata'].includes(instrument.provider) || !instrument.sourceSymbol) {
     throw new Error('Market probe is not configured for this instrument.');
   }
-  const candles = await fetchFromProvider(instrument, '1m', 5, false);
-  validateCandles(candles, instrument, '1m');
+  const candles = await fetchFromProvider(instrument, timeframe, requestedLimit, false);
+  validateCandles(candles, instrument, timeframe);
   if (candles.length === 0) throw new Error('Provider returned no candles.');
-  return { candleCount: candles.length };
+  const now = Date.now();
+  const closed = selectClosedCandles(candles, timeframe, now, traderConfig.CLOSE_GRACE_MS);
+  const latest = closed.at(-1);
+  if (!latest) return { candleCount: candles.length, closedCandleCount: 0, latestClosedCandleAt: null, ageMs: null, stale: true, provider: instrument.provider, sourceInstrument: instrument.sourceSymbol };
+  const durationMs = candleSeconds(timeframe, latest.time) * 1000;
+  const ageMs = Math.max(0, now - latest.time * 1000 - durationMs);
+  return {
+    candleCount: candles.length,
+    closedCandleCount: closed.length,
+    latestClosedCandleAt: new Date(latest.time * 1000).toISOString(),
+    ageMs,
+    stale: ageMs > durationMs * config.marketDataMaxStaleTtlMultiplier,
+    provider: instrument.provider,
+    sourceInstrument: instrument.sourceSymbol,
+  };
 }
 
 export function isTimeframe(value: unknown): value is Timeframe {

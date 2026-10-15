@@ -27,7 +27,8 @@ function massiveOk(input: string | URL | Request): Response {
   const unitSeconds = { minute: 60, hour: 3_600, day: 86_400, week: 604_800, month: 2_592_000 }[interval?.[2] as 'minute' | 'hour' | 'day' | 'week' | 'month'] ?? 60;
   const step = multiplier * unitSeconds;
   const time = Math.floor(1_700_000_000 / step) * step * 1_000;
-  return new Response(JSON.stringify({ status: 'OK', ticker: 'X:BTCUSD', results: [{ t: time, o: 100, h: 102, l: 99, c: 101, v: 50 }] }), { status: 200 });
+  const ticker = decodeURIComponent(new URL(url).pathname.match(/\/ticker\/([^/]+)\//)?.[1] ?? '');
+  return new Response(JSON.stringify({ status: 'OK', ticker, results: [{ t: time, o: 100, h: 102, l: 99, c: 101, v: 50 }] }), { status: 200 });
 }
 
 beforeEach(() => {
@@ -56,8 +57,8 @@ describe('Massive request budget', () => {
     const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => Promise.resolve(massiveOk(input)));
     vi.stubGlobal('fetch', fetchMock);
 
-    await fetchMarketData('BTCUSD', '1h', 100);
-    const rejected = await fetchMarketData('BTCUSD', '4h', 100).catch((error: unknown) => error);
+    await fetchMarketData('ETHUSD', '1h', 100);
+    const rejected = await fetchMarketData('ETHUSD', '4h', 100).catch((error: unknown) => error);
 
     expect(rejected).toBeInstanceOf(MarketDataProviderError);
     expect(rejected).toMatchObject({ status: 429, provider: 'Massive' });
@@ -82,8 +83,8 @@ describe('Massive request budget', () => {
     vi.stubGlobal('fetch', fetchMock);
     config.massiveRequestsPerWindow = 100;
 
-    await expect(fetchMarketData('BTCUSD', '1h', 100)).rejects.toMatchObject({ status: 429 });
-    await expect(fetchMarketData('BTCUSD', '4h', 100)).rejects.toMatchObject({ status: 429 });
+    await expect(fetchMarketData('ETHUSD', '1h', 100)).rejects.toMatchObject({ status: 429 });
+    await expect(fetchMarketData('ETHUSD', '4h', 100)).rejects.toMatchObject({ status: 429 });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(getMassiveBudgetSnapshot().backoffUntil).not.toBeNull();

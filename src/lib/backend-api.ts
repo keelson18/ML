@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 import { readJsonSafe } from '../../shared/http';
-import type { Candle, Timeframe } from './types';
+import type { Candle, MarketDataProvider, Timeframe } from './types';
 
 export async function authenticatedBackendRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const { data: { session } } = await supabase.auth.getSession();
@@ -213,9 +213,19 @@ export async function cancelEventBlackout(id: string): Promise<void> {
 
 export interface MarketAvailabilityRecord {
   symbol: string;
+  provider: MarketDataProvider;
+  sourceInstrument: string;
   status: 'available' | 'unavailable' | 'unverified';
   checkedAt: number | null;
-  candleCount?: number;
+  timeframes?: Array<{
+    timeframe: Timeframe;
+    status: 'available' | 'unavailable' | 'unverified';
+    candleCount?: number;
+    closedCandleCount?: number;
+    latestClosedCandleAt?: string | null;
+    ageMs?: number | null;
+    reason?: string;
+  }>;
 }
 
 export async function fetchMarketAvailability(admin = false): Promise<MarketAvailabilityRecord[]> {

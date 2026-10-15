@@ -1,4 +1,5 @@
 import { Brain, TrendingUp, TrendingDown, Minus, Activity, BarChart3, Zap, RefreshCw } from 'lucide-react';
+import { useMemo, useState } from 'react';
 import type { Signal, MLPrediction, Recommendation } from '../../lib/types';
 
 interface Props {
@@ -14,6 +15,9 @@ interface Props {
 }
 
 export default function AIAnalysis({ signals, ml, mlStatus, recommendation, onRefreshML, mlLoading, candleCount, marketLoading, marketError }: Props) {
+  const [signalFilter, setSignalFilter] = useState<'all' | 'buy' | 'sell' | 'neutral'>('all');
+  const [selectedSignal, setSelectedSignal] = useState<string | null>(null);
+  const filteredSignals = useMemo(() => signalFilter === 'all' ? signals : signals.filter((signal) => signal.side === signalFilter), [signalFilter, signals]);
   return (
     <div className="page-frame space-y-6">
       {marketError && <div role="alert" className="text-xs text-warning bg-warning/10 border border-warning/20 rounded-lg p-3">Market data unavailable: {marketError}. Pattern analysis may be stale.</div>}
@@ -72,19 +76,24 @@ export default function AIAnalysis({ signals, ml, mlStatus, recommendation, onRe
 
         {/* Pattern Detection Summary */}
         <div className="bg-surface border border-border rounded-xl p-4">
-          <h3 className="text-xs font-medium text-muted mb-3 flex items-center gap-1">
-            <Zap className="w-3 h-3" /> Active Patterns
-          </h3>
+          <div className="flex items-center justify-between gap-2 mb-3"><h3 className="text-xs font-medium text-muted flex items-center gap-1"><Zap className="w-3 h-3" /> Active Patterns</h3><span className="text-[10px] text-muted">{filteredSignals.length} shown</span></div>
+          <div className="flex flex-wrap gap-1 mb-3" role="group" aria-label="Filter analysis signals">{(['all', 'buy', 'sell', 'neutral'] as const).map((filter) => <button key={filter} type="button" aria-pressed={signalFilter === filter} onClick={() => { setSignalFilter(filter); setSelectedSignal(null); }} className={`rounded px-2 py-1 text-[10px] capitalize ${signalFilter === filter ? 'bg-primary/15 text-primary' : 'bg-bg text-muted hover:text-text'}`}>{filter}</button>)}</div>
           <div className="space-y-2">
             {signals.length === 0 && <div className="text-xs text-muted">{marketLoading ? 'Loading market data…' : marketError ? 'Patterns cannot be evaluated until the market feed recovers.' : candleCount < 60 ? 'Waiting for enough candles to evaluate patterns.' : 'No patterns detected on the latest candle.'}</div>}
-            {signals.slice(0, 5).map((s, i) => (
-              <div key={i} className="flex items-center gap-2 text-xs">
-                <span className={`w-1.5 h-1.5 rounded-full ${s.side === 'buy' ? 'bg-success' : s.side === 'sell' ? 'bg-danger' : 'bg-muted'}`} />
-                <span className="text-muted flex-1 truncate">{s.strategy}</span>
-                <span className="tabular-nums">{(s.confidence * 100).toFixed(0)}%</span>
-              </div>
-            ))}
-            {signals.length > 5 && <div className="text-xs text-muted">+{signals.length - 5} more</div>}
+            {signals.length > 0 && filteredSignals.length === 0 && <div className="text-xs text-muted">No {signalFilter} signals in the current analysis.</div>}
+            {filteredSignals.map((signal, index) => {
+              const key = `${signal.strategyId ?? signal.strategy}:${signal.side}:${index}`;
+              const expanded = selectedSignal === key;
+              return <div key={key} className="rounded-lg bg-bg/50">
+                <button type="button" aria-expanded={expanded} onClick={() => setSelectedSignal(expanded ? null : key)} className="flex w-full items-center gap-2 rounded-lg p-2 text-left text-xs hover:bg-bg">
+                  <span className={`w-1.5 h-1.5 rounded-full ${signal.side === 'buy' ? 'bg-success' : signal.side === 'sell' ? 'bg-danger' : 'bg-muted'}`} />
+                  <span className="text-muted flex-1 truncate">{signal.strategy}</span>
+                  <span className="tabular-nums">{(signal.confidence * 100).toFixed(0)}%</span>
+                  <span className="text-[10px] uppercase text-muted">{expanded ? 'Hide' : 'Details'}</span>
+                </button>
+                {expanded && <div className="border-t border-border/60 px-3 py-2 text-[10px] text-muted"><p>{signal.reason}</p><p className="mt-1">{signal.side.toUpperCase()} · confidence {(signal.confidence * 100).toFixed(1)}%{signal.strategyVersion ? ` · version ${signal.strategyVersion}` : ''}</p></div>}
+              </div>;
+            })}
           </div>
         </div>
       </div>

@@ -4,7 +4,7 @@ import type { Market } from '../../../src/lib/types';
 // Lives outside src/live so config validation can use it without pulling streaming code into trader/engines.
 
 function coinbaseProductFor(market: Market): string | undefined {
-  if (market.marketType !== 'crypto' || market.provider !== 'massive' || market.quoteAsset !== 'USD') return undefined;
+  if (market.marketType !== 'crypto' || market.quoteAsset !== 'USD') return undefined;
   return `${market.baseAsset}-USD`;
 }
 

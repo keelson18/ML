@@ -203,18 +203,10 @@ export const config = {
   liveFeed: parseLiveFeedConfig(process.env),
 };
 
-// Validate default and probe override symbols against the same active market registry used by the API.
+// Validate default and configured autonomy symbols against the active market registry.
 const activeSymbols = new Set(MARKET_UNIVERSE.filter((market) => market.isActive).map((market) => market.symbol));
 export const defaultSymbol = process.env.DEFAULT_SYMBOL?.trim() || MARKET_UNIVERSE.find((market) => market.isActive)?.symbol;
 if (!defaultSymbol || !activeSymbols.has(defaultSymbol)) throw new Error('DEFAULT_SYMBOL must name an active market in the market registry.');
 
 export const autonomySymbols = (process.env.AUTONOMY_SYMBOLS?.split(',').map((symbol) => symbol.trim()).filter(Boolean) ?? [defaultSymbol]);
 if (autonomySymbols.some((symbol) => !activeSymbols.has(symbol))) throw new Error('AUTONOMY_SYMBOLS must contain only active symbols from the market registry.');
-
-const massiveCryptoSymbols = new Set(MARKET_UNIVERSE
-  .filter((market) => market.isActive && market.marketType === 'crypto' && market.provider === 'massive')
-  .map((market) => market.symbol));
-export const marketsVerifiedOverride = (process.env.MARKETS_VERIFIED_OVERRIDE ?? '').split(',').map((symbol) => symbol.trim()).filter(Boolean);
-if (marketsVerifiedOverride.some((symbol) => !massiveCryptoSymbols.has(symbol))) {
-  throw new Error('MARKETS_VERIFIED_OVERRIDE must contain only active Massive crypto symbols from the market registry.');
-}

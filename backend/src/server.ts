@@ -21,7 +21,6 @@ import { personalDataRoutes } from './routes/personal-data';
 import { learningResearchRoutes } from './routes/learning-research';
 import { coachContextRoutes } from './routes/coach-context';
 import { registerLiveStream } from './live/register-stream';
-import { probeAllMarkets } from './services/marketAvailability';
 import { readJsonSafe } from '../../shared/http';
 import { createHash } from 'node:crypto';
 import { isSupabaseServerKey } from './utils/supabase-server-key';
@@ -228,7 +227,6 @@ export async function startServer() {
     scheduler.start();
     if (!config.autonomousTradingEnabled) app.log.info('Paper worker is active for existing-position management; new entries are disabled.');
   }
-  if (config.massiveApiKey) void probeAllMarkets().catch(() => app.log.warn('market availability probe failed'));
   const shutdown = async () => { scheduler.stop(); await app.close(); };
   process.once('SIGINT', shutdown);
   process.once('SIGTERM', shutdown);

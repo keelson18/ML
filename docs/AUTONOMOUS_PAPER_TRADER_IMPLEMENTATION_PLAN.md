@@ -22,6 +22,8 @@
 
 The repository's configured product scope is BTCUSD, ETHUSD, XAUUSD, and SilverUSD. Provider mappings and entitlement are distinct from the canonical registry. Autopilot currently accepts only active, available Massive USD crypto markets; metal research is blocked pending session-calendar verification. Trader timeframe roles are 1D/4H context, 1H setup, 15M primary confirmation, and 5M management. Configuration retains a legacy 1H trigger option for stored-plan compatibility, but new plan creation is restricted to 15M.
 
+**Provider mapping update (2026-10-15):** BTCUSD now uses Twelve Data `BTC/USD` after Massive failed the strict history probe. Active USD crypto markets mapped to Massive or Twelve Data may be selected for autopilot only after all five required timeframes pass the runtime availability gate. BTCUSD passed one strict history probe; sustained provider quota and uptime remain unverified.
+
 ## Baseline commands and results
 
 Environment: Windows PowerShell, Node `v24.15.0`, npm `11.12.1`. The ordinary `npm ci` attempt failed with Windows `spawn EPERM` while running a dependency lifecycle process; retrying the same `npm ci` with process permission succeeded (`383 packages`, one deprecated `glob` warning). No manifest or lockfile changes resulted.

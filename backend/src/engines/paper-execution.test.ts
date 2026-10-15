@@ -32,8 +32,11 @@ describe('paper order execution validation', () => {
     ['non-finite requested price', order({ requestedPrice: Number.POSITIVE_INFINITY }), account(), 'Quantity and requested price'],
     ['negative fee', order({ feeRate: -0.01 }), account(), 'rates must be finite values in [0, 1)'],
     ['non-finite fee', order({ feeRate: Number.NaN }), account(), 'rates must be finite values in [0, 1)'],
+    ['infinite fee', order({ feeRate: Number.POSITIVE_INFINITY }), account(), 'rates must be finite values in [0, 1)'],
     ['fee at one', order({ feeRate: 1 }), account(), 'rates must be finite values in [0, 1)'],
     ['negative slippage', order({ slippageRate: -0.01 }), account(), 'rates must be finite values in [0, 1)'],
+    ['non-finite slippage', order({ slippageRate: Number.NaN }), account(), 'rates must be finite values in [0, 1)'],
+    ['infinite slippage', order({ slippageRate: Number.POSITIVE_INFINITY }), account(), 'rates must be finite values in [0, 1)'],
     ['slippage at one', order({ slippageRate: 1 }), account(), 'rates must be finite values in [0, 1)'],
     ['duplicate open symbol', order(), account({ positions: [openPosition] }), 'Only one open paper position per symbol'],
     ['insufficient cash', order({ quantity: 20 }), account(), 'Insufficient paper cash'],
@@ -59,6 +62,14 @@ describe('paper order execution validation', () => {
     expect(result.account.trades).toEqual([]);
     expect(state.cash).toBe(1_000);
     expect(state.positions).toHaveLength(0);
+  });
+
+  it('fills at the requested price with zero execution costs', () => {
+    const result = simulatePaperOrder(account(), order({ feeRate: 0, slippageRate: 0 }));
+
+    expect(result).toMatchObject({ accepted: true, status: 'filled', fillPrice: 100, fee: 0 });
+    expect(result.account.cash).toBe(800);
+    expect(result.account.positions[0]).toMatchObject({ entryPrice: 100, entryFee: 0, entrySlippage: 0 });
   });
 });
 
@@ -115,5 +126,17 @@ describe('paper position reductions and closes', () => {
     expect(result.trade.exitReason).toBe('stop-or-target');
     expect(result.account.positions[0]).toMatchObject({ quantity: 0, status: 'closed' });
     expect(result.account.trades).toEqual([result.trade]);
+  });
+
+  it('caps an oversized reduction at the remaining position size', () => {
+    const state = account({ cash: 500, positions: [openPosition] });
+    const result = reducePaperPosition(state, openPosition.id, 100, 90, 0, 'test-1', 'trade-cap', '2026-01-01T03:00:00.000Z');
+
+    expect('trade' in result).toBe(true);
+    if ('error' in result) throw new Error(result.error);
+    expect(result.trade.quantity).toBe(2);
+    expect(result.trade.realizedPnl).toBeCloseTo(-24.02);
+    expect(result.account.positions[0]).toMatchObject({ quantity: 0, status: 'closed' });
+    expect(result.account.cash).toBe(680);
   });
 });

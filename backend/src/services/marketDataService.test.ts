@@ -1,11 +1,16 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { config } from '../config';
+import { getMarket } from '../../../src/lib/markets';
 import { fetchMarketData, clearMarketDataCache, getCachedCandleFreshness, resetMassiveBudgetForTests } from './marketDataService';
 
 const originalMassiveKey = config.massiveApiKey;
 const originalTwelveDataKey = config.twelveDataApiKey;
 const originalMaxCacheEntries = config.marketDataCacheMaxEntries;
 const originalMaxStaleMultiplier = config.marketDataMaxStaleTtlMultiplier;
+const btcMarket = getMarket('BTCUSD');
+const originalBtcProvider = btcMarket?.provider;
+const originalBtcSourceSymbol = btcMarket?.sourceSymbol;
+const originalBtcExchange = btcMarket?.exchange;
 config.massiveRequestsPerWindow = 1_000;
 resetMassiveBudgetForTests();
 
@@ -20,12 +25,22 @@ function massiveResponse(time = ALIGNED_HOUR_MS, status = 200): Response {
   }), { status });
 }
 
+beforeEach(() => {
+  if (btcMarket) { btcMarket.provider = 'massive'; btcMarket.sourceSymbol = 'X:BTCUSD'; btcMarket.exchange = 'Massive'; }
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
   config.massiveApiKey = originalMassiveKey;
   config.twelveDataApiKey = originalTwelveDataKey;
   config.marketDataCacheMaxEntries = originalMaxCacheEntries;
   config.marketDataMaxStaleTtlMultiplier = originalMaxStaleMultiplier;
+  if (btcMarket && originalBtcProvider) {
+    btcMarket.provider = originalBtcProvider;
+    if (originalBtcSourceSymbol) btcMarket.sourceSymbol = originalBtcSourceSymbol;
+    else delete btcMarket.sourceSymbol;
+    if (originalBtcExchange) btcMarket.exchange = originalBtcExchange;
+  }
   vi.useRealTimers();
   clearMarketDataCache();
   resetMassiveBudgetForTests();
@@ -48,6 +63,25 @@ describe('market data instrument mapping', () => {
     expect(result.instrument).toMatchObject({ canonicalSymbol: 'BTCUSD', sourceSymbol: 'X:BTCUSD', quoteAsset: 'USD' });
     expect(result.identity).toMatchObject({ canonicalSymbol: 'BTCUSD', sourceSymbol: 'X:BTCUSD', provider: 'massive' });
     expect(result.dataset).toMatchObject({ provider: 'massive', sourceInstrument: 'X:BTCUSD', quoteCurrency: 'USD', timeframe: '1h' });
+  });
+
+  it('maps BTCUSD through Twelve Data using the verified BTC/USD source symbol', async () => {
+    if (!btcMarket) throw new Error('BTCUSD market missing.');
+    btcMarket.provider = 'twelvedata';
+    btcMarket.sourceSymbol = 'BTC/USD';
+    btcMarket.exchange = 'Twelve Data';
+    config.twelveDataApiKey = 'server-twelve-key';
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      status: 'ok', meta: { symbol: 'BTC/USD' },
+      values: [{ datetime: '2026-10-14 20:00:00', open: '100', high: '102', low: '99', close: '101', volume: '50' }],
+    }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await fetchMarketData('BTCUSD', '4h', 1);
+
+    expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get('symbol')).toBe('BTC/USD');
+    expect(result.instrument).toMatchObject({ canonicalSymbol: 'BTCUSD', sourceSymbol: 'BTC/USD', provider: 'twelvedata' });
+    expect(result.dataset).toMatchObject({ provider: 'twelvedata', sourceInstrument: 'BTC/USD', quoteCurrency: 'USD', timeframe: '4h' });
   });
 
   it('changes dataset identity when a provider corrects candle content at the same timestamps', async () => {

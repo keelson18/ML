@@ -16,12 +16,33 @@ const violations = [];
 // A local ignore rule only protects the current checkout. It cannot remove
 // credentials already committed in Supabase CLI state, so keep that path out
 // of every reachable commit as well. CI fetches full history for this check.
-const historicalSupabaseState = execFileSync('git', ['log', '--all', '--format=', '--name-only', '--', 'supabase/.temp'], {
-  cwd: root, encoding: 'utf8',
+const historicalPaths = execFileSync('git', ['log', '--all', '--format=', '--name-only'], {
+  cwd: root, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024,
 }).split(/\r?\n/).filter(Boolean);
-if (historicalSupabaseState.length) {
+if (historicalPaths.some((file) => file.replaceAll('\\', '/').startsWith('supabase/.temp/'))) {
   violations.push('Git history: Supabase local CLI state is present; remove it from all reachable commits');
 }
+if (historicalPaths.some((file) => file.replaceAll('\\', '/').startsWith('supabase/.temp/'))) {
+  const commits = execFileSync('git', ['rev-list', '--all'], { cwd: root, encoding: 'utf8' }).trim().split(/\r?\n/).filter(Boolean);
+  try {
+    // Inspect historic CLI state without emitting any matching content. These
+    // files can contain remote connection endpoints and credentials.
+    execFileSync('git', [
+      'grep', '-I', '-l', '-E',
+      '(postgres|postgresql|mysql|redis)://[^/[:space:]@]+@[^/[:space:]?#]+',
+      ...commits, '--', 'supabase/.temp/**',
+    ], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    violations.push('Git history: Supabase local CLI state contains a remote database URL with user info; rotate associated credentials before history cleanup');
+  } catch (error) {
+    // git grep exits with status 1 when there are no matches. Other failures
+    // are reported separately so this check cannot silently pass on errors.
+    if (error?.status !== 1) violations.push('Git history: could not inspect Supabase local CLI state for database credentials');
+  }
+}
+if (historicalPaths.some((file) => {
+  const basename = file.split(/[\\/]/).at(-1);
+  return basename === '.env' || (basename?.startsWith('.env.') && basename !== '.env.example');
+})) violations.push('Git history: environment file is present; remove it from all reachable commits');
 
 for (const file of files) {
   const basename = file.split(/[\\/]/).at(-1);

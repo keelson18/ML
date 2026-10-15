@@ -3,16 +3,18 @@ import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import type { Timeframe } from '../../../src/lib/types';
 import { MARKET_UNIVERSE } from '../../../src/lib/markets';
+import type { Market } from '../../../src/lib/types';
 import { getSupabaseClientWithToken } from '../db';
 import { config } from '../config';
 import { fetchMarketData } from '../services/marketDataService';
-import { getMarketAvailability } from '../services/marketAvailability';
+import { getMarketAvailability, type MarketAvailability } from '../services/marketAvailability';
 import { traderConfig } from '../trader/config';
 import { createTradePlan, rankPlannerResults } from '../trader/planner';
 import { getAccount, listStoredTradePlans, storeTradePlan } from '../services/paperTradingService';
 import { markToMarket } from '../trader/risk';
 import type { TradePlan } from '../trader/types';
 import { candleSeconds, isClosed, selectClosedCandles } from '../trader/candle-math';
+import { hasFreshClosedCandleData } from '../trader/market-data-quality';
 import { reconcilePaperAccount } from '../trader/decision-ledger';
 import { getSupabaseClient } from '../db';
 import { paperAutopilotScheduler, isAutopilotSymbol, type PaperAutopilotConfig } from '../autonomy/paper-autopilot';
@@ -23,6 +25,13 @@ const autopilotSymbols = z.array(z.string().regex(/^[A-Z0-9]{3,12}$/)).min(1).ma
 const autopilotUpdate = z.object({ enabled: z.boolean(), symbols: autopilotSymbols }).strict();
 const defaultAutopilotSymbols = MARKET_UNIVERSE.filter((market) => market.isActive).slice(0, 3).map((market) => market.symbol);
 const ledgerVerificationCache = new Map<string, { checkedAt: number; status: 'verified' | 'broken' | 'unavailable' }>();
+
+export function selectVerifiedPlannerMarkets(selectedSymbols: readonly string[], availability: readonly MarketAvailability[]): Market[] {
+  const selected = new Set(selectedSymbols);
+  const verified = new Set(availability.filter((market) => market.status === 'available').map((market) => market.symbol));
+  return MARKET_UNIVERSE.filter((market) => selected.has(market.symbol) && verified.has(market.symbol)
+    && market.isActive && market.marketType === 'crypto' && ['massive', 'twelvedata'].includes(market.provider) && market.priceCurrency === 'USD');
+}
 
 async function accountLedgerStatus(accountId: string): Promise<'verified' | 'broken' | 'unavailable'> {
   const cached = ledgerVerificationCache.get(accountId);
@@ -68,7 +77,7 @@ export async function traderRoutes(app: FastifyInstance) {
     if (new Set(parsed.data.symbols).size !== parsed.data.symbols.length) return reply.code(400).send({ error: 'Symbols must be unique.' });
     const unavailable = parsed.data.symbols.filter((symbol) => !isAutopilotSymbol(symbol)
       || getMarketAvailability().find((candidate) => candidate.symbol === symbol)?.status !== 'available');
-    if (parsed.data.enabled && unavailable.length) return reply.code(409).send({ error: `Autopilot requires active, verified Massive USD markets: ${unavailable.join(', ')}.` });
+    if (parsed.data.enabled && unavailable.length) return reply.code(409).send({ error: `Autopilot requires active, verified configured USD crypto markets: ${unavailable.join(', ')}.` });
     const { data, error } = await getSupabaseClientWithToken(request.accessToken).rpc('set_paper_autopilot', {
       p_enabled: parsed.data.enabled, p_symbols: parsed.data.symbols,
     });
@@ -179,12 +188,10 @@ export async function traderRoutes(app: FastifyInstance) {
     config: { rateLimit: { max: 1, timeWindow: config.rateLimitWindowMs } },
   }, async (request, reply) => {
     if (!request.accessToken || !request.authenticatedUserId) return reply.code(401).send({ error: 'Authentication required.' });
-    const availability = getMarketAvailability();
     const { data: enrollment } = await getSupabaseClientWithToken(request.accessToken).from('paper_autopilot')
       .select('symbols').eq('account_id', request.authenticatedUserId).maybeSingle();
     const selectedSymbols = enrollment?.symbols ?? defaultAutopilotSymbols;
-    const candidates = MARKET_UNIVERSE.filter((market) => selectedSymbols.includes(market.symbol) && market.isActive && market.marketType === 'crypto' && market.provider === 'massive'
-      && availability.find((item) => item.symbol === market.symbol)?.status !== 'unavailable');
+    const candidates = selectVerifiedPlannerMarkets(selectedSymbols, getMarketAvailability());
     const results = [];
     for (const market of candidates) {
       try {
@@ -195,7 +202,11 @@ export async function traderRoutes(app: FastifyInstance) {
           fetchMarketData(market.symbol, traderConfig.SETUP_TIMEFRAME, 100, { priority: true }),
           fetchMarketData(market.symbol, triggerTimeframe, 100, { priority: true }),
         ]);
-        if (traderConfig.STALE_DATA_BLOCKS_ENTRIES && (daily.stale || fourHour.stale || setup.stale || trigger.stale)) continue;
+        if (traderConfig.STALE_DATA_BLOCKS_ENTRIES && (daily.stale || fourHour.stale || setup.stale || trigger.stale
+          || !hasFreshClosedCandleData(daily.candles, '1d')
+          || !hasFreshClosedCandleData(fourHour.candles, '4h')
+          || !hasFreshClosedCandleData(setup.candles, traderConfig.SETUP_TIMEFRAME as Timeframe)
+          || !hasFreshClosedCandleData(trigger.candles, triggerTimeframe))) continue;
         const dailyCandles = closedCandles(daily.candles, '1d');
         const fourHourCandles = closedCandles(fourHour.candles, '4h');
         const setupCandles = closedCandles(setup.candles, traderConfig.SETUP_TIMEFRAME);

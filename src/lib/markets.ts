@@ -2,8 +2,8 @@ import type { Market, MarketType } from './types';
 
 // Full market universe — single source of truth for all instruments
 export const MARKET_UNIVERSE: Market[] = [
-  // ---- Crypto (USD-settled via Massive, ticker format X:<BASE>USD) ----
-  { symbol: 'BTCUSD', canonicalSymbol: 'BTCUSD', sourceSymbol: 'X:BTCUSD', id: 'crypto-btc-usd', baseAsset: 'BTC', quoteAsset: 'USD', priceCurrency: 'USD', marketType: 'crypto', exchange: 'Massive', label: 'BTC/USD', provider: 'massive', category: 'Major', isActive: true },
+  // ---- Crypto (USD-settled; providers are instrument-specific) ----
+  { symbol: 'BTCUSD', canonicalSymbol: 'BTCUSD', sourceSymbol: 'BTC/USD', id: 'crypto-btc-usd', baseAsset: 'BTC', quoteAsset: 'USD', priceCurrency: 'USD', marketType: 'crypto', exchange: 'Twelve Data', label: 'BTC/USD', provider: 'twelvedata', category: 'Major', isActive: true },
   { symbol: 'ETHUSD', canonicalSymbol: 'ETHUSD', sourceSymbol: 'X:ETHUSD', id: 'crypto-eth-usd', baseAsset: 'ETH', quoteAsset: 'USD', priceCurrency: 'USD', marketType: 'crypto', exchange: 'Massive', label: 'ETH/USD', provider: 'massive', category: 'Major', isActive: true },
   { symbol: 'SOLUSD', canonicalSymbol: 'SOLUSD', sourceSymbol: 'X:SOLUSD', id: 'crypto-sol-usd', baseAsset: 'SOL', quoteAsset: 'USD', priceCurrency: 'USD', marketType: 'crypto', exchange: 'Massive', label: 'SOL/USD', provider: 'massive', category: 'Major', isActive: true },
   { symbol: 'XRPUSD', canonicalSymbol: 'XRPUSD', sourceSymbol: 'X:XRPUSD', id: 'crypto-xrp-usd', baseAsset: 'XRP', quoteAsset: 'USD', priceCurrency: 'USD', marketType: 'crypto', exchange: 'Massive', label: 'XRP/USD', provider: 'massive', category: 'Major', isActive: true },
