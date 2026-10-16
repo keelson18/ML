@@ -16,6 +16,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { computeResearchMetrics, createDailyReview, type JournalSample } from '../trader/research';
 import { getMarketAvailability } from './marketAvailability';
 import { evaluateEventEntryGate, getEventRiskStatus } from '../trader/event-risk';
+import { reconcilePaperAccount } from '../trader/decision-ledger';
 import { candleIndex, candleSeconds, isClosed, selectClosedCandles } from '../trader/candle-math';
 import { config } from '../config';
 
@@ -76,6 +77,17 @@ export function getAccount(accountId = 'autonomy:default') {
   return loadAccount(accountId).then(({ account }) => account);
 }
 
+export async function assertPaperAccountIntegrity(accountId: string, account: PaperAccountState): Promise<void> {
+  const reconciliation = reconcilePaperAccount(account);
+  if (!reconciliation.ok) throw new Error('Paper account reconciliation is broken; new entries are blocked until reviewed.');
+
+  const { data, error } = await getSupabaseClient().rpc('verify_decision_ledger', { p_account_id: accountId });
+  const verification = Array.isArray(data) ? data[0] : data;
+  if (error || !verification || typeof verification !== 'object' || !('ok' in verification) || verification.ok !== true) {
+    throw new Error('Paper decision ledger verification failed or is unavailable; new entries are blocked until reviewed.');
+  }
+}
+
 export async function storeTradePlan(accountId: string, plan: TradePlan): Promise<void> {
   await updateAccount(accountId, (account) => {
     if ((account.tradePlans ?? []).some((candidate) => candidate.id === plan.id)) return { account, result: undefined };
@@ -110,6 +122,13 @@ export async function advanceStoredTradePlans(input: {
   shadowMode?: boolean;
   entriesAllowed?: boolean;
 }): Promise<StoredPlanExecutionResult> {
+  const candleValues = [input.candle.time, input.candle.open, input.candle.high, input.candle.low, input.candle.close, input.candle.volume];
+  if (candleValues.some((value) => !Number.isFinite(value)) || input.candle.time < 0
+    || input.candle.open <= 0 || input.candle.high <= 0 || input.candle.low <= 0 || input.candle.close <= 0 || input.candle.volume < 0
+    || input.candle.high < Math.max(input.candle.open, input.candle.close, input.candle.low)
+    || input.candle.low > Math.min(input.candle.open, input.candle.close, input.candle.high)) {
+    throw new Error('Paper execution requires a valid finite OHLCV market price.');
+  }
   if (!isClosed(input.candle, input.timeframe, Date.now(), traderConfig.CLOSE_GRACE_MS)) {
     throw new Error('Paper execution requires a boundary-verified closed candle.');
   }
@@ -118,6 +137,11 @@ export async function advanceStoredTradePlans(input: {
   const eventRisk = await getEventRiskStatus(input.symbol);
   const riskMarks: Record<string, number> = { [input.symbol]: input.candle.close };
   const observedAccount = await getAccount(input.accountId);
+  const hasEntryCandidate = (observedAccount.tradePlans ?? []).some((plan) =>
+    plan.symbol === input.symbol
+      && (plan.triggerTimeframe ?? traderConfig.TRIGGER_TIMEFRAMES[0]) === input.timeframe
+      && ['WATCHING', 'ARMED', 'PENDING_ORDER'].includes(plan.status));
+  if (input.entriesAllowed === true && hasEntryCandidate) await assertPaperAccountIntegrity(input.accountId, observedAccount);
   const marksToLoad = [...new Set(observedAccount.positions
     .filter((position) => position.status === 'open' && position.symbol !== input.symbol)
     .map((position) => position.symbol))];
@@ -153,7 +177,7 @@ export async function advanceStoredTradePlans(input: {
       if (plan.symbol !== input.symbol || (plan.triggerTimeframe ?? traderConfig.TRIGGER_TIMEFRAMES[0]) !== input.timeframe || !['WATCHING', 'ARMED', 'PENDING_ORDER'].includes(plan.status)) continue;
       let gateResult: EntryGateResult = { approved: false, quantity: 0, reason: 'Entry gates have not passed.' };
       const gate = (entryPrice: number): EntryGateResult => {
-        if (input.entriesAllowed === false) return gateResult = { approved: false, quantity: 0, reason: 'Entry paused: trigger candle is older than the configured maximum entry age.' };
+        if (input.entriesAllowed !== true) return gateResult = { approved: false, quantity: 0, reason: 'Entry paused: trigger candle freshness was not verified or exceeds the configured maximum entry age.' };
         const eventDecision = evaluateEventEntryGate(eventRisk, traderConfig.EVENT_BLACKOUT_MIN_IMPACT);
         if (!eventDecision.approved) return gateResult = { approved: false, quantity: 0, reason: eventDecision.reason, activeEventIds: eventDecision.activeEventIds };
         const market = getMarket(plan.symbol);

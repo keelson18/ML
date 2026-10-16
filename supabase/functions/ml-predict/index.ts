@@ -8,6 +8,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.57.4";
 import { readJsonSafe } from "../../../shared/http.ts";
+import { computeMlFeatures, type MlCandle } from "../../../shared/ml-features.ts";
 
 function corsHeaders(origin: string | undefined): Record<string, string> {
   return {
@@ -52,6 +53,15 @@ function backendUrl(): string | null {
 
 const BACKEND_URL = backendUrl();
 const PRED_HORIZON = 5; // candles ahead to predict
+const DEFAULT_LABEL_ATR_MULTIPLE = 0.1;
+
+function labelAtrMultiple(): number {
+  const configured = Deno.env.get("ML_LABEL_ATR_MULTIPLE");
+  if (configured === undefined || configured.trim() === "") return DEFAULT_LABEL_ATR_MULTIPLE;
+  const value = Number(configured);
+  if (!Number.isFinite(value) || value < 0) throw new Error("ML_LABEL_ATR_MULTIPLE must be a finite non-negative number.");
+  return value;
+}
 const TRAIN_FRACTION = 0.7; // chronological split, no shuffling
 
 // In-memory model state. NOTE: edge functions may reset between requests, so this is
@@ -95,84 +105,7 @@ async function ensureModel(supabase: SupabaseClient, pair: string, timeframe: st
 // Computes the same feature set as the Python spec: multi-window returns, RSI, MACD,
 // MAs (20/50/200), Bollinger width, volume change, ATR.
 function computeFeatures(candles: Candle[]): { features: number[][]; labels: number[]; valid: boolean } {
-  if (candles.length < 210) return { features: [], labels: [], valid: false };
-  const closes = candles.map((c) => c.close);
-  const highs = candles.map((c) => c.high);
-  const lows = candles.map((c) => c.low);
-  const vols = candles.map((c) => c.volume);
-
-  const ema = (vals: number[], p: number) => {
-    const k = 2 / (p + 1);
-    let prev = vals[0];
-    return vals.map((_, i) => (i === 0 ? prev : (prev = vals[i] * k + prev * (1 - k))));
-  };
-  const sma = (vals: number[], p: number) =>
-    vals.map((_, i) => (i < p - 1 ? NaN : vals.slice(i - p + 1, i + 1).reduce((a, b) => a + b, 0) / p));
-
-  const rsiArr = (() => {
-    const out: number[] = new Array(closes.length).fill(50);
-    let gain = 0, loss = 0;
-    const p = 14;
-    for (let i = 1; i <= p; i++) {
-      const ch = closes[i] - closes[i - 1];
-      if (ch >= 0) gain += ch; else loss -= ch;
-    }
-    let avgG = gain / p, avgL = loss / p;
-    out[p] = 100 - 100 / (1 + (avgL === 0 ? 100 : avgG / avgL));
-    for (let i = p + 1; i < closes.length; i++) {
-      const ch = closes[i] - closes[i - 1];
-      const g = ch > 0 ? ch : 0, l = ch < 0 ? -ch : 0;
-      avgG = (avgG * (p - 1) + g) / p;
-      avgL = (avgL * (p - 1) + l) / p;
-      out[i] = avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL);
-    }
-    return out;
-  })();
-
-  const ma20 = sma(closes, 20);
-  const ma50 = sma(closes, 50);
-  const ma200 = sma(closes, 200);
-  const macdLine = ema(closes, 12).map((v, i) => v - ema(closes, 26)[i]);
-  const macdSignal = ema(macdLine, 9);
-  const bbMid = sma(closes, 20);
-  const bbWidth = bbMid.map((m, i) => {
-    if (isNaN(m)) return 0;
-    let sumSq = 0;
-    for (let j = i - 19; j <= i; j++) sumSq += (closes[j] - m) ** 2;
-    const sd = Math.sqrt(sumSq / 20);
-    return (4 * sd) / m;
-  });
-  const volChange = vols.map((v, i) => (i === 0 ? 0 : v / (vols[i - 1] || 1) - 1));
-  const atrArr: number[] = new Array(closes.length).fill(0);
-  for (let i = 1; i < closes.length; i++) {
-    const tr = Math.max(highs[i] - lows[i], Math.abs(highs[i] - closes[i - 1]), Math.abs(lows[i] - closes[i - 1]));
-    atrArr[i] = i < 14 ? tr : (atrArr[i - 1] * 13 + tr) / 14;
-  }
-
-  const features: number[][] = [];
-  const labels: number[] = [];
-  // Start where all features are valid (200 SMA needs 200 bars).
-  for (let i = 200; i < closes.length - PRED_HORIZON; i++) {
-    const ret = (p: number) => closes[i] / closes[i - p] - 1;
-    const f = [
-      ret(1), ret(3), ret(5), ret(10), ret(20),
-      rsiArr[i] / 100,
-      macdLine[i] / closes[i],
-      macdSignal[i] / closes[i],
-      ma20[i] / closes[i] - 1,
-      ma50[i] / closes[i] - 1,
-      ma200[i] / closes[i] - 1,
-      bbWidth[i],
-      volChange[i],
-      atrArr[i] / closes[i],
-    ];
-    // Label: will price be higher after N candles? (classification target)
-    const future = closes[i + PRED_HORIZON];
-    const label = future > closes[i] ? 1 : 0;
-    features.push(f);
-    labels.push(label);
-  }
-  return { features, labels, valid: features.length > 50 };
+  return computeMlFeatures(candles as MlCandle[], { predictionHorizon: PRED_HORIZON, minimumMoveAtr: labelAtrMultiple() });
 }
 
 // ---- Logistic regression with gradient descent ----

@@ -37,6 +37,19 @@ describe('Trader Desk risk calculations', () => {
       .toBeCloseTo(entryFill - stopFill * (1 - costs.feeRate));
   });
 
+  it('uses the supplied fee and slippage rates for both stop risk and cash affordability', () => {
+    const base = { equity: 100_000, entry: 100, invalidation: 50, cash: 100, grossExposure: 0, symbolExposure: 0 };
+    const lowCost = calculatePositionSize({ ...base, feeRate: 0.001, slippageRate: 0.001 });
+    const highCost = calculatePositionSize({ ...base, feeRate: 0.1, slippageRate: 0.1 });
+
+    expect(lowCost.accepted).toBe(true);
+    expect(highCost.accepted).toBe(true);
+    expect(highCost.perUnitRisk).toBeGreaterThan(lowCost.perUnitRisk);
+    expect(highCost.quantity).toBeLessThan(lowCost.quantity);
+    expect(lowCost.quantity * base.entry * (1 + 0.001) * (1 + 0.001)).toBeLessThanOrEqual(base.cash);
+    expect(highCost.quantity * base.entry * (1 + 0.1) * (1 + 0.1)).toBeLessThanOrEqual(base.cash);
+  });
+
   it('rejects a zero stop distance', () => {
     const result = calculatePositionSize({ equity: 100_000, entry: 100, invalidation: 100, cash: 100_000, grossExposure: 0, symbolExposure: 0 });
     expect(result.accepted).toBe(false);
@@ -49,6 +62,10 @@ describe('Trader Desk risk calculations', () => {
     ['missing exposure input', { grossExposure: Number.NaN }],
     ['negative exposure', { symbolExposure: -1 }],
     ['wrong-side stop', { invalidation: 101 }],
+    ['missing price', { entry: undefined as unknown as number }],
+    ['zero price', { entry: 0 }],
+    ['infinite price', { entry: Number.POSITIVE_INFINITY }],
+    ['extreme price overflow', { entry: Number.MAX_VALUE, invalidation: Number.MAX_VALUE / 2 }],
   ])('fails closed for %s', (_label, overrides) => {
     const result = calculatePositionSize({
       equity: 100_000, entry: 100, invalidation: 90, cash: 100_000, grossExposure: 0, symbolExposure: 0,

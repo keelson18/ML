@@ -3,6 +3,8 @@
 **Audit date:** 2026-10-12  
 **Scope:** source tree, migrations, existing docs, and configured workflows. This is a source audit; no provider credentials, signed-in browser, or deployed Supabase project was available. The related implementation edits in this worktree are identified below. No real broker execution was found.
 
+See [PROJECT_ASSESSMENT.md](PROJECT_ASSESSMENT.md) for the separate qualitative scorecard and strengths snapshot. Scores do not replace this audit's findings or the evidence statuses in [VERIFICATION.md](VERIFICATION.md).
+
 ## Executive findings
 
 | Priority | Finding | Evidence / impact |

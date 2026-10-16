@@ -143,6 +143,8 @@ export class AutonomousPipeline {
     if (role === 'executor') {
       const result = await advanceStoredTradePlans({
         accountId: this.config.accountId, symbol, timeframe, candle: closedCandle, candles: series,
+        // The executor role returned above unless the closed candle passed the age gate.
+        entriesAllowed: true,
         shadowMode: !this.config.enableExecution || traderConfig.SHADOW_MODE_ENABLED,
       });
       this.processedCandles.set(candleKey, closedCandle.time);

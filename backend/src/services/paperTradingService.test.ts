@@ -1,12 +1,74 @@
-import { describe, expect, it, vi } from 'vitest';
-import { advanceStoredTradePlans, closeOpenPaperPosition, getAccount, manageOpenPositions, markCandleProcessed, storeTradePlan, wasCandleProcessed } from './paperTradingService';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { advanceStoredTradePlans as advanceVerifiedTradePlans, assertPaperAccountIntegrity, closeOpenPaperPosition, getAccount, manageOpenPositions, markCandleProcessed, storeTradePlan, wasCandleProcessed } from './paperTradingService';
 import { fetchMarketData } from './marketDataService';
+import { getSupabaseClient } from '../db';
 import type { TradePlan } from '../trader/types';
 import { traderConfig } from '../trader/config';
+import { calculatePositionSize } from '../trader/risk';
+
+// Unit fixtures use historical synthetic candles; every normal fixture explicitly
+// represents an upstream freshness-approved candle unless the test overrides it.
+const advanceStoredTradePlans: typeof advanceVerifiedTradePlans = (input) => advanceVerifiedTradePlans({
+  ...input,
+  entriesAllowed: input.entriesAllowed ?? true,
+});
 
 let availabilityStatus = 'available';
 vi.mock('./marketAvailability', () => ({ getMarketAvailability: () => [{ symbol: 'BTCUSD', status: availabilityStatus, checkedAt: 1 }, { symbol: 'ETHUSD', status: availabilityStatus, checkedAt: 1 }] }));
 vi.mock('./marketDataService', () => ({ fetchMarketData: vi.fn() }));
+vi.mock('../db', () => ({ getSupabaseClient: vi.fn() }));
+beforeEach(() => {
+  vi.mocked(getSupabaseClient).mockReturnValue({ rpc: vi.fn().mockResolvedValue({ data: [{ ok: true }], error: null }) } as never);
+});
+
+describe('paper account entry integrity gate', () => {
+  it('requires both accounting reconciliation and a verified database ledger', async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: [{ ok: true }], error: null });
+    vi.mocked(getSupabaseClient).mockReturnValue({ rpc } as never);
+    const account = { accountId: 'integrity-ok', cash: traderConfig.TRADER_STARTING_EQUITY, positions: [], trades: [] };
+
+    await expect(assertPaperAccountIntegrity(account.accountId, account)).resolves.toBeUndefined();
+    expect(rpc).toHaveBeenCalledWith('verify_decision_ledger', { p_account_id: account.accountId });
+  });
+
+  it('blocks entry when ledger verification fails or cannot be read', async () => {
+    const account = { accountId: 'integrity-broken', cash: traderConfig.TRADER_STARTING_EQUITY, positions: [], trades: [] };
+    vi.mocked(getSupabaseClient).mockReturnValue({ rpc: vi.fn().mockResolvedValue({ data: [{ ok: false }], error: null }) } as never);
+    await expect(assertPaperAccountIntegrity(account.accountId, account)).rejects.toThrow(/ledger verification failed/);
+
+    vi.mocked(getSupabaseClient).mockReturnValue({ rpc: vi.fn().mockResolvedValue({ data: null, error: { message: 'unavailable' } }) } as never);
+    await expect(assertPaperAccountIntegrity(account.accountId, account)).rejects.toThrow(/ledger verification failed/);
+  });
+
+  it('blocks entry when account cash and positions fail reconciliation', async () => {
+    const rpc = vi.fn();
+    vi.mocked(getSupabaseClient).mockReturnValue({ rpc } as never);
+    const account = { accountId: 'account-unbalanced', cash: 1, positions: [], trades: [] };
+
+    await expect(assertPaperAccountIntegrity(account.accountId, account)).rejects.toThrow(/reconciliation is broken/);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('does not advance an eligible plan when database ledger verification fails', async () => {
+    const accountId = `ledger-gate-${Date.now()}`;
+    const time = Math.floor(Date.parse('2026-01-06T00:00:00Z') / 1000 / 900) * 900;
+    const plan: TradePlan = {
+      id: `plan-${accountId}`, accountId, symbol: 'BTCUSD', side: 'long', setupType: 'trend-pullback', htfBias: 'bull',
+      zone: { low: 98, high: 100 }, trigger: { kind: 'close_above_level', level: 100 }, invalidation: 95,
+      targets: [{ price: 110, fractionOfPosition: 1 }], minRR: 2, expiresAtBar: time / 900 + 20,
+      thesis: 'ledger gate test', falsification: 'close below stop', grade: 'A', status: 'WATCHING', contextSnapshot: {},
+      engineVersions: {}, datasetId: 'ledger-gate-test', createdAt: new Date(time * 1000).toISOString(), updatedAt: new Date(time * 1000).toISOString(),
+    };
+    await storeTradePlan(accountId, plan);
+    vi.mocked(getSupabaseClient).mockReturnValue({ rpc: vi.fn().mockResolvedValue({ data: [{ ok: false }], error: null }) } as never);
+    const candle = { time, open: 99, high: 101, low: 98, close: 101, volume: 100 };
+
+    await expect(advanceVerifiedTradePlans({ accountId, symbol: plan.symbol, timeframe: '15m', candle, candles: [candle], entriesAllowed: true }))
+      .rejects.toThrow(/ledger verification failed/);
+    expect((await getAccount(accountId)).tradePlans?.[0]?.status).toBe('WATCHING');
+    expect((await getAccount(accountId)).processedCandles?.['BTCUSD:executor:15m']).toBeUndefined();
+  });
+});
 
 describe('backend paper position lifecycle', () => {
   it('blocks an unavailable market through the stored-plan executor', async () => {
@@ -146,6 +208,37 @@ describe('backend paper position lifecycle', () => {
     await expect(advanceStoredTradePlans({ accountId, symbol: 'BTCUSD', timeframe: '15m', candle: forming, candles: [forming], shadowMode: false }))
       .rejects.toThrow('boundary-verified closed candle');
     expect((await getAccount(accountId)).positions).toHaveLength(0);
+  });
+
+  it('fails closed when the caller marks a trigger candle as stale for new entries', async () => {
+    const accountId = `stale-entry-${Date.now()}`;
+    const priorPromotions = traderConfig.PROMOTED_SETUP_TYPES;
+    traderConfig.PROMOTED_SETUP_TYPES = ['trend-pullback'];
+    const time = Math.floor(Date.parse('2026-01-06T00:00:00Z') / 1000 / 900) * 900;
+    const plan: TradePlan = {
+      id: `plan-${accountId}`, accountId, symbol: 'BTCUSD', side: 'long', setupType: 'trend-pullback', htfBias: 'bull',
+      zone: { low: 98, high: 100 }, trigger: { kind: 'close_above_level', level: 100 }, invalidation: 95,
+      targets: [{ price: 110, fractionOfPosition: 1 }], minRR: 2, expiresAtBar: time / 900 + 20,
+      thesis: 'stale candle test', falsification: 'close below stop', grade: 'A', status: 'WATCHING', contextSnapshot: {},
+      engineVersions: {}, datasetId: 'stale-entry-test', createdAt: new Date(time * 1000).toISOString(), updatedAt: new Date(time * 1000).toISOString(),
+    };
+    try {
+      await storeTradePlan(accountId, plan);
+      const candle = { time, open: 99, high: 101, low: 98, close: 101, volume: 100 };
+      const result = await advanceStoredTradePlans({ accountId, symbol: plan.symbol, timeframe: '15m', candle, candles: [candle], shadowMode: false, entriesAllowed: false });
+      expect(result.filled).toBe(0);
+      expect(result.orders).toHaveLength(0);
+      expect((await getAccount(accountId)).positions).toHaveLength(0);
+      expect((await getAccount(accountId)).tradePlans?.[0]?.lastReason).toContain('freshness was not verified');
+    } finally { traderConfig.PROMOTED_SETUP_TYPES = priorPromotions; }
+  });
+
+  it('rejects malformed or non-finite market prices before changing account state', async () => {
+    const invalidCandle = { time: 1_767_244_800, open: 100, high: 99, low: 98, close: 101, volume: 100 };
+    await expect(advanceStoredTradePlans({ accountId: `invalid-price-${Date.now()}`, symbol: 'BTCUSD', timeframe: '15m', candle: invalidCandle, candles: [invalidCandle] }))
+      .rejects.toThrow('valid finite OHLCV market price');
+    const extreme = { ...invalidCandle, high: Number.MAX_VALUE, close: Number.MAX_VALUE };
+    expect(calculatePositionSize({ equity: 100_000, entry: extreme.close, invalidation: 95, cash: 100_000, grossExposure: 0, symbolExposure: 0 }).accepted).toBe(false);
   });
 
   it('connects stored plans to gated, next-candle paper fills and records the order', async () => {

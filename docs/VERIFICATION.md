@@ -434,3 +434,23 @@ The probe exited 0. These results verify this configured symbol at one point in 
 - **FAIL (reachable history):** `check:secrets` still finds historical `supabase/.temp` paths and a remote PostgreSQL URL with user information. The associated database access material must be rotated before history rewriting. Rotation and history rewrite were not performed; no credential was read from local `.env`, emitted, or changed.
 - **NOT-VERIFIED (GitHub):** `gh` is unavailable and there is no confirmed GitHub connection to inspect workflow runs or set `main` branch protection. The GitHub connection must be authorized before that hosted rule can be changed.
 - **Gate:** Phase 1 remains **NOT GREEN** until historical credential remediation and required GitHub branch protection are completed, and Massive coverage is recorded where Massive is configured. No work was done on gated Phases 2â€“5.
+
+## Risk sizing and entry freshness follow-up — 2026-10-16
+
+- `calculatePositionSize()` now uses the supplied fee and slippage rates for stop-risk and cash-affordability limits. Invalid, missing, non-finite, and out-of-safe-range prices fail closed. Regression tests cover custom cost rates, affordability, malformed OHLCV, and extreme numeric prices.
+- Stored-plan execution now requires an explicit freshness approval. The scheduler supplies it from `entryCandleIsFresh()`; the pipeline supplies it only after its closed-candle age gate. Existing position management remains available while new entries are paused.
+- Local checks: focused risk, service, scheduler, and pipeline tests **PASS** (4 files / 43 tests); full Vitest suite **PASS** (70 files / 439 tests); backend typecheck and lint **PASS**; `git diff --check` **PASS**.
+- The local default for `AUTONOMOUS_TRADING` remains `false`. The scheduler still has process-local coordination only; no persistent worker lease or provider-to-database lifecycle integration was verified here. Keep autonomous entries disabled until those checks are proven in the target deployment.
+- Decision/research behavior is still not one canonical screen-to-execution path: the browser Backtesting Center remains explicitly exploratory, while the backend research replay uses the paper planner and execution simulator. No profitable edge is established, and no changes here make ML, XAUUSD, or SilverUSD operational. Cross-instance lease, database/RLS, real-provider lifecycle, and out-of-sample edge verification remain **NOT-VERIFIED**.
+
+## ML feature label quality follow-up — 2026-10-16
+
+- ML feature computation is shared in `shared/ml-features.ts` between the Edge Function and Vitest tests. Flat-price RSI warmup now returns neutral 50, and forward labels are dropped when the close-to-close move is within `ML_LABEL_ATR_MULTIPLE × ATR` (default 0.1). The multiplier is validated and documented in `.env.example`.
+- Focused feature tests **PASS** (1 file / 3 tests); `check:env` **PASS** (56 variables); backend typecheck **PASS**; `git diff --check` **PASS**.
+- This corrects RSI and label noise only. It does not establish model profitability, add a momentum benchmark, persist model weights or train/test metrics, or prove edge-function deployment behavior. Those ML items remain **NOT-VERIFIED**.
+
+## Paper entry ledger guard follow-up — 2026-10-16
+
+- Before an eligible stored plan advances toward an entry, the backend now requires both local account accounting reconciliation and a successful service-role `verify_decision_ledger` RPC result. An RPC error, missing result, broken chain, or unreconciled account fails closed. Existing-position management remains a separate path.
+- Focused paper lifecycle tests **PASS** (1 file / 15 tests); backend typecheck and targeted ESLint **PASS**.
+- The RPC contract is mocked in unit tests. PostgreSQL execution, RLS/grants, concurrent mutation behavior, restart recovery, and a real provider-to-ledger lifecycle remain **NOT-VERIFIED**. This guard does not replace the missing persistent worker lease/fencing.

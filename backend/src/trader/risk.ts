@@ -64,24 +64,32 @@ export interface PositionSizingResult {
 export function calculatePositionSize(input: PositionSizingInput): PositionSizingResult {
   const feeRate = input.feeRate ?? traderConfig.FEE_RATE;
   const slippageRate = input.slippageRate ?? traderConfig.SLIPPAGE_RATE;
+  const validInputs = [input.equity, input.entry, input.invalidation, input.cash, input.grossExposure, input.symbolExposure, feeRate, slippageRate].every(Number.isFinite)
+    && input.equity > 0 && input.entry > 0 && input.entry <= Number.MAX_SAFE_INTEGER
+    && input.invalidation > 0 && input.invalidation <= Number.MAX_SAFE_INTEGER && input.invalidation < input.entry
+    && input.cash >= 0 && input.grossExposure >= 0 && input.symbolExposure >= 0
+    && feeRate >= 0 && feeRate < 1 && slippageRate >= 0 && slippageRate < 1;
+  if (!validInputs) {
+    return { accepted: false, quantity: 0, riskCash: Number.isFinite(input.equity) ? input.equity * traderConfig.RISK_PER_TRADE_PCT / 100 : 0, perUnitRisk: Number.POSITIVE_INFINITY, reason: 'Invalid stop distance, price, account value, exposure, fee, or slippage input.' };
+  }
+
   const entryFill = input.entry * (1 + slippageRate);
   const stopFill = input.invalidation * (1 - slippageRate);
   // Include both sides' execution costs in the risk budget, as the simulator
   // charges entry and exit fees and applies adverse slippage to each fill.
   const perUnitRisk = entryFill * (1 + feeRate) - stopFill * (1 - feeRate);
   const riskCash = input.equity * traderConfig.RISK_PER_TRADE_PCT / 100;
-  if (![input.equity, input.entry, input.invalidation, input.cash, input.grossExposure, input.symbolExposure].every(Number.isFinite)
-    || input.entry <= 0 || input.invalidation <= 0 || input.invalidation >= input.entry || perUnitRisk <= 0
-    || input.grossExposure < 0 || input.symbolExposure < 0
-    || !Number.isFinite(feeRate) || feeRate < 0 || feeRate >= 1
-    || !Number.isFinite(slippageRate) || slippageRate < 0 || slippageRate >= 1) {
-    return { accepted: false, quantity: 0, riskCash, perUnitRisk, reason: 'Invalid stop distance.' };
+  if (!Number.isFinite(entryFill) || !Number.isFinite(stopFill) || !Number.isFinite(perUnitRisk) || perUnitRisk <= 0) {
+    return { accepted: false, quantity: 0, riskCash, perUnitRisk, reason: 'Price or stop distance is outside the supported numeric range.' };
   }
-  if (input.equity <= 0 || input.cash <= 0) {
+  if (input.cash <= 0) {
     return { accepted: false, quantity: 0, riskCash, perUnitRisk, reason: 'Insufficient paper equity or cash.' };
   }
   const maxQtyByRisk = riskCash / perUnitRisk;
-  const costPerUnit = input.entry * (1 + traderConfig.SLIPPAGE_RATE) * (1 + traderConfig.FEE_RATE);
+  const costPerUnit = input.entry * (1 + slippageRate) * (1 + feeRate);
+  if (!Number.isFinite(costPerUnit) || costPerUnit <= 0) {
+    return { accepted: false, quantity: 0, riskCash, perUnitRisk, reason: 'Entry cost is outside the supported numeric range.' };
+  }
   const maxQtyByCash = input.cash / costPerUnit;
   const grossHeadroom = Math.max(0, input.equity * traderConfig.MAX_GROSS_EXPOSURE_PCT / 100 - input.grossExposure);
   const symbolHeadroom = Math.max(0, input.equity * traderConfig.MAX_SYMBOL_EXPOSURE_PCT / 100 - input.symbolExposure);
