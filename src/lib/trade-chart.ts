@@ -24,11 +24,10 @@ export function mapPaperTradesToDrawings(
     const exitTime = Math.floor(Date.parse(trade.closedAt) / 1000);
     const exitPrice = trade.exitPrice;
     if (!Number.isFinite(entryTime) || !Number.isFinite(exitTime) || !Number.isFinite(exitPrice)) return [];
-    const direction = trade.side === 'buy' ? 1 : -1;
     const riskCash = position?.initialRisk && position.initialRisk > 0 ? position.initialRisk * trade.quantity : 0;
     return [{
       trade, position, entryTime, entryPrice: trade.entryPrice, exitTime, exitPrice, open: false,
-      pnlPct: ((exitPrice - trade.entryPrice) * direction / trade.entryPrice) * 100,
+      pnlPct: trade.entryPrice > 0 && trade.quantity > 0 ? (trade.realizedPnl / (trade.entryPrice * trade.quantity)) * 100 : 0,
       rMultiple: riskCash ? trade.realizedPnl / riskCash : null,
     }];
   });
@@ -41,8 +40,11 @@ export function mapPaperTradesToDrawings(
       const direction = position.side === 'buy' ? 1 : -1;
       const riskCash = position.initialRisk && position.initialRisk > 0 ? position.initialRisk * position.quantity : 0;
       const floating = (exitPrice - position.entryPrice) * direction * position.quantity;
+      const entryNotional = position.entryPrice * position.quantity;
+      const estimatedExitFee = entryNotional > 0 ? (position.entryFee / entryNotional) * exitPrice * position.quantity : 0;
+      const netFloatingPnl = floating - position.entryFee - estimatedExitFee;
       const trade: ChartPaperTrade = {
-        id: `open:${position.id}`, positionId: position.id, symbol: position.symbol, side: position.side,
+        id: `open:${position.id}`, positionId: position.id, orderId: position.orderId, symbol: position.symbol, side: position.side,
         quantity: position.quantity, entryPrice: position.entryPrice, exitPrice, realizedPnl: 0,
         requestedEntryPrice: position.requestedEntryPrice,
         confidenceAtEntry: position.confidenceAtEntry,
@@ -51,7 +53,7 @@ export function mapPaperTradesToDrawings(
         openedAt: position.openedAt, closedAt: '', maeR: null, mfeR: null,
       };
       return [{ trade, position, entryTime, entryPrice: position.entryPrice, exitTime, exitPrice, open: true,
-        pnlPct: ((exitPrice - position.entryPrice) * direction / position.entryPrice) * 100,
+        pnlPct: entryNotional > 0 ? (netFloatingPnl / entryNotional) * 100 : 0,
         rMultiple: riskCash ? floating / riskCash : null }];
     });
   return [...completed, ...active];

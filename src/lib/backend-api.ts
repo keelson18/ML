@@ -83,6 +83,7 @@ export interface PaperPosition {
 
 export interface PaperTrade {
   id: string;
+  orderId?: string;
   symbol: string;
   side: 'buy' | 'sell';
   quantity: number;
@@ -105,6 +106,7 @@ export interface PaperTrade {
 
 export interface ChartPaperPosition {
   id: string;
+  orderId?: string;
   symbol: string;
   side: 'buy' | 'sell';
   quantity: number;
@@ -126,6 +128,7 @@ export interface ChartPaperPosition {
 
 export interface ChartPaperTrade extends PaperTrade {
   positionId: string;
+  orderId?: string;
   side: 'buy' | 'sell';
   quantity: number;
   fees: number;

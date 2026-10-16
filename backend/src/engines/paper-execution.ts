@@ -46,6 +46,7 @@ export interface PaperPosition {
 export interface PaperTrade {
   id: string;
   positionId: string;
+  orderId?: string;
   symbol: string;
   side: PaperOrderSide;
   quantity: number;
@@ -283,6 +284,7 @@ export function reducePaperPosition(
   const trade: PaperTrade = {
     id: tradeId,
     positionId: position.id,
+    orderId: position.orderId,
     symbol: position.symbol,
     side: position.side,
     quantity,

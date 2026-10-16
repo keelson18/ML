@@ -144,6 +144,9 @@ export default function PriceChart({ candles, overlays, theme, trades = [], posi
     applyCandleUpdate(candleSeries, toCandleBar, appliedCandlesRef.current, safeCandles);
     appliedCandlesRef.current = safeCandles;
     recordTiming('chart.candles', performance.now() - start);
+    // Reproject trade markers and drawing levels after Lightweight Charts has
+    // applied the new series data and its autoscale coordinates have settled.
+    setCoordinateRevision((value) => value + 1);
   }, [safeCandles, theme]);
 
   useEffect(() => {

@@ -17,7 +17,8 @@ export default function ExplainableTrade({ recommendation, signals = [], onClose
     <div className="flex items-center justify-between mb-3"><h3 className="text-sm font-semibold text-text">Explainable trade · {trade.symbol}</h3>
       {onClose && <button onClick={onClose} className="min-h-11 min-w-11 rounded-lg text-sm text-muted hover:text-text">Close</button>}</div>
     <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm text-muted">
-      <dt>Order / position</dt><dd className="truncate text-text">{trade.id} / {trade.positionId}</dd>
+      <dt>Order ID</dt><dd className="truncate text-text">{trade.orderId ?? 'Not recorded'}</dd>
+      <dt>Position ID</dt><dd className="truncate text-text">{trade.positionId}</dd>
       <dt>Side · quantity</dt><dd className="text-text">{trade.side.toUpperCase()} · {trade.quantity}</dd>
       <dt>Entry fill</dt><dd className="tabular-nums text-text">{trade.entryPrice}</dd>
       <dt>Requested / fill entry</dt><dd className="tabular-nums text-text">{trade.requestedEntryPrice ?? 'Not recorded'} / {trade.entryPrice}</dd>
