@@ -27,6 +27,12 @@ for (const path of files) {
   if (collapse.test(source)) problems.push(`${relative('.', path)}: collapse-related identifier`);
 }
 
+const chart = readFileSync(join(sourceRoot, 'components', 'PriceChart.tsx'), 'utf8');
+if (!/strokeWidth="2"/.test(chart) || !/strokeWidth="1\.5"/.test(chart)) problems.push('PriceChart.tsx: drawing lines must be at least 1.5px thick');
+if (!/fontSize="14"/.test(chart)) problems.push('PriceChart.tsx: chart drawing labels must be at least 14px for mobile');
+if (!/\['structure', 'Structure'\]/.test(chart) || !/\['zones', 'Zones'\]/.test(chart) || !/\['tradeLevels', 'Trade levels'\]/.test(chart)
+  || !/\['signals', 'Signals'\]/.test(chart) || !/\['trades', 'Trades'\]/.test(chart)) problems.push('PriceChart.tsx: all five independently toggleable drawing layers are required');
+
 if (problems.length) {
   console.error(problems.join('\n'));
   process.exitCode = 1;

@@ -20,6 +20,8 @@ export interface PaperPosition {
   side: PaperOrderSide;
   quantity: number;
   entryPrice: number;
+  requestedEntryPrice?: number;
+  confidenceAtEntry?: number;
   entryFee: number;
   entrySlippage?: number;
   stopLoss?: number;
@@ -48,6 +50,9 @@ export interface PaperTrade {
   side: PaperOrderSide;
   quantity: number;
   entryPrice: number;
+  requestedEntryPrice?: number;
+  confidenceAtEntry?: number;
+  engineVersions?: Record<string, string>;
   exitPrice: number;
   fees: number;
   entryFee?: number;
@@ -168,6 +173,8 @@ export function simulatePaperOrder(
     side,
     quantity: request.quantity,
     entryPrice: fillPrice,
+    requestedEntryPrice: request.requestedPrice,
+    confidenceAtEntry: Number.isFinite(request.decision.confidence) ? request.decision.confidence : undefined,
     entryFee: fee,
     entrySlippage: Math.abs(fillPrice - request.requestedPrice) * request.quantity,
     stopLoss: request.stopLoss,
@@ -280,6 +287,8 @@ export function reducePaperPosition(
     side: position.side,
     quantity,
     entryPrice: position.entryPrice,
+    requestedEntryPrice: position.requestedEntryPrice,
+    confidenceAtEntry: position.confidenceAtEntry,
     exitPrice: fillPrice,
     fees: allocatedEntryFee + exitFee,
     entryFee: allocatedEntryFee,
@@ -289,6 +298,7 @@ export function reducePaperPosition(
     exitSlippage,
     realizedPnl,
     executionVersion,
+    engineVersions: { ...position.engineVersions, execution: executionVersion },
     openedAt: position.openedAt,
     closedAt: timestamp,
     exitReason,

@@ -1,13 +1,33 @@
 import { Info, TrendingUp, Shield, Target, AlertTriangle, BarChart3, type LucideIcon } from 'lucide-react';
 import type { Recommendation, Signal } from '../lib/types';
+import type { ChartPaperTrade } from '../lib/backend-api';
 
 interface Props {
-  recommendation: Recommendation;
-  signals: Signal[];
+  recommendation?: Recommendation;
+  signals?: Signal[];
   onClose?: () => void;
+  trade?: ChartPaperTrade;
+  planId?: string;
+  confidence?: string;
+  engineVersions?: Record<string, string>;
 }
 
-export default function ExplainableTrade({ recommendation, signals, onClose }: Props) {
+export default function ExplainableTrade({ recommendation, signals = [], onClose, trade, planId, confidence, engineVersions }: Props) {
+  if (trade) return <div className="bg-surface border border-border rounded-xl p-4 shadow-card" aria-label="Explainable paper trade">
+    <div className="flex items-center justify-between mb-3"><h3 className="text-sm font-semibold text-text">Explainable trade · {trade.symbol}</h3>
+      {onClose && <button onClick={onClose} className="min-h-11 min-w-11 rounded-lg text-sm text-muted hover:text-text">Close</button>}</div>
+    <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm text-muted">
+      <dt>Order / position</dt><dd className="truncate text-text">{trade.id} / {trade.positionId}</dd>
+      <dt>Side · quantity</dt><dd className="text-text">{trade.side.toUpperCase()} · {trade.quantity}</dd>
+      <dt>Entry fill</dt><dd className="tabular-nums text-text">{trade.entryPrice}</dd>
+      <dt>Requested / fill entry</dt><dd className="tabular-nums text-text">{trade.requestedEntryPrice ?? 'Not recorded'} / {trade.entryPrice}</dd>
+      <dt>Fees · slippage</dt><dd className="tabular-nums text-text">{trade.fees} · {trade.slippage}</dd>
+      <dt>Exit reason</dt><dd className="text-text">{trade.exitReason ?? (trade.id.startsWith('open:') ? 'OPEN' : 'CLOSED')}</dd>
+      <dt>Plan / entry confidence</dt><dd className="text-text">{planId ?? 'Not linked'} · {confidence ?? (trade.confidenceAtEntry === undefined ? 'Not recorded' : `${(trade.confidenceAtEntry * 100).toFixed(1)}%`)}</dd>
+      <dt>Engine versions</dt><dd className="break-words text-text">{Object.entries(engineVersions ?? trade.engineVersions ?? { execution: trade.executionVersion }).map(([name, version]) => `${name} ${version}`).join(', ')}</dd>
+    </dl>
+  </div>;
+  if (!recommendation) return null;
   const isBullish = recommendation.side === 'buy';
   const isBearish = recommendation.side === 'sell';
 

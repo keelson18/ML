@@ -7,3 +7,5 @@ The touch target token is `--tap: 44px`. Below 1024px, buttons, selects, inputs,
 Phone is below 640px, tablet is 640–1023px, and desktop starts at 1024px. Desktop always shows the expanded 248px sidebar. Phones and tablets use the fixed five-item bottom bar (Chart, Trader, Portfolio, Research, More); More lists the other pages and account actions in a safe-area-aware sheet. Add a primary destination in `PRIMARY` or a secondary destination in `MORE` in `src/components/MobileNavigation.tsx`, and add every page to `NAV_ITEMS` and `NAV_GROUPS` in `src/components/Sidebar.tsx` for desktop. Keep Admin visibility role-gated and server authorization intact.
 
 Run `npm run check:ui-layout` to catch undersized font declarations and sidebar collapse code.
+
+The chart toolbar exposes independent Structure, Zones, Trade levels, Signals, and Trades layers. Their settings are stored in the signed-in user's RLS-protected `user_preferences.chart_layers` field; apply the chart-layer migration before expecting changes to persist. Paper trade history is loaded from the authenticated `/api/v1/trader/trades?symbol=...` endpoint and refreshed independently of market candles.

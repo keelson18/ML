@@ -47,6 +47,13 @@ export default function AutonomousCommandCenter({ symbol, timeframe, marketType,
   const automatic = status.state === 'MONITORING' || status.state === 'DECIDING';
   const actionable = serverDecision?.decision === 'BUY' || serverDecision?.decision === 'SELL';
   const actionLabel = serverDecision ? serverDecision.decision : serverDecisionError ? 'BLOCKED' : 'WAIT';
+  const decisionMessage = serverDecisionError
+    ? [
+      `${serverDecisionError.replace(/[.!?]+$/, '')}.`,
+      serverDecisionError.includes('Market is not verified') ? 'An admin can verify configured markets from Admin → Market Availability → Probe markets.' : null,
+      'Local indicator output is bias context only.',
+    ].filter(Boolean).join(' ')
+    : 'Waiting for the server decision. Local indicator output is bias context only.';
 
   return (
     <section className="command-center" aria-label="Autonomous trading command center">
@@ -82,7 +89,7 @@ export default function AutonomousCommandCenter({ symbol, timeframe, marketType,
 
       <div className="command-decision-bar">
         <div className={`command-decision decision-${actionable ? serverDirection : 'neutral'}`}><span>ACTION</span><strong>{actionLabel}</strong></div>
-        <div className="decision-explanation">{serverDecision?.explanation ?? (serverDecisionError ? `No actionable decision: ${serverDecisionError}. Local indicator output is bias context only.` : 'Waiting for the server decision. Local indicator output is bias context only.')}</div>
+        <div className="decision-explanation">{serverDecision?.explanation ?? decisionMessage}</div>
         <div className="decision-risk"><span><ShieldCheck className="w-3.5 h-3.5" /> Risk capacity</span><strong>{serverDecision?.stages?.riskApproval.status.toUpperCase() ?? (actionable ? 'APPROVED' : serverDecision ? 'NOT CLEARED' : 'WAITING')}</strong></div>
         <div className="decision-risk"><span>Orders</span><strong>{status.executedOrders}</strong></div>
         {status.state === 'PAUSED' && <span title="Automatic engine paused after a safety event"><AlertTriangle className="w-4 h-4 text-warning" /></span>}

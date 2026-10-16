@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 export interface UserPreferences {
   theme: 'light' | 'dark';
   notifications: { marketAlerts: boolean; news: boolean };
+  chartLayers: { structure: boolean; zones: boolean; tradeLevels: boolean; signals: boolean; trades: boolean };
 }
 
 export interface PriceAlert {
@@ -16,6 +17,7 @@ export interface PriceAlert {
 }
 
 const DEFAULT_NOTIFICATIONS: UserPreferences['notifications'] = { marketAlerts: true, news: false };
+export const DEFAULT_CHART_LAYERS: UserPreferences['chartLayers'] = { structure: true, zones: true, tradeLevels: true, signals: true, trades: true };
 
 function mapAlert(row: Record<string, unknown>): PriceAlert {
   return {
@@ -31,13 +33,14 @@ function mapAlert(row: Record<string, unknown>): PriceAlert {
 
 export const workspaceApi = {
   async getPreferences(): Promise<UserPreferences | null> {
-    const { data, error } = await supabase.from('user_preferences').select('theme,notifications').maybeSingle();
+    const { data, error } = await supabase.from('user_preferences').select('theme,notifications,chart_layers').maybeSingle();
     if (error) throw error;
     if (!data) return null;
     const notifications = data.notifications as Partial<UserPreferences['notifications']> | null;
     return {
       theme: data.theme as UserPreferences['theme'],
       notifications: { marketAlerts: notifications?.marketAlerts ?? true, news: notifications?.news ?? false },
+      chartLayers: { ...DEFAULT_CHART_LAYERS, ...(data.chart_layers as Partial<UserPreferences['chartLayers']> | null) },
     };
   },
 
@@ -50,6 +53,19 @@ export const workspaceApi = {
       user_id: user.id,
       theme: preferences.theme ?? current?.theme ?? 'dark',
       notifications: preferences.notifications ?? current?.notifications ?? DEFAULT_NOTIFICATIONS,
+      chart_layers: preferences.chartLayers ?? current?.chartLayers ?? DEFAULT_CHART_LAYERS,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id' });
+    if (error) throw error;
+  },
+
+  async saveChartLayers(chartLayers: UserPreferences['chartLayers']): Promise<void> {
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError) throw authError;
+    if (!user) throw new Error('Authentication required.');
+    const { error } = await supabase.from('user_preferences').upsert({
+      user_id: user.id,
+      chart_layers: chartLayers,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'user_id' });
     if (error) throw error;

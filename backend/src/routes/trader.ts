@@ -21,6 +21,7 @@ import { paperAutopilotScheduler, isAutopilotSymbol, type PaperAutopilotConfig }
 
 const listQuery = z.object({ status: z.enum(['WATCHING', 'ARMED', 'PENDING_ORDER', 'OPEN', 'MANAGING', 'CLOSED']).optional() }).strict();
 const historyQuery = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) }).strict();
+const tradeChartQuery = z.object({ symbol: z.string().regex(/^[A-Z0-9]{3,12}$/) }).strict();
 const autopilotSymbols = z.array(z.string().regex(/^[A-Z0-9]{3,12}$/)).min(1).max(MARKET_UNIVERSE.length);
 const autopilotUpdate = z.object({ enabled: z.boolean(), symbols: autopilotSymbols }).strict();
 const defaultAutopilotSymbols = MARKET_UNIVERSE.filter((market) => market.isActive).slice(0, 3).map((market) => market.symbol);
@@ -159,6 +160,29 @@ export async function traderRoutes(app: FastifyInstance) {
     } catch (error) {
       request.log.error({ reason: error instanceof Error ? error.message : 'unknown' }, 'Trader overview failed');
       return reply.code(503).send({ error: 'Trader overview is temporarily unavailable.' });
+    }
+  });
+
+  app.get('/api/v1/trader/trades', {
+    preHandler: app.requireAuth,
+    config: { rateLimit: { max: config.marketRateLimitMax, timeWindow: config.rateLimitWindowMs } },
+  }, async (request, reply) => {
+    const query = tradeChartQuery.safeParse(request.query);
+    if (!query.success) return reply.code(400).send({ error: 'A valid symbol is required.' });
+    if (!request.authenticatedUserId) return reply.code(401).send({ error: 'Authentication required.' });
+    try {
+      const account = await getAccount(request.authenticatedUserId);
+      const symbol = query.data.symbol;
+      const positions = account.positions.filter((position) => position.symbol === symbol);
+      const positionIds = new Set(positions.map((position) => position.id));
+      const trades = account.trades.filter((trade) => trade.symbol === symbol || positionIds.has(trade.positionId))
+        .sort((left, right) => Date.parse(left.openedAt) - Date.parse(right.openedAt));
+      const plans = (account.tradePlans ?? []).filter((plan) => plan.symbol === symbol);
+      const journal = (account.tradeJournal ?? []).filter((entry) => entry.symbol === symbol);
+      return { symbol, trades, positions, plans, journal };
+    } catch (error) {
+      request.log.error({ reason: error instanceof Error ? error.message : 'unknown', symbol: query.data.symbol }, 'Chart trade history failed');
+      return reply.code(503).send({ error: 'Chart trade history is temporarily unavailable.' });
     }
   });
 

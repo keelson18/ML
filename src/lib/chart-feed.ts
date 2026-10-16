@@ -22,7 +22,7 @@ export interface LinePoint {
 
 export interface LineOptions {
   color: string;
-  lineWidth: 1;
+  lineWidth: 1 | 2;
   priceLineVisible: boolean;
   lastValueVisible: boolean;
   lineStyle?: number;
@@ -101,7 +101,7 @@ export function planOverlays(overlays: Overlay[], candles: Candle[]): OverlayPla
     if (overlay.type === 'line' && overlay.points) {
       lines.push({
         key,
-        options: { color: overlay.color ?? '#6b7280', lineWidth: 1, priceLineVisible: false, lastValueVisible: false },
+        options: { color: overlay.color ?? '#6b7280', lineWidth: 2, priceLineVisible: false, lastValueVisible: false },
         points: overlay.points.map((point) => ({ time: point.time, value: point.value })),
       });
     } else if (overlay.type === 'hline' && overlay.price !== undefined && candles.length) {
@@ -109,7 +109,7 @@ export function planOverlays(overlays: Overlay[], candles: Candle[]): OverlayPla
         key,
         options: {
           color: overlay.color ?? '#9ca3af',
-          lineWidth: 1,
+          lineWidth: 2,
           lineStyle: 2,
           priceLineVisible: false,
           lastValueVisible: true,

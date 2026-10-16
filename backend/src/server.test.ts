@@ -147,8 +147,10 @@ describe('Fastify security headers', () => {
     const { app } = buildServer();
     const overview = await app.inject('/api/v1/trader/overview');
     const plans = await app.inject('/api/v1/trader/plans');
+    const trades = await app.inject('/api/v1/trader/trades?symbol=BTCUSD');
     expect(overview.statusCode).toBe(401);
     expect(plans.statusCode).toBe(401);
+    expect(trades.statusCode).toBe(401);
     expect((await app.inject('/api/v1/me/health')).statusCode).toBe(401);
     expect((await app.inject('/api/v1/system/health')).statusCode).toBe(401);
     await app.close();

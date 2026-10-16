@@ -4,7 +4,7 @@ import { closePaperPosition, reducePaperPosition, simulatePaperOrder } from './p
 
 const openPosition: PaperPosition = {
   id: 'position-1', symbol: 'BTCUSD', assetId: 'BTCUSD', side: 'buy', quantity: 2,
-  entryPrice: 101, entryFee: 2.02, entrySlippage: 2, stopLoss: 90, initialRisk: 11,
+  entryPrice: 101, requestedEntryPrice: 100, confidenceAtEntry: 0.82, engineVersions: { strategy: 's1' }, entryFee: 2.02, entrySlippage: 2, stopLoss: 90, initialRisk: 11,
   status: 'open', openedAt: '2026-01-01T00:00:00.000Z',
 };
 
@@ -15,7 +15,7 @@ function account(overrides: Partial<PaperAccountState> = {}): PaperAccountState 
 function order(overrides: Partial<PaperOrderRequest> = {}): PaperOrderRequest {
   return {
     orderId: 'order-1', positionId: 'position-2', decisionId: 'decision-1', assetId: 'BTCUSD', symbol: 'BTCUSD',
-    decision: { decision: 'BUY' }, riskApproved: true, portfolioApproved: true, quantity: 2, requestedPrice: 100,
+    decision: { decision: 'BUY', confidence: 0.82, engineVersions: { strategy: 's1' } }, riskApproved: true, portfolioApproved: true, quantity: 2, requestedPrice: 100,
     feeRate: 0.01, slippageRate: 0.01, executionVersion: 'test-1', ...overrides,
   };
 }
@@ -57,7 +57,7 @@ describe('paper order execution validation', () => {
     expect(result.account.cash).toBeCloseTo(795.98);
     expect(result.account.positions).toHaveLength(1);
     expect(result.account.positions[0]).toMatchObject({
-      entryPrice: 101, entryFee: 2.02, entrySlippage: 2, quantity: 2, status: 'open',
+      entryPrice: 101, requestedEntryPrice: 100, confidenceAtEntry: 0.82, engineVersions: { strategy: 's1' }, entryFee: 2.02, entrySlippage: 2, quantity: 2, status: 'open',
     });
     expect(result.account.trades).toEqual([]);
     expect(state.cash).toBe(1_000);
@@ -109,6 +109,7 @@ describe('paper position reductions and closes', () => {
     expect(result.trade.fees).toBeCloseTo(1.0495);
     expect(result.trade.slippage).toBeCloseTo(1.05);
     expect(result.trade.realizedPnl).toBeCloseTo(2.9005);
+    expect(result.trade).toMatchObject({ requestedEntryPrice: 100, confidenceAtEntry: 0.82, engineVersions: { strategy: 's1', execution: 'test-1' } });
     expect(result.account.cash).toBeCloseTo(553.9055);
     expect(result.account.positions[0]).toMatchObject({ quantity: 1.5, status: 'open' });
     expect(result.account.positions[0]?.entryFee).toBeCloseTo(1.515);

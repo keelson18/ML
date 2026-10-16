@@ -70,6 +70,9 @@ export interface PaperPosition {
   side: 'buy' | 'sell';
   quantity: number;
   entryPrice: number;
+  requestedEntryPrice?: number;
+  confidenceAtEntry?: number;
+  engineVersions?: Record<string, string>;
   entryFee: number;
   stopLoss?: number;
   takeProfit?: number;
@@ -90,6 +93,62 @@ export interface PaperTrade {
   mfeR: number | null;
   openedAt: string;
   closedAt: string;
+  positionId?: string;
+  fees?: number;
+  slippage?: number;
+  entrySlippage?: number;
+  exitSlippage?: number;
+  exitReason?: string;
+  executionVersion?: string;
+  engineVersions?: Record<string, string>;
+}
+
+export interface ChartPaperPosition {
+  id: string;
+  symbol: string;
+  side: 'buy' | 'sell';
+  quantity: number;
+  entryPrice: number;
+  requestedEntryPrice?: number;
+  confidenceAtEntry?: number;
+  entryFee: number;
+  entrySlippage?: number;
+  stopLoss?: number;
+  takeProfit?: number;
+  initialRisk?: number;
+  targets?: Array<{ price: number; fractionOfPosition: number }>;
+  engineVersions?: Record<string, string>;
+  planId?: string;
+  status: 'open' | 'closed';
+  openedAt: string;
+  closedAt?: string;
+}
+
+export interface ChartPaperTrade extends PaperTrade {
+  positionId: string;
+  side: 'buy' | 'sell';
+  quantity: number;
+  fees: number;
+  slippage: number;
+  exitPrice: number;
+  entryPrice: number;
+  requestedEntryPrice?: number;
+  confidenceAtEntry?: number;
+  realizedPnl: number;
+  exitReason?: string;
+  executionVersion: string;
+}
+
+export interface ChartTradeHistory {
+  symbol: string;
+  trades: ChartPaperTrade[];
+  positions: ChartPaperPosition[];
+  plans: Array<{ id: string; confidence?: number; contextSnapshot?: Record<string, unknown> }>;
+  journal: Array<{ id: string; planId?: string; metrics: Record<string, number | string | boolean | null>; engineVersions: Record<string, string> }>;
+}
+
+export async function fetchChartTradeHistory(symbol: string): Promise<ChartTradeHistory> {
+  return authenticatedBackendRequest<ChartTradeHistory>(`/api/v1/trader/trades?symbol=${encodeURIComponent(symbol)}`);
 }
 
 export interface PaperAccount {
