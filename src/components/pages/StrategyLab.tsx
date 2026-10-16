@@ -83,7 +83,7 @@ export default function StrategyLab({ signals, candles, timeframe }: Props) {
           if (!categoryStrategies.length) return null;
           return (
             <section key={category} className="space-y-3">
-              <div className="flex items-center justify-between"><h2 className="text-sm font-semibold">{category}</h2><span className="text-[10px] text-muted">{categoryStrategies.length} strategies</span></div>
+              <div className="flex items-center justify-between"><h2 className="text-sm font-semibold">{category}</h2><span className="text-xs text-muted">{categoryStrategies.length} strategies</span></div>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 {categoryStrategies.map(({ strategy, eligible, reason }) => {
                   const Icon = ICONS[strategy.type];
@@ -95,15 +95,15 @@ export default function StrategyLab({ signals, candles, timeframe }: Props) {
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center justify-between gap-3">
                             <div className="text-sm font-medium">{strategy.name}</div>
-                            <span className={`text-[10px] font-medium ${eligible ? 'text-success' : 'text-muted'}`}>{eligible ? 'READY' : 'UNAVAILABLE'}</span>
+                            <span className={`text-xs font-medium ${eligible ? 'text-success' : 'text-muted'}`}>{eligible ? 'READY' : 'UNAVAILABLE'}</span>
                           </div>
-                          <div className="text-[10px] text-muted mt-1">{strategy.type} · v{strategy.version} · min {strategy.minCandles} candles{strategy.requiresVolume ? ' · volume required' : ''}</div>
+                          <div className="text-xs text-muted mt-1">{strategy.type} · v{strategy.version} · min {strategy.minCandles} candles{strategy.requiresVolume ? ' · volume required' : ''}</div>
                         </div>
                       </div>
                       <p className="text-xs text-muted mt-3 mb-3">{strategy.description}</p>
                       {activeSignals.length > 0 ? (
                         <div className="space-y-1">
-                          {activeSignals.slice(0, 3).map((signal, index) => <div key={`${signal.strategyId}-${index}`} className="flex items-center gap-2 text-xs"><span className={`w-2 h-2 rounded-full ${signal.side === 'buy' ? 'bg-success' : 'bg-danger'}`} /><span className="flex-1 truncate text-muted">{signal.reason}</span><span className="uppercase text-[10px]">{signal.side}</span></div>)}
+                          {activeSignals.slice(0, 3).map((signal, index) => <div key={`${signal.strategyId}-${index}`} className="flex items-center gap-2 text-xs"><span className={`w-2 h-2 rounded-full ${signal.side === 'buy' ? 'bg-success' : 'bg-danger'}`} /><span className="flex-1 truncate text-muted">{signal.reason}</span><span className="uppercase text-xs">{signal.side}</span></div>)}
                         </div>
                       ) : <div className="text-xs text-muted">{eligible ? 'No active signal on the latest candle.' : reason}</div>}
                     </article>

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity, Sun, Moon, Wifi, WifiOff, TrendingUp, TrendingDown,
-  Menu, X, Bell,
+  Bell,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -18,6 +18,8 @@ import AdminRoute from './AdminRoute';
 import CMSManager from './CMS/CMSManager';
 import CMSViewer from './CMS/CMSViewer';
 import Sidebar from './Sidebar';
+import MobileNavigation from './MobileNavigation';
+import MultiTimeframeTerminal from './MultiTimeframeTerminal';
 import { pathForSidebarTab, sidebarTabFromPath, type SidebarTab } from '../lib/routes';
 import { formatMarketPrice, getDefaultMarketSymbol, getMarketsByType, setMarketAvailability } from '../lib/markets';
 import { fetchPublishedContent } from '../lib/cms';
@@ -33,11 +35,11 @@ import RiskManagement from './pages/RiskManagement';
 import AILearning from './pages/AILearning';
 import SettingsPage from './pages/SettingsPage';
 import TraderDesk from './pages/TraderDesk';
-import MultiTimeframeTerminal from './MultiTimeframeTerminal';
 import AutonomousCommandCenter from './AutonomousCommandCenter';
 import { fetchMarketAvailability, requestBackendDecision, type BackendDecision } from '../lib/backend-api';
 import { resolveAvatarUrl } from '../lib/avatar';
 import { fetchNotifications, markNotificationRead, type InAppNotification } from '../api/notifications';
+import { MULTI_TIMEFRAME_PANELS } from '../lib/terminal';
 
 type WsStatus = 'connecting' | 'open' | 'polling' | 'closed' | 'reconnecting';
 
@@ -45,8 +47,6 @@ export default function Dashboard() {
   const { user, profile, signOut } = useAuth();
   const { theme, toggle } = useTheme();
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>(() => sidebarTabFromPath(window.location.pathname));
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [marketType, setMarketType] = useState<MarketType>('crypto');
   const [symbol, setSymbol] = useState<string>(getDefaultMarketSymbol());
   const [availabilityRevision, setAvailabilityRevision] = useState(0);
@@ -75,7 +75,6 @@ export default function Dashboard() {
       window.history[replace ? 'replaceState' : 'pushState']({}, '', path);
     }
     setSidebarTab(nextTab);
-    setMobileSidebarOpen(false);
   };
 
   useEffect(() => {
@@ -284,12 +283,12 @@ export default function Dashboard() {
               className="px-3.5 py-2 rounded-lg bg-surface border border-border text-text focus:outline-none focus:border-primary/40 text-sm font-medium">
               {availableMarkets.map((p) => <option key={p.symbol} value={p.symbol}>{p.label}</option>)}
             </select>
-            <div className="flex items-center gap-1 px-3 py-2 rounded-lg bg-surface border border-border text-xs text-muted">
-              <span className="text-text font-medium">1D</span><span>·</span><span>4H</span><span>·</span><span>15M</span><span>·</span><span>5M</span>
+            <div className="flex items-center gap-1 rounded-lg bg-surface border border-border p-1" role="group" aria-label="Jump to terminal timeframe">
+              {MULTI_TIMEFRAME_PANELS.map(({ timeframe: frame, label }) => <button key={frame} type="button" onClick={() => document.getElementById(`terminal-${frame}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })} aria-label={`Show ${label} chart`} aria-controls={`terminal-${frame}`} className="rounded px-2 py-1 text-xs font-medium text-muted hover:bg-bg hover:text-text">{label}</button>)}
             </div>
             <span className="text-lg font-semibold tabular-nums ml-auto text-text">{formatMarketPrice(symbol, livePrice)}</span>
           </div>
-          <div className="bg-surface border border-border rounded-xl overflow-hidden h-[600px] relative">
+          <div className="terminal-chart-frame bg-surface border border-border rounded-xl overflow-hidden relative">
             <MultiTimeframeTerminal symbol={symbol} marketType={marketType} theme={theme} wsStatus={wsStatus} />
           </div>
         </div>
@@ -378,29 +377,13 @@ export default function Dashboard() {
         activeTab={sidebarTab}
         onTabChange={navigateToTab}
         isAdmin={isAdmin}
-        collapsed={sidebarCollapsed && !mobileSidebarOpen}
-        mobileOpen={mobileSidebarOpen}
-        onToggle={() => {
-          if (window.matchMedia('(max-width: 1024px)').matches) setMobileSidebarOpen((open) => !open);
-          else setSidebarCollapsed((collapsed) => !collapsed);
-        }}
+        onSignOut={() => void signOut()}
       />
-      {mobileSidebarOpen && <button className="sidebar-backdrop" type="button" aria-label="Close navigation" onClick={() => setMobileSidebarOpen(false)} />}
 
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
         <header className="h-14 border-b border-border bg-surface/80 backdrop-blur-md flex items-center justify-between px-4 lg:px-6 shrink-0">
           <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setMobileSidebarOpen((open) => !open)}
-              className="dashboard-mobile-menu p-1.5 rounded-lg hover:bg-surface transition-colors text-muted hover:text-text"
-              aria-label={mobileSidebarOpen ? 'Close navigation' : 'Open navigation'}
-              aria-expanded={mobileSidebarOpen}
-              aria-controls="app-navigation"
-            >
-              {mobileSidebarOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
-            </button>
             <div className="flex items-center gap-2.5">
               <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center">
                 <Activity className="w-3.5 h-3.5 text-primary" />
@@ -437,23 +420,23 @@ export default function Dashboard() {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto">
-          {sidebarTab !== 'dashboard' && <div className="flex md:hidden items-center gap-1.5 border-b border-border bg-surface px-2 py-2">
+        <main className="app-main flex-1 overflow-y-auto">
+          {sidebarTab !== 'dashboard' && <div className="mobile-market-row flex md:hidden items-center gap-1.5 border-b border-border bg-surface px-2 py-2">
             <label className="sr-only" htmlFor="mobile-market-type">Market type</label>
             <select id="mobile-market-type" aria-label="Market type" value={marketType} onChange={(event) => {
               const nextType = event.target.value as MarketType;
               setMarketType(nextType);
               const nextMarkets = getMarketsByType(nextType);
               if (nextMarkets.length && !nextMarkets.some((market) => market.symbol === symbol)) setSymbol(nextMarkets[0].symbol);
-            }} className="min-w-0 flex-1 rounded-lg border border-border bg-bg px-2 py-1.5 text-[10px] text-text">
+            }} className="min-w-0 flex-1 rounded-lg border border-border bg-bg px-2 py-1.5 text-xs text-text">
               {MARKET_TYPES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
             </select>
             <label className="sr-only" htmlFor="mobile-market-symbol">Market symbol</label>
-            <select id="mobile-market-symbol" aria-label="Market symbol" value={symbol} onChange={(event) => setSymbol(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-border bg-bg px-2 py-1.5 text-[10px] text-text">
+            <select id="mobile-market-symbol" aria-label="Market symbol" value={symbol} onChange={(event) => setSymbol(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-border bg-bg px-2 py-1.5 text-xs text-text">
               {availableMarkets.map((market) => <option key={market.symbol} value={market.symbol}>{market.label}</option>)}
             </select>
             <label className="sr-only" htmlFor="mobile-timeframe">Analysis timeframe</label>
-            <select id="mobile-timeframe" aria-label="Analysis timeframe" value={timeframe} onChange={(event) => setTimeframe(event.target.value as Timeframe)} className="w-16 rounded-lg border border-border bg-bg px-2 py-1.5 text-[10px] text-text">
+            <select id="mobile-timeframe" aria-label="Analysis timeframe" value={timeframe} onChange={(event) => setTimeframe(event.target.value as Timeframe)} className="w-16 rounded-lg border border-border bg-bg px-2 py-1.5 text-xs text-text">
               {TIMEFRAMES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
             </select>
           </div>}
@@ -461,6 +444,7 @@ export default function Dashboard() {
           {perfOverlayEnabled && <PerfOverlay candleCount={candles.length} />}
         </main>
       </div>
+      <MobileNavigation activeTab={sidebarTab} isAdmin={isAdmin} onNavigate={navigateToTab} onSignOut={() => void signOut()} />
     </div>
   );
 }
@@ -514,7 +498,7 @@ function NotificationBell({ userId, onOpenNews }: { userId?: string; onOpenNews:
       <Bell className="h-4 w-4" />
       {!!notifications.filter((item) => !item.read_at).length && <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-primary" />}
     </button>
-    {open && <div className="absolute right-0 top-full z-50 mt-2 w-80 rounded-xl border border-border bg-surface p-2 shadow-xl"><div className="px-3 py-2 text-xs font-semibold">News updates</div>{error && <p role="alert" className="px-3 py-2 text-xs text-warning">Notifications are unavailable.</p>}{notifications.length ? <div className="max-h-80 overflow-y-auto">{notifications.map((item) => <button type="button" key={item.id} onClick={() => void openNews(item)} className={`block w-full rounded-lg px-3 py-2 text-left hover:bg-bg ${item.read_at ? 'text-muted' : 'text-text'}`}><span className="block text-xs font-medium">{item.title}</span>{item.body && <span className="mt-1 block text-[10px] text-muted">{item.body}</span>}<time className="mt-1 block text-[10px] text-muted">{new Date(item.created_at).toLocaleString()}</time></button>)}</div> : !error && <p className="px-3 py-4 text-xs text-muted">No news updates yet.</p>}</div>}
+    {open && <div className="absolute right-0 top-full z-50 mt-2 w-80 rounded-xl border border-border bg-surface p-2 shadow-xl"><div className="px-3 py-2 text-xs font-semibold">News updates</div>{error && <p role="alert" className="px-3 py-2 text-xs text-warning">Notifications are unavailable.</p>}{notifications.length ? <div className="max-h-80 overflow-y-auto">{notifications.map((item) => <button type="button" key={item.id} onClick={() => void openNews(item)} className={`block w-full rounded-lg px-3 py-2 text-left hover:bg-bg ${item.read_at ? 'text-muted' : 'text-text'}`}><span className="block text-xs font-medium">{item.title}</span>{item.body && <span className="mt-1 block text-xs text-muted">{item.body}</span>}<time className="mt-1 block text-xs text-muted">{new Date(item.created_at).toLocaleString()}</time></button>)}</div> : !error && <p className="px-3 py-4 text-xs text-muted">No news updates yet.</p>}</div>}
   </div>;
 }
 
@@ -535,9 +519,9 @@ function AvatarMenu({ email, displayName, avatarPath, role, onSettings, onSignOu
       <span className="hidden max-w-40 truncate text-xs font-medium sm:block">{displayName || email}</span>
     </button>
     {open && <div role="menu" className="absolute right-0 top-full z-50 mt-2 w-64 rounded-xl border border-border bg-surface p-2 shadow-xl">
-      <div className="border-b border-border px-3 py-2"><div className="truncate text-sm font-medium text-text">{displayName || 'Account details'}</div><div className="truncate text-xs text-muted">{email}</div><div className="mt-1 text-[10px] uppercase tracking-wide text-muted">{role}</div></div>
+      <div className="border-b border-border px-3 py-2"><div className="truncate text-sm font-medium text-text">{displayName || 'Account details'}</div><div className="truncate text-xs text-muted">{email}</div><div className="mt-1 text-xs uppercase tracking-wide text-muted">{role}</div></div>
       <button type="button" role="menuitem" onClick={() => { setOpen(false); onSettings(); }} className="mt-1 w-full rounded-lg px-3 py-2 text-left text-sm text-text hover:bg-bg">Profile & settings</button>
-      <button type="button" role="menuitem" onClick={onSignOut} className="w-full rounded-lg px-3 py-2 text-left text-sm text-text hover:bg-bg">Sign out</button>
+      <button type="button" role="menuitem" onClick={onSignOut} className="w-full rounded-lg px-3 py-2 text-left text-sm text-danger hover:bg-danger/10">Sign out</button>
     </div>}
   </div>;
 }
@@ -580,15 +564,15 @@ function PublishedArticles() {
           className="w-full text-left bg-surface border border-border rounded-xl p-4 hover:border-primary/20 hover:shadow-card-hover transition-all duration-200"
         >
           <div className="flex items-center gap-2 mb-1.5">
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/8 text-primary capitalize font-medium">{a.contentType}</span>
+            <span className="text-xs px-1.5 py-0.5 rounded bg-primary/8 text-primary capitalize font-medium">{a.contentType}</span>
             {a.tags.map((t: string) => (
-              <span key={t} className="text-[10px] text-muted">#{t}</span>
+              <span key={t} className="text-xs text-muted">#{t}</span>
             ))}
           </div>
           <div className="text-sm font-medium text-text">{a.title}</div>
           {a.excerpt && <div className="text-xs text-muted mt-1 line-clamp-2">{a.excerpt}</div>}
           {a.publishedAt && (
-            <div className="text-[10px] text-muted mt-2">{new Date(a.publishedAt).toLocaleDateString()}</div>
+            <div className="text-xs text-muted mt-2">{new Date(a.publishedAt).toLocaleDateString()}</div>
           )}
         </button>
       ))}

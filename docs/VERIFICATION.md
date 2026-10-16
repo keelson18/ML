@@ -380,3 +380,18 @@ Regression coverage includes Twelve Data BTCUSD mapping, strict multi-timeframe 
 ### Strict provider freshness rerun — 2026-10-15 03:32–03:33 UTC
 
 The configured strict probe was rerun from the current worktree. BTCUSD/Twelve Data returned 60 candles with at least 59 closed and fresh on each required frame: 4h latest close `2026-10-14T20:00:00Z` (checked `03:32:31Z`); 1d `2026-10-14T00:00:00Z` (`03:32:40Z`); 1h `2026-10-15T02:00:00Z` (`03:32:48Z`); 15m `2026-10-15T03:15:00Z` (`03:32:56Z`); 5m `2026-10-15T03:25:00Z` (`03:33:04Z`). The probe exited **0**. This is a second successful point-in-time probe; `AUTONOMOUS_TRADING=false` remains set, so it still does not prove order execution or sustained availability.
+
+## Responsive UI sizing - 2026-10-16
+
+- **Font audit:** baseline in this checkout had 34 CSS `font-size` rules at 8–11px and 94 `text-[8–11px]` utilities. Current source has 0 literal CSS sizes in that range and 0 such utilities; replaced rules/classes use 12px or larger tokens/utilities. The 11px `--fs-2xs` token remains available for secondary captions but is not currently used for visible text.
+- **Sidebar:** collapse state, props, controls, icons, and collapsed CSS removed. Desktop sidebar stays expanded at 248px. Admin remains conditional on the role supplied by the authenticated profile; server checks remain authoritative.
+- **Checks:** `npm run check:ui-layout`, `npm run typecheck`, `npm run lint`, `npm test` (67 files / 426 tests), and `npm run build` PASS. Build emits the existing large application chunk warning.
+- **Browser screenshots / visual review:** NOT-VERIFIED. No viewport screenshots or authenticated page review were captured in this session. 390x844, 414x896, 768x1024, 1280x800, and 1440x900 overflow, clipped text, overlap, text scale, and touch targets remain unverified.
+- **iPhone XR Safari:** NOT-VERIFIED. The implementation uses a five-item bottom tab bar and More sheet, but it has not been checked on real Safari. Owner checks: read text without zoom; reach the bottom bar with Safari controls visible; open More and verify Settings/Admin access; chart sizing and pinch/scroll; input focus zoom; Trader Desk usability; landscape rotation; sideways scrolling.
+
+## Code review follow-up — 2026-10-16
+
+- Replaced the remaining mobile slide-over drawer with the five-item tab bar and full-height More sheet; More contains every secondary route, Settings, admin-only Admin, and red Sign out. Added keyboard focus cycling and Escape close behavior.
+- Dashboard chart height and terminal frame now derive from `100dvh` on small screens; safe-area viewport metadata and bottom padding keep content clear of the tab bar. Device and screenshot review remain NOT-VERIFIED.
+- Replaced System Metrics' unwritten legacy-table dependency with the backend operational overview, and System Logs now reads admin audit events from the protected backend endpoint.
+- `npm run typecheck`, `npm run lint`, `npm run check:ui-layout`, `npm test` (68 files / 428 tests), and `npm run build` PASS. The build still warns about the large App chunk.

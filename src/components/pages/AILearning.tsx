@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Brain, Database, FlaskConical, RefreshCw, ShieldCheck } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { authenticatedBackendRequest } from '../../lib/backend-api';
 
 interface ModelVersion {
   id: string;
@@ -35,6 +36,10 @@ export default function AILearning() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [search, setSearch] = useState('');
+  const [hypothesis, setHypothesis] = useState('');
+  const [sourceType, setSourceType] = useState<LearningEvent['source_type']>('research');
+  const [savingEvent, setSavingEvent] = useState(false);
+  const [eventMessage, setEventMessage] = useState('');
   const requestId = useRef(0);
 
   const load = useCallback(async () => {
@@ -76,12 +81,37 @@ export default function AILearning() {
   const accuracies = versions.map((version) => Number(version.metrics.accuracy)).filter(Number.isFinite);
   const averageAccuracy = accuracies.length ? accuracies.reduce((sum, value) => sum + value, 0) / accuracies.length : null;
 
+  const saveLearningEvent = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!hypothesis.trim()) return;
+    setSavingEvent(true);
+    setEventMessage('');
+    try {
+      await authenticatedBackendRequest('/api/v1/learning/events', {
+        method: 'POST',
+        body: JSON.stringify({ sourceType, hypothesis: hypothesis.trim(), observation: {} }),
+      });
+      setHypothesis('');
+      setEventMessage('Learning note saved to your account.');
+      await load();
+    } catch (cause) {
+      setEventMessage(cause instanceof Error ? cause.message : 'Could not save the learning note.');
+    } finally { setSavingEvent(false); }
+  };
+
   return (
     <div className="page-frame space-y-6">
       <div className="page-heading"><div className="page-heading-copy"><div className="page-eyebrow"><Brain className="w-3.5 h-3.5" /> Model operations</div><h1>AI Learning Center</h1><p>Review account-scoped learning events, research experiments, and registered model versions.</p></div><button type="button" onClick={() => void load()} disabled={loading} className="p-2 rounded-lg hover:bg-surface text-muted disabled:opacity-50" title="Refresh learning data" aria-label="Refresh learning data"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /></button></div>
       {error && <div role="alert" className="text-xs text-danger bg-danger/10 border border-danger/20 rounded-lg p-3">Could not load all learning data. Verify the connected database policies and try again.</div>}
 
       <label className="block max-w-xl text-xs font-medium text-muted">Search learning records<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Model, status, hypothesis, or dataset" className="mt-1 block w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-muted/60" /></label>
+
+      <form onSubmit={(event) => void saveLearningEvent(event)} className="grid gap-3 rounded-xl border border-border bg-surface p-4 sm:grid-cols-[minmax(10rem,0.35fr)_1fr_auto] sm:items-end">
+        <label className="text-xs font-medium text-muted">Note type<select value={sourceType} onChange={(event) => setSourceType(event.target.value as LearningEvent['source_type'])} className="mt-1 block min-h-11 w-full rounded-lg border border-border bg-bg px-3 text-sm text-text"><option value="research">Research</option><option value="paper_trade">Paper trade</option><option value="risk_event">Risk event</option><option value="data_quality">Data quality</option></select></label>
+        <label className="text-xs font-medium text-muted">Record a learning hypothesis<input value={hypothesis} onChange={(event) => setHypothesis(event.target.value)} maxLength={2000} required placeholder="What should be reviewed or learned?" className="mt-1 block min-h-11 w-full rounded-lg border border-border bg-bg px-3 text-sm text-text placeholder:text-muted/60" /></label>
+        <button type="submit" disabled={savingEvent || !hypothesis.trim()} className="min-h-11 rounded-lg bg-primary px-4 text-sm font-semibold text-black disabled:opacity-50">{savingEvent ? 'Saving…' : 'Save note'}</button>
+        {eventMessage && <p role="status" className="text-xs text-muted sm:col-span-3">{eventMessage}</p>}
+      </form>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Stat icon={Brain} title="Model Versions" value={loading ? '…' : String(versions.length)} detail={latest ? `Latest ${latest.version} · ${latest.status}` : 'No versions registered'} />
@@ -95,15 +125,15 @@ export default function AILearning() {
       </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <section className="bg-surface border border-border rounded-xl p-4"><h2 className="text-xs font-medium text-muted mb-3">Recent Learning Events</h2>{loading ? <p className="text-xs text-muted">Loading…</p> : events.length ? <div className="space-y-2">{visibleEvents.slice(0, 8).map((event) => <article key={event.id} className="rounded-lg bg-bg/50 border border-border/60 p-3"><div className="flex items-center justify-between gap-2"><span className="text-[10px] uppercase text-primary">{event.source_type} · {event.status}</span><time className="text-[10px] text-muted">{new Date(event.created_at).toLocaleDateString()}</time></div><p className="text-xs mt-1">{event.hypothesis}</p></article>)}</div> : <p className="text-xs text-muted">No learning events have been recorded for this account.</p>}</section>
-        <section className="bg-surface border border-border rounded-xl p-4"><h2 className="text-xs font-medium text-muted mb-3">Research Experiments</h2>{loading ? <p className="text-xs text-muted">Loading…</p> : experiments.length ? <div className="space-y-2">{visibleExperiments.slice(0, 8).map((experiment) => <article key={experiment.id} className="rounded-lg bg-bg/50 border border-border/60 p-3"><div className="flex items-center justify-between gap-2"><strong className="text-xs">{experiment.name}</strong><span className="text-[10px] uppercase text-muted">{experiment.status}</span></div><p className="text-xs text-muted mt-1">{experiment.hypothesis}</p><div className="text-[10px] text-muted mt-2">Dataset {experiment.dataset_id} · {new Date(experiment.created_at).toLocaleDateString()}</div></article>)}</div> : <p className="text-xs text-muted">No research experiments have been saved for this account.</p>}</section>
+        <section className="bg-surface border border-border rounded-xl p-4"><h2 className="text-xs font-medium text-muted mb-3">Recent Learning Events</h2>{loading ? <p className="text-xs text-muted">Loading…</p> : visibleEvents.length ? <div className="space-y-2">{visibleEvents.slice(0, 8).map((event) => <article key={event.id} className="rounded-lg bg-bg/50 border border-border/60 p-3"><div className="flex items-center justify-between gap-2"><span className="text-xs uppercase text-primary">{event.source_type} · {event.status}</span><time className="text-xs text-muted">{new Date(event.created_at).toLocaleDateString()}</time></div><p className="text-xs mt-1">{event.hypothesis}</p></article>)}</div> : <p className="text-xs text-muted">{events.length ? 'No learning events match this search.' : 'No learning events have been recorded for this account.'}</p>}</section>
+        <section className="bg-surface border border-border rounded-xl p-4"><h2 className="text-xs font-medium text-muted mb-3">Research Experiments</h2>{loading ? <p className="text-xs text-muted">Loading…</p> : visibleExperiments.length ? <div className="space-y-2">{visibleExperiments.slice(0, 8).map((experiment) => <article key={experiment.id} className="rounded-lg bg-bg/50 border border-border/60 p-3"><div className="flex items-center justify-between gap-2"><strong className="text-xs">{experiment.name}</strong><span className="text-xs uppercase text-muted">{experiment.status}</span></div><p className="text-xs text-muted mt-1">{experiment.hypothesis}</p><div className="text-xs text-muted mt-2">Dataset {experiment.dataset_id} · {new Date(experiment.created_at).toLocaleDateString()}</div></article>)}</div> : <p className="text-xs text-muted">{experiments.length ? 'No experiments match this search.' : 'No research experiments have been saved for this account.'}</p>}</section>
       </div>
 
-      <section className="bg-surface border border-border rounded-xl p-4"><h2 className="text-xs font-medium text-muted mb-2">Prediction Accuracy</h2><div className="text-2xl font-semibold">{averageAccuracy == null ? '--' : `${(averageAccuracy * 100).toFixed(1)}%`}</div><p className="text-[10px] text-muted mt-1">Average accuracy from registered model-version metrics; unavailable when versions do not include accuracy values.</p></section>
+      <section className="bg-surface border border-border rounded-xl p-4"><h2 className="text-xs font-medium text-muted mb-2">Prediction Accuracy</h2><div className="text-2xl font-semibold">{averageAccuracy == null ? '--' : `${(averageAccuracy * 100).toFixed(1)}%`}</div><p className="text-xs text-muted mt-1">Average accuracy from registered model-version metrics; unavailable when versions do not include accuracy values.</p></section>
     </div>
   );
 }
 
 function Stat({ icon: Icon, title, value, detail }: { icon: typeof Brain; title: string; value: string; detail: string }) {
-  return <div className="bg-surface border border-border rounded-xl p-4"><div className="flex items-center gap-2 mb-3"><Icon className="w-4 h-4 text-primary" /><h2 className="text-xs font-medium text-muted">{title}</h2></div><div className="text-2xl font-semibold">{value}</div><p className="text-[10px] text-muted mt-1">{detail}</p></div>;
+  return <div className="bg-surface border border-border rounded-xl p-4"><div className="flex items-center gap-2 mb-3"><Icon className="w-4 h-4 text-primary" /><h2 className="text-xs font-medium text-muted">{title}</h2></div><div className="text-2xl font-semibold">{value}</div><p className="text-xs text-muted mt-1">{detail}</p></div>;
 }

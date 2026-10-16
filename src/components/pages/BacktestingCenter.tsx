@@ -18,7 +18,7 @@ interface Props {
 type Range = 100 | 500 | 'all';
 
 export default function BacktestingCenter({ candles, timeframe, symbol, theme, marketLoading, marketError, onRetryMarketData }: Props) {
-  const [capitalInput, setCapitalInput] = useState('10000');
+  const [capitalInput, setCapitalInput] = useState('');
   const [range, setRange] = useState<Range>(100);
   const [selectedStrategy, setSelectedStrategy] = useState(STRATEGY_REGISTRY[0].id);
   const [running, setRunning] = useState(false);
@@ -114,22 +114,22 @@ export default function BacktestingCenter({ candles, timeframe, symbol, theme, m
             <option value="all">All available data ({candles.length})</option>
           </select>
         </Field>
-        <Field id="backtest-capital" label="Initial Capital"><input id="backtest-capital" type="number" min="1" step="100" value={capitalInput} onChange={(event) => { setCapitalInput(event.target.value); setRunError(null); }} className="control-input" /></Field>
+        <Field id="backtest-capital" label="Initial Capital"><input id="backtest-capital" type="number" min="1" step="100" value={capitalInput} onChange={(event) => { setCapitalInput(event.target.value); setResult(null); setRunError(null); }} className="control-input" placeholder="Enter starting capital" /></Field>
       </div>
 
       {marketError && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning"><span>Market data unavailable: {marketError}</span><button type="button" onClick={onRetryMarketData} className="rounded border border-warning/40 px-2 py-1 font-medium hover:bg-warning/10">Retry feed</button></div>}
       {marketLoading && <div role="status" className="text-xs text-muted">Loading historical candles for {symbol}…</div>}
 
       <div className="flex flex-wrap items-center gap-3">
-        <button onClick={runSelectedBacktest} disabled={running || !canRun} className="px-4 py-2 rounded-lg bg-primary text-black text-xs font-semibold disabled:opacity-50 flex items-center gap-2"><Play className="w-3.5 h-3.5" />{running ? 'Running...' : marketLoading ? 'Loading market data…' : marketError ? 'Market data unavailable' : canRun ? 'Run backtest' : selectedAvailability?.reason ?? `Need ${minimumTestCandles} candles`}</button>
+        <button onClick={runSelectedBacktest} disabled={running || !canRun} className="px-4 py-2 rounded-lg bg-primary text-black text-xs font-semibold disabled:opacity-50 flex items-center gap-2"><Play className="w-3.5 h-3.5" />{running ? 'Running...' : marketLoading ? 'Loading market data…' : marketError ? 'Market data unavailable' : canRun ? 'Run backtest' : !capitalInput || Number(capitalInput) <= 0 ? 'Enter initial capital' : selectedAvailability?.reason ?? `Need ${minimumTestCandles} candles`}</button>
         <span className="text-xs text-muted">Warmup: 60 bars · Holding period: 5 bars · No fees or slippage modeled</span>
       </div>
       {runError && <div role="alert" className="text-xs text-danger bg-danger/10 border border-danger/20 rounded-lg p-3">{runError}</div>}
 
-      <div className="grid grid-cols-3 lg:grid-cols-6 gap-3">{metrics.map((metric) => <div key={metric.label} className="bg-surface border border-border rounded-xl p-3"><div className="text-[10px] text-muted mb-1">{metric.label}</div><div className={`text-lg font-semibold tabular-nums ${metric.color}`}>{metric.value}</div></div>)}</div>
+      <div className="grid grid-cols-3 lg:grid-cols-6 gap-3">{metrics.map((metric) => <div key={metric.label} className="bg-surface border border-border rounded-xl p-3"><div className="text-xs text-muted mb-1">{metric.label}</div><div className={`text-lg font-semibold tabular-nums ${metric.color}`}>{metric.value}</div></div>)}</div>
 
       <section className="bg-surface border border-border rounded-xl p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-3"><h2 className="text-xs font-medium text-muted">Equity Curve</h2>{lastRun && <span className="text-[10px] text-muted">{getStrategy(lastRun.strategyId)?.name} · {lastRun.candleCount} candles · ${lastRun.capital.toLocaleString()}</span>}</div>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-3"><h2 className="text-xs font-medium text-muted">Equity Curve</h2>{lastRun && <span className="text-xs text-muted">{getStrategy(lastRun.strategyId)?.name} · {lastRun.candleCount} candles · ${lastRun.capital.toLocaleString()}</span>}</div>
         <div className="h-64 border border-border rounded-lg overflow-hidden">{running ? <div className="h-full flex items-center justify-center text-xs text-muted"><RefreshCw className="w-4 h-4 animate-spin mr-2" />Running simulation</div> : equityCandles.length ? <PriceChart candles={equityCandles} overlays={[]} theme={theme} /> : <div className="h-full flex items-center justify-center text-xs text-muted">Run a backtest to render the equity curve.</div>}</div>
       </section>
 

@@ -22,7 +22,7 @@ export default function MfaChallenge() {
       <label className="block text-xs font-medium">Authentication code<input autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))} required className="mt-1 w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm tracking-[0.3em]" /></label>
       {error && <p role="alert" className="text-xs text-danger">{error}</p>}
       <button type="submit" disabled={busy || code.length !== 6} className="w-full rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-black disabled:opacity-50">{busy ? 'Verifying…' : 'Verify and continue'}</button>
-      <button type="button" disabled={busy} onClick={() => void cancelMfaChallenge()} className="w-full rounded-lg border border-border px-3 py-2 text-xs text-muted">Cancel and sign out</button>
+      <button type="button" disabled={busy} onClick={() => void cancelMfaChallenge()} className="w-full rounded-lg border border-danger/30 px-3 py-2 text-xs text-danger hover:bg-danger/10">Cancel and sign out</button>
     </form>
   </main>;
 }

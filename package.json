@@ -15,6 +15,7 @@
     "typecheck:scripts": "tsc --noEmit --target ES2022 --module ESNext --moduleResolution bundler --types node scripts/probe-configured-markets.ts",
     "check:env": "node scripts/check-env-docs.mjs",
     "check:secrets": "node scripts/check-secrets.mjs",
+    "check:ui-layout": "node scripts/check-ui-layout.mjs",
     "check:priority-test-stubs": "node scripts/check-priority-test-stubs.mjs",
     "probe:markets": "tsx scripts/probe-configured-markets.ts",
     "check:migration-versions": "node scripts/check-migration-versions.mjs",

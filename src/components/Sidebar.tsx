@@ -1,4 +1,4 @@
-import { Activity, BarChart3, Shield, BookOpen, Settings, PanelLeftClose, PanelLeftOpen, TrendingUp, Brain, Zap, Briefcase, History, Star, Bell, Newspaper, AlertTriangle, X, ClipboardList } from 'lucide-react';
+import { Activity, BarChart3, Shield, BookOpen, Settings, TrendingUp, Brain, Zap, Briefcase, History, Star, Bell, Newspaper, AlertTriangle, ClipboardList, LogOut } from 'lucide-react';
 import type { SidebarTab } from '../lib/routes';
 export type { SidebarTab } from '../lib/routes';
 
@@ -6,9 +6,7 @@ interface Props {
   activeTab: SidebarTab;
   onTabChange: (tab: SidebarTab) => void;
   isAdmin: boolean;
-  collapsed?: boolean;
-  mobileOpen?: boolean;
-  onToggle?: () => void;
+  onSignOut: () => void;
 }
 
 const NAV_ITEMS: { key: SidebarTab; label: string; icon: typeof Activity; adminOnly?: boolean }[] = [
@@ -36,30 +34,32 @@ const NAV_GROUPS = [
   { label: 'Control', keys: ['alerts', 'risk', 'admin', 'cms', 'settings'] as SidebarTab[] },
 ];
 
-export default function Sidebar({ activeTab, onTabChange, isAdmin, collapsed, mobileOpen = false, onToggle }: Props) {
+export default function Sidebar({ activeTab, onTabChange, isAdmin, onSignOut }: Props) {
   return (
-    <aside id="app-navigation" className={`app-sidebar ${collapsed ? 'is-collapsed' : ''} ${mobileOpen ? 'is-mobile-open' : ''}`}>
+    <aside id="app-navigation" className="app-sidebar">
       <div className="sidebar-brand">
-        {!collapsed && <div className="flex items-center gap-2 min-w-0"><div className="sidebar-mark"><Activity className="w-3.5 h-3.5 text-primary" /></div><span className="sidebar-wordmark">Quantum <small>INTELLIGENCE</small></span></div>}
-        {collapsed && <div className="w-full flex justify-center"><div className="sidebar-mark"><Activity className="w-3.5 h-3.5 text-primary" /></div></div>}
-        {onToggle && <button onClick={onToggle} className="sidebar-toggle" aria-label={mobileOpen ? 'Close navigation' : collapsed ? 'Expand navigation' : 'Collapse navigation'} title={mobileOpen ? 'Close navigation' : collapsed ? 'Expand navigation' : 'Collapse navigation'}>{mobileOpen ? <X className="w-4 h-4" /> : collapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}</button>}
+        <div className="flex items-center gap-2 min-w-0"><div className="sidebar-mark"><Activity className="w-3.5 h-3.5 text-primary" /></div><span className="sidebar-wordmark">Quantum <small>INTELLIGENCE</small></span></div>
       </div>
 
       <nav className="sidebar-nav" aria-label="Main navigation">
         {NAV_GROUPS.map((group) => <div className="sidebar-group" key={group.label}>
-          {!collapsed && <div className="sidebar-group-label">{group.label}</div>}
+          <div className="sidebar-group-label">{group.label}</div>
           {NAV_ITEMS.filter((item) => group.keys.includes(item.key) && (!item.adminOnly || isAdmin)).map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.key;
-            return <button key={item.key} onClick={() => onTabChange(item.key)} className={`sidebar-link ${isActive ? 'is-active' : ''} ${collapsed ? 'is-icon-only' : ''}`} title={collapsed ? item.label : undefined} aria-current={isActive ? 'page' : undefined}>
+            return <button key={item.key} type="button" onClick={() => onTabChange(item.key)} className={isActive ? 'sidebar-link is-active' : 'sidebar-link'} aria-current={isActive ? 'page' : undefined}>
               <Icon className="sidebar-link-icon" />
-              {!collapsed && <span className="truncate">{item.label}</span>}
+              <span className="truncate">{item.label}</span>
             </button>;
           })}
         </div>)}
       </nav>
 
-      {!collapsed && <div className="sidebar-footer"><div className="sidebar-system"><span /> SYSTEM NOMINAL</div><p>Quantum Intelligence <b>v2.0</b></p></div>}
+      <div className="sidebar-footer">
+        <div className="sidebar-system"><span /> SYSTEM NOMINAL</div>
+        <button type="button" onClick={onSignOut} className="sidebar-sign-out"><LogOut aria-hidden="true" /><span>Sign out</span></button>
+        <p>Quantum Intelligence <b>v2.0</b></p>
+      </div>
     </aside>
   );
 }

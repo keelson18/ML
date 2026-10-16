@@ -66,7 +66,7 @@ export default function CMSViewer({ slug, onBack, allowUnpublished }: Props) {
         {content.tags.length > 0 && (
           <div className="flex gap-1">
             {content.tags.map((tag) => (
-              <span key={tag} className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+              <span key={tag} className="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary">
                 {tag}
               </span>
             ))}

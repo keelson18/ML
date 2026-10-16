@@ -57,7 +57,7 @@ export default function UserManagement() {
         : <div className="space-y-2">{users.map((person) => {
           const selfDemotion = person.id === currentUser?.id && person.role === 'admin';
           return <div key={person.id} className="flex items-center justify-between gap-3 rounded-lg border border-border/50 bg-bg/50 px-3 py-2">
-            <div className="min-w-0"><div className="truncate text-sm font-medium">{person.displayName ?? 'Unknown'}</div><div className="truncate text-xs text-muted">{person.email || 'No email available'}</div><div className="text-[10px] text-muted">ID {person.id.slice(0, 8)} · joined {new Date(person.createdAt).toLocaleDateString()}</div></div>
+            <div className="min-w-0"><div className="truncate text-sm font-medium">{person.displayName ?? 'Unknown'}</div><div className="truncate text-xs text-muted">{person.email || 'No email available'}</div><div className="text-xs text-muted">ID {person.id.slice(0, 8)} · joined {new Date(person.createdAt).toLocaleDateString()}</div></div>
             <button type="button" disabled={updatingId === person.id || selfDemotion} onClick={() => void toggleRole(person)} title={selfDemotion ? 'You cannot remove your own admin role.' : `Change role for ${person.email}`} className={`flex shrink-0 items-center gap-1 rounded px-2.5 py-1.5 text-xs font-medium disabled:opacity-50 ${person.role === 'admin' ? 'bg-primary/15 text-primary hover:bg-primary/25' : 'border border-border bg-surface text-muted hover:text-text'}`}>
               {person.role === 'admin' ? <><Shield className="h-3 w-3" /> Admin</> : <><ShieldOff className="h-3 w-3" /> User</>}
             </button>

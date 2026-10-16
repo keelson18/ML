@@ -53,7 +53,7 @@ export default function PerfOverlay({ candleCount }: Props) {
   }, []);
 
   return (
-    <aside aria-label="Performance metrics" className="fixed bottom-3 left-3 z-50 rounded-md border border-border bg-surface/95 px-3 py-2 font-mono text-[11px] text-muted shadow-lg">
+    <aside aria-label="Performance metrics" className="fixed bottom-3 left-3 z-50 rounded-md border border-border bg-surface/95 px-3 py-2 font-mono text-xs text-muted shadow-lg">
       <p>Bars: {candleCount}</p>
       <p>FPS: {snapshot.fps}</p>
       <p>Long tasks: {snapshot.longTasks}</p>

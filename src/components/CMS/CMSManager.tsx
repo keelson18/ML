@@ -108,13 +108,13 @@ export default function CMSManager() {
               <div className="flex items-center gap-2">
                 <BookOpen className="w-3.5 h-3.5 text-primary shrink-0" />
                 <span className="text-sm font-medium truncate">{c.title}</span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface border border-border text-muted capitalize">
+                <span className="text-xs px-1.5 py-0.5 rounded bg-surface border border-border text-muted capitalize">
                   {c.contentType}
                 </span>
                 {c.published ? (
-                  <span className="text-[10px] text-success">Published</span>
+                  <span className="text-xs text-success">Published</span>
                 ) : (
-                  <span className="text-[10px] text-muted">Draft</span>
+                  <span className="text-xs text-muted">Draft</span>
                 )}
               </div>
               <div className="text-xs text-muted mt-0.5">
