@@ -1,9 +1,10 @@
 ﻿begin;
-select plan(9);
+select plan(16);
 select set_config('request.jwt.claim.role', 'service_role', true);
 select set_config('test.empty_account', 'test-empty-ledger:' || txid_current()::text, true);
 select set_config('test.chain_account', 'test-chain-ledger:' || txid_current()::text, true);
 select set_config('test.state_account', 'test-state-ledger:' || txid_current()::text, true);
+select set_config('test.recovery_account', 'test-recovery-ledger:' || txid_current()::text, true);
 
 do $$
 declare
@@ -23,6 +24,50 @@ begin
     '{"cash":1000,"positions":[],"trades":[]}'::jsonb, '[]'::jsonb)::text, true);
 end;
 $$;
+
+select public.record_paper_account_update(current_setting('test.recovery_account'), -1,
+  '{"cash":1000,"positions":[],"trades":[],"processedCandles":{}}'::jsonb, '[]'::jsonb);
+
+create or replace function public.test_fail_paper_account_update()
+returns trigger language plpgsql as $$
+begin
+  if old.account_id = current_setting('test.recovery_account', true) then
+    raise exception 'injected account write failure';
+  end if;
+  return new;
+end;
+$$;
+create trigger test_fail_paper_account_update
+  before update on public.paper_sim_accounts
+  for each row execute function public.test_fail_paper_account_update();
+
+select throws_ok(
+  $$select public.record_paper_account_update(
+    current_setting('test.recovery_account'), 0,
+    '{"cash":1000,"positions":[],"trades":[],"processedCandles":{"BTCUSD:executor:15m":900}}'::jsonb,
+    '[{"idempotencyKey":"recovery-event","eventType":"test.checkpoint","payload":{"candleTime":900}}]'::jsonb
+  )$$,
+  'P0001', 'injected account write failure', 'a failure after the ledger append aborts the account update transaction'
+);
+
+drop trigger test_fail_paper_account_update on public.paper_sim_accounts;
+drop function public.test_fail_paper_account_update();
+
+select is((select version from public.paper_sim_accounts where account_id = current_setting('test.recovery_account')), 0::bigint,
+  'failed account update leaves the prior version intact');
+select is((select count(*) from public.decision_ledger where account_id = current_setting('test.recovery_account') and idempotency_key = 'recovery-event'), 0::bigint,
+  'failed account update rolls its ledger event back');
+select is(public.record_paper_account_update(
+  current_setting('test.recovery_account'), 0,
+  '{"cash":1000,"positions":[],"trades":[],"processedCandles":{"BTCUSD:executor:15m":900}}'::jsonb,
+  '[{"idempotencyKey":"recovery-event","eventType":"test.checkpoint","payload":{"candleTime":900}}]'::jsonb
+), 1::bigint, 'retry from the unchanged version commits successfully');
+select is((select state->'processedCandles'->>'BTCUSD:executor:15m' from public.paper_sim_accounts where account_id = current_setting('test.recovery_account')), '900',
+  'the retried account state durably contains its candle checkpoint');
+select is((select count(*) from public.decision_ledger where account_id = current_setting('test.recovery_account') and idempotency_key = 'recovery-event'), 1::bigint,
+  'the retried event exists exactly once');
+select is((select ok from public.verify_decision_ledger(current_setting('test.recovery_account'))), true,
+  'the recovered account ledger verifies');
 
 select is((select ok from public.verify_decision_ledger(current_setting('test.empty_account'))), true, 'an empty account ledger has no broken hash chain');
 select is((select checked_rows from public.verify_decision_ledger(current_setting('test.empty_account'))), 0::bigint, 'empty ledger verification checks zero rows');

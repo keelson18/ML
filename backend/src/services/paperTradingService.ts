@@ -19,6 +19,7 @@ import { evaluateEventEntryGate, getEventRiskStatus } from '../trader/event-risk
 import { reconcilePaperAccount } from '../trader/decision-ledger';
 import { candleIndex, candleSeconds, isClosed, selectClosedCandles } from '../trader/candle-math';
 import { config } from '../config';
+import type { PaperAccountWriteFence } from './paperAutopilotLease';
 
 const testAccounts = new Map<string, PaperAccountState>();
 
@@ -54,23 +55,15 @@ async function loadAccount(accountId: string): Promise<LoadedAccount> {
     return { account: created, version: 0 };
   }
   const supabase = getSupabaseClient();
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const { data, error } = await supabase
-      .from('paper_sim_accounts')
-      .select('state,version')
-      .eq('account_id', accountId)
-      .maybeSingle();
-    if (error) throw new Error(`Could not load paper account: ${error.message}`);
-    if (data?.state) return { account: data.state as PaperAccountState, version: Number(data.version) };
-
-    const account: PaperAccountState = { accountId, cash: traderConfig.TRADER_STARTING_EQUITY, positions: [], trades: [] };
-    const { data: createdVersion, error: createError } = await supabase.rpc('record_paper_account_update', {
-      p_account_id: accountId, p_expected_version: -1, p_state: account, p_events: [],
-    });
-    if (createError) throw new Error(`Could not initialize paper account: ${createError.message}`);
-    if (Number(createdVersion) >= 0) return { account, version: Number(createdVersion) };
-  }
-  throw new Error('Could not initialize paper account after concurrent creation.');
+  const { data, error } = await supabase
+    .from('paper_sim_accounts')
+    .select('state,version')
+    .eq('account_id', accountId)
+    .maybeSingle();
+  if (error) throw new Error(`Could not load paper account: ${error.message}`);
+  if (data?.state) return { account: data.state as PaperAccountState, version: Number(data.version) };
+  // Reads never create account state. The next real mutation initializes the row and ledger atomically.
+  return { account: { accountId, cash: traderConfig.TRADER_STARTING_EQUITY, positions: [], trades: [] }, version: -1 };
 }
 
 export function getAccount(accountId = 'autonomy:default') {
@@ -88,7 +81,7 @@ export async function assertPaperAccountIntegrity(accountId: string, account: Pa
   }
 }
 
-export async function storeTradePlan(accountId: string, plan: TradePlan): Promise<void> {
+export async function storeTradePlan(accountId: string, plan: TradePlan, writeFence?: PaperAccountWriteFence): Promise<void> {
   await updateAccount(accountId, (account) => {
     if ((account.tradePlans ?? []).some((candidate) => candidate.id === plan.id)) return { account, result: undefined };
     const event: PlanEvent = {
@@ -97,7 +90,7 @@ export async function storeTradePlan(accountId: string, plan: TradePlan): Promis
       engineVersion: plan.engineVersions['market-structure'], occurredAt: plan.createdAt,
     };
     return { account: { ...account, tradePlans: [...(account.tradePlans ?? []), plan], planEvents: [...(account.planEvents ?? []), event] }, result: undefined };
-  });
+  }, writeFence);
 }
 
 export async function listStoredTradePlans(accountId: string): Promise<TradePlan[]> {
@@ -121,6 +114,7 @@ export async function advanceStoredTradePlans(input: {
   candles: Candle[];
   shadowMode?: boolean;
   entriesAllowed?: boolean;
+  writeFence?: PaperAccountWriteFence;
 }): Promise<StoredPlanExecutionResult> {
   const candleValues = [input.candle.time, input.candle.open, input.candle.high, input.candle.low, input.candle.close, input.candle.volume];
   if (candleValues.some((value) => !Number.isFinite(value)) || input.candle.time < 0
@@ -295,7 +289,7 @@ export async function advanceStoredTradePlans(input: {
       processedCandles: { ...account.processedCandles, [checkpoint]: input.candle.time },
     };
     return { account, result: { plans, events, orders: pendingOrders, filled, shadowSignals } };
-  });
+  }, input.writeFence);
 }
 
 function ledgerEvents(previous: PaperAccountState, next: PaperAccountState) {
@@ -337,6 +331,7 @@ function ledgerEvents(previous: PaperAccountState, next: PaperAccountState) {
 async function updateAccount<T>(
   accountId: string,
   update: (account: PaperAccountState) => { account: PaperAccountState; result: T },
+  writeFence?: PaperAccountWriteFence,
 ): Promise<T> {
   for (let attempt = 0; attempt < 5; attempt++) {
     const loaded = await loadAccount(accountId);
@@ -351,6 +346,8 @@ async function updateAccount<T>(
       p_expected_version: loaded.version,
       p_state: changed.account,
       p_events: ledgerEvents(loaded.account, changed.account),
+      p_lease_owner_id: writeFence?.ownerId ?? null,
+      p_lease_fencing_token: writeFence?.fencingToken ?? null,
     });
     if (error) throw new Error(`Could not atomically record paper account and ledger update: ${error.message}`);
     if (Number(data) >= 0) return changed.result;
@@ -394,7 +391,7 @@ export async function closeOpenPaperPosition(accountId: string, symbol: string):
   });
 }
 
-export async function manageOpenPositions(accountId: string, symbol: string, candle: Candle, history: Candle[] = [candle], invalidationCandles: Candle[] = [], timeframe: Timeframe = traderConfig.MGMT_TIMEFRAME as Timeframe): Promise<PaperTrade[]> {
+export async function manageOpenPositions(accountId: string, symbol: string, candle: Candle, history: Candle[] = [candle], invalidationCandles: Candle[] = [], timeframe: Timeframe = traderConfig.MGMT_TIMEFRAME as Timeframe, writeFence?: PaperAccountWriteFence): Promise<PaperTrade[]> {
   return updateAccount(accountId, (startingAccount) => {
     const checkpoint = candleCheckpoint(symbol, timeframe, 'manager');
     if (startingAccount.processedCandles?.[checkpoint] === candle.time) return { account: startingAccount, result: [] };
@@ -467,7 +464,7 @@ export async function manageOpenPositions(accountId: string, symbol: string, can
       }
     }
     return { account: { ...account, processedCandles: { ...account.processedCandles, [checkpoint]: candle.time } }, result: closedTrades };
-  });
+  }, writeFence);
 }
 
 export async function generateDailyAccountReview(accountId: string, reviewDate: string): Promise<void> {

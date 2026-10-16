@@ -43,7 +43,8 @@ export default function AIAnalysis({ signals, ml, mlStatus, recommendation, onRe
               {ml ? (
                 <div className="space-y-1">
                   <div>Direction: <span className="text-text font-medium capitalize">{ml.prediction}</span></div>
-                  <div>Move: <span className="text-text font-medium">{ml.expected_move_pct >= 0 ? '+' : ''}{ml.expected_move_pct.toFixed(2)}%</span></div>
+                  <div>Calibrated move: <span className="text-text font-medium">{ml.expected_move_pct === null ? 'Not available' : `${ml.expected_move_pct >= 0 ? '+' : ''}${ml.expected_move_pct.toFixed(2)}%`}</span></div>
+                  {ml.edge_status === 'no-edge' && <div className="text-warning">This model did not beat the momentum baseline on its held-out test.</div>}
                   <div>Confidence: <span className="text-text font-medium capitalize">{ml.confidence}</span></div>
                   {mlStatus === 'cached' && <div className="text-warning">Showing the last cached prediction; refresh is unavailable.</div>}
                 </div>

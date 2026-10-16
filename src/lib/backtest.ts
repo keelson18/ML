@@ -58,7 +58,7 @@ export function combineSignals(
       side: ml.prediction === 'up' ? 'buy' : ml.prediction === 'down' ? 'sell' : 'neutral',
       weight: mlWeight,
       confidence: ml.probability,
-      reason: `p=${ml.probability.toFixed(2)}, exp move ${ml.expected_move_pct.toFixed(2)}%`,
+      reason: `p=${ml.probability.toFixed(2)}, ${ml.expected_move_pct === null ? 'expected move unavailable' : `calibrated move ${ml.expected_move_pct.toFixed(2)}%`}`,
     });
   }
 

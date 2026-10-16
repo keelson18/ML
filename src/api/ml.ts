@@ -28,7 +28,7 @@ export const mlApi = {
   async getCachedPrediction(symbol: string, timeframe: Timeframe): Promise<{ prediction: MLPrediction | null }> {
     const { data, error } = await supabase
       .from('ml_predictions')
-      .select('symbol,timeframe,prediction,probability,expected_move_pct,model_version,confidence')
+      .select('symbol,timeframe,prediction,probability,expected_move_pct,model_version,confidence,payload')
       .eq('symbol', symbol)
       .eq('timeframe', timeframe)
       .maybeSingle();
@@ -39,9 +39,12 @@ export const mlApi = {
         timeframe: data.timeframe as Timeframe,
         prediction: data.prediction as MLPrediction['prediction'],
         probability: Number(data.probability),
-        expected_move_pct: Number(data.expected_move_pct),
+        expected_move_pct: data.expected_move_pct === null ? null : Number(data.expected_move_pct),
+        expected_move_calibrated: (data.payload as Partial<MLPrediction> | null)?.expected_move_calibrated,
         model_version: data.model_version,
         confidence: data.confidence as MLPrediction['confidence'],
+        edge_status: (data.payload as Partial<MLPrediction> | null)?.edge_status,
+        momentum_baseline_accuracy: (data.payload as Partial<MLPrediction> | null)?.momentum_baseline_accuracy,
       } : null,
     };
   },

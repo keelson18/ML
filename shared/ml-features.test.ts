@@ -18,7 +18,7 @@ describe('ML feature engineering', () => {
     expect(computeRsi(Array(20).fill(100)).every(Number.isFinite)).toBe(true);
   });
 
-  it('drops labels whose forward move does not exceed the ATR threshold', () => {
+  it('drops labels whose forward move does not exceed the ATR threshold while keeping validation returns aligned', () => {
     const candles = flatCandles(320).map((candle, index) => {
       const close = 100 + index * 0.001;
       return { ...candle, open: close, close, high: close + 0.01, low: close - 0.01 };
@@ -28,8 +28,11 @@ describe('ML feature engineering', () => {
 
     expect(permissive.features.length).toBeGreaterThan(50);
     expect(permissive.labels).toHaveLength(permissive.features.length);
-    expect(strict.features.length).toBeLessThan(permissive.features.length);
+    expect(permissive.sampleIndices).toHaveLength(permissive.features.length);
+    expect(permissive.forwardReturns).toHaveLength(permissive.features.length);
+    expect(strict.features).toHaveLength(permissive.features.length);
     expect(strict.labels).toHaveLength(strict.features.length);
+    expect(strict.labels.filter((label) => label !== null).length).toBeLessThan(permissive.labels.filter((label) => label !== null).length);
   });
 
   it('rejects invalid label thresholds', () => {

@@ -1,4 +1,5 @@
 import type { Candle, Timeframe } from '../../../src/lib/types';
+import { randomUUID } from 'node:crypto';
 import { getMarket } from '../../../src/lib/markets';
 import { getSupabaseClient } from '../db';
 import { config } from '../config';
@@ -10,6 +11,10 @@ import { traderConfig } from '../trader/config';
 import { candleSeconds, latestClosedCandleTime, selectClosedCandles } from '../trader/candle-math';
 import { hasFreshClosedCandleData } from '../trader/market-data-quality';
 import { nextScheduledRunAt } from './candle-clock';
+import { claimPaperAutopilotLease, releasePaperAutopilotLease, renewPaperAutopilotLease, type PaperAutopilotLease } from '../services/paperAutopilotLease';
+
+const AUTOPILOT_LEASE_MS = 90_000;
+const AUTOPILOT_LEASE_RENEW_MS = 20_000;
 
 export function providerRequestSpacingMs(requestsPerWindow = config.massiveRequestsPerWindow, windowMs = config.massiveBudgetWindowMs, traderReservedRequests = config.massiveTraderReservedRequests): number {
   const traderAllocation = Math.max(1, Math.min(requestsPerWindow, traderReservedRequests));
@@ -87,6 +92,7 @@ export class PaperAutopilotScheduler {
   private readonly lastBoundaries = new Map<Timeframe, number>();
   private readonly accountQueues = new Map<string, Promise<void>>();
   private readonly manualRuns = new Set<string>();
+  private readonly workerId = randomUUID();
   private lastCycleAt: string | null = null;
   private nextScheduledAt: string | null = null;
   private lastError: string | null = null;
@@ -254,6 +260,19 @@ export class PaperAutopilotScheduler {
     for (const row of availableRows) {
       const account = snapshots.get(row.account_id)!;
       await this.withAccountLock(row.account_id, async () => {
+        const lease = await claimPaperAutopilotLease(row.account_id, this.workerId, AUTOPILOT_LEASE_MS);
+        if (!lease) return;
+        let leaseLost = false;
+        const heartbeat = setInterval(() => {
+          void renewPaperAutopilotLease(lease, AUTOPILOT_LEASE_MS)
+            .then((renewed) => { if (!renewed) leaseLost = true; })
+            .catch(() => { leaseLost = true; });
+        }, AUTOPILOT_LEASE_RENEW_MS);
+        const requireLease = () => {
+          if (leaseLost) throw new Error('Paper-autopilot lease was lost; account processing stopped.');
+        };
+        try {
+        requireLease();
         const managedSymbols = managedSymbolsByAccount.get(row.account_id)!;
         const accountRequests = requestsByAccount.get(row.account_id)!;
         const missing = [...accountRequests.entries()].flatMap(([symbol, timeframes]) =>
@@ -273,7 +292,7 @@ export class PaperAutopilotScheduler {
           if (due.has(managerTimeframe) && account.positions.some((position) => position.status === 'open' && position.symbol === symbol)) {
             const managerSeries = seriesByKey.get(`${symbol}:${managerTimeframe}`);
             const invalidationSeries = seriesByKey.get(`${symbol}:4h`);
-            if (managerSeries) processed += await this.replayManagement(row.account_id, symbol, managerTimeframe, managerSeries, invalidationSeries, now);
+            if (managerSeries) processed += await this.replayManagement(row.account_id, symbol, managerTimeframe, managerSeries, invalidationSeries, now, lease);
           }
         }
         for (const symbol of verifiedAutopilotSymbols(row.symbols)) {
@@ -294,7 +313,7 @@ export class PaperAutopilotScheduler {
                 const setupCandles = selectClosedCandles(setupSeries.candles, traderConfig.SETUP_TIMEFRAME, now, traderConfig.CLOSE_GRACE_MS);
                 const triggerCandles = selectClosedCandles(triggerSeries.candles, trigger, now, traderConfig.CLOSE_GRACE_MS);
                 const result = createTradePlan({ accountId: row.account_id, symbol, htfCandles: { '1d': dailyCandles, '4h': fourHourCandles }, setupCandles, triggerCandles, triggerTimeframe: trigger, datasetId: `${daily.dataset.id}:${fourHour.dataset.id}:${setupSeries.dataset.id}:${triggerSeries.dataset.id}` });
-                if (result.plan) await storeTradePlan(row.account_id, result.plan);
+                if (result.plan) await storeTradePlan(row.account_id, result.plan, lease);
                 }
               }
             }
@@ -303,10 +322,15 @@ export class PaperAutopilotScheduler {
             if (!due.has(timeframe)) continue;
             const series = seriesByKey.get(`${symbol}:${timeframe}`);
             if (!series || !entriesAllowed) continue;
-            processed += await this.replayEntries(row.account_id, symbol, timeframe, series, now);
+            processed += await this.replayEntries(row.account_id, symbol, timeframe, series, now, lease);
           }
         }
+        requireLease();
         await getSupabaseClient().rpc('touch_paper_autopilot_run', { p_account_id: row.account_id });
+        } finally {
+          clearInterval(heartbeat);
+          await releasePaperAutopilotLease(lease);
+        }
       }).catch(async (error: unknown) => {
         const reason = error instanceof Error ? error.message : 'Paper autopilot account processing failed.';
         pausedReason ??= reason;
@@ -317,7 +341,7 @@ export class PaperAutopilotScheduler {
     return { pausedReason, processed };
   }
 
-  private async replayManagement(accountId: string, symbol: string, timeframe: Timeframe, series: MarketDataSeries, invalidationSeries: MarketDataSeries | undefined, now: number): Promise<number> {
+  private async replayManagement(accountId: string, symbol: string, timeframe: Timeframe, series: MarketDataSeries, invalidationSeries: MarketDataSeries | undefined, now: number, lease: PaperAutopilotLease): Promise<number> {
     const candles = selectClosedCandles(series.candles, timeframe, now, traderConfig.CLOSE_GRACE_MS);
     const invalidationCandles = invalidationSeries
       ? selectClosedCandles(invalidationSeries.candles, '4h', now, traderConfig.CLOSE_GRACE_MS)
@@ -325,17 +349,17 @@ export class PaperAutopilotScheduler {
     const account = await getAccount(accountId);
     const checkpoint = account.processedCandles?.[`${symbol}:manager:${timeframe}`];
     return replaySequentialCandles(candles, checkpoint, traderConfig.SCHEDULER_MAX_CATCH_UP_BARS,
-      (candle, history) => manageOpenPositions(accountId, symbol, candle, history, invalidationCandles, timeframe).then(() => undefined));
+      (candle, history) => manageOpenPositions(accountId, symbol, candle, history, invalidationCandles, timeframe, lease).then(() => undefined));
   }
 
-  private async replayEntries(accountId: string, symbol: string, timeframe: Timeframe, series: MarketDataSeries, now: number): Promise<number> {
+  private async replayEntries(accountId: string, symbol: string, timeframe: Timeframe, series: MarketDataSeries, now: number, lease: PaperAutopilotLease): Promise<number> {
     const candles = selectClosedCandles(series.candles, timeframe, now, traderConfig.CLOSE_GRACE_MS);
     const account = await getAccount(accountId);
     const checkpoint = account.processedCandles?.[`${symbol}:executor:${timeframe}`] ?? account.processedCandles?.[`${symbol}:${timeframe}`];
     return replaySequentialCandles(candles, checkpoint, traderConfig.SCHEDULER_MAX_CATCH_UP_BARS,
       async (candle, history) => {
         const allowEntries = entryCandleIsFresh(candle, timeframe, now);
-        await advanceStoredTradePlans({ accountId, symbol, timeframe, candle, candles: history, entriesAllowed: allowEntries });
+        await advanceStoredTradePlans({ accountId, symbol, timeframe, candle, candles: history, entriesAllowed: allowEntries, writeFence: lease });
       });
   }
 

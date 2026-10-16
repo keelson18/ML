@@ -8,6 +8,7 @@ import { analyzeMarketStructure } from '../market-structure';
 import { adx } from '../indicators/adx';
 
 export type StrategyCategory = 'Trend' | 'Momentum' | 'Breakout' | 'Mean Reversion' | 'Market Structure' | 'Liquidity' | 'Price Action' | 'Volume' | 'Divergence' | 'Volatility' | 'Multi-factor / Confluence' | 'Additional';
+export type StrategyParameters = Readonly<Record<string, number>>;
 
 export interface Strategy {
   id: string;
@@ -20,24 +21,26 @@ export interface Strategy {
   minCandles: number;
   defaultParameters: Record<string, number>;
   requiresVolume?: boolean;
-  detect: (candles: Candle[], timeframe: Timeframe) => Signal[];
+  detect: (candles: Candle[], timeframe: Timeframe, parameters?: StrategyParameters) => Signal[];
 }
 
 const bollingerStrategy: Strategy = {
   id: 'bollinger-volatility',
-  version: '1.0.0',
+  version: '1.1.0',
   name: 'Bollinger Volatility',
   category: 'Additional',
   type: 'volatility',
   description: 'Uses the existing band-compression and price-position setup.',
   timeframes: ['15m', '1h', '4h', '1d'],
   minCandles: 60,
-  defaultParameters: { period: 20, standardDeviations: 2 },
-  detect(candles) {
+  defaultParameters: { period: 20, standardDeviations: 2, squeezeLookback: 50 },
+  detect(candles, _timeframe, parameters = { period: 20, standardDeviations: 2, squeezeLookback: 50 }) {
     const closes = candles.map((c) => c.close);
-    const { upper, lower, middle, width } = bollinger(closes, 20, 2);
+    const period = Math.floor(parameters.period);
+    const squeezeLookback = Math.floor(parameters.squeezeLookback);
+    const { upper, lower, middle, width } = bollinger(closes, period, parameters.standardDeviations);
     const i = closes.length - 1;
-    const lookback = width.slice(Math.max(0, i - 50), i).filter(Number.isFinite);
+    const lookback = width.slice(Math.max(0, i - squeezeLookback), i).filter(Number.isFinite);
     if (!lookback.length || !Number.isFinite(width[i])) return [];
     const isSqueeze = width[i] <= Math.min(...lookback) * 1.2;
     const side: Side = closes[i] > upper[i] ? 'sell' : closes[i] < lower[i] ? 'buy' : isSqueeze && closes[i] > middle[i] ? 'buy' : isSqueeze && closes[i] < middle[i] ? 'sell' : 'neutral';
@@ -57,9 +60,24 @@ export function getStrategy(strategyId: string): Strategy | undefined {
   return STRATEGY_REGISTRY.find((strategy) => strategy.id === strategyId);
 }
 
-function getIneligibilityReason(strategy: Strategy, candles: Candle[], timeframe: Timeframe): string | undefined {
+function effectiveParameters(strategy: Strategy, overrides: StrategyParameters = {}): StrategyParameters | undefined {
+  if (Object.keys(overrides).some((key) => !(key in strategy.defaultParameters))) return undefined;
+  const values = { ...strategy.defaultParameters, ...overrides };
+  for (const [key, value] of Object.entries(values)) {
+    if (!Number.isFinite(value) || value <= 0) return undefined;
+    if (/(period|lookback|swingleft|swingright|factor)$/i.test(key) && !Number.isInteger(value)) return undefined;
+  }
+  if (values.fastPeriod !== undefined && values.slowPeriod !== undefined && values.fastPeriod >= values.slowPeriod) return undefined;
+  if (values.oversold !== undefined && values.overbought !== undefined && values.oversold >= values.overbought) return undefined;
+  if (values.proximity !== undefined && values.proximity >= 0.5) return undefined;
+  return values;
+}
+
+function getIneligibilityReason(strategy: Strategy, candles: Candle[], timeframe: Timeframe, parameters = strategy.defaultParameters): string | undefined {
   if (!strategy.timeframes.includes(timeframe)) return `Not supported on ${timeframe}`;
-  if (candles.length < strategy.minCandles) return `Needs ${strategy.minCandles} candles`;
+  const parameterBars = Math.max(0, ...Object.entries(parameters).filter(([key]) => /(period|lookback|channelperiod|slowperiod)$/i.test(key)).map(([, value]) => value));
+  const requiredCandles = Math.max(strategy.minCandles, parameterBars + 2);
+  if (candles.length < requiredCandles) return `Needs ${requiredCandles} candles`;
   if (strategy.requiresVolume && !candles.some((candle) => candle.volume > 0)) return 'Requires non-zero volume data';
   return undefined;
 }
@@ -71,10 +89,12 @@ export function getStrategyAvailability(candles: Candle[], timeframe: Timeframe)
   });
 }
 
-export function runStrategy(candles: Candle[], timeframe: Timeframe, strategyId: string): Signal[] {
+export function runStrategy(candles: Candle[], timeframe: Timeframe, strategyId: string, overrides: StrategyParameters = {}): Signal[] {
   const strategy = getStrategy(strategyId);
-  if (!strategy || getIneligibilityReason(strategy, candles, timeframe)) return [];
-  return strategy.detect(candles, timeframe).map((result) => ({ ...result, strategyId: strategy.id, strategyVersion: strategy.version }));
+  if (!strategy) return [];
+  const parameters = effectiveParameters(strategy, overrides);
+  if (!parameters || getIneligibilityReason(strategy, candles, timeframe, parameters)) return [];
+  return strategy.detect(candles, timeframe, parameters).map((result) => ({ ...result, strategyId: strategy.id, strategyVersion: strategy.version }));
 }
 
 export interface StrategyExecutionFailure {
@@ -89,7 +109,7 @@ function collectStrategySignals(candles: Candle[], timeframe: Timeframe, strateg
   for (const strategy of strategies) {
     if (getIneligibilityReason(strategy, candles, timeframe)) continue;
     try {
-      signals.push(...strategy.detect(candles, timeframe).map((result) => ({ ...result, strategyId: strategy.id, strategyVersion: strategy.version })));
+      signals.push(...strategy.detect(candles, timeframe, strategy.defaultParameters).map((result) => ({ ...result, strategyId: strategy.id, strategyVersion: strategy.version })));
     } catch {
       failures.push({
         strategyId: strategy.id,

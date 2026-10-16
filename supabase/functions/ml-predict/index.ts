@@ -9,6 +9,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.57.4";
 import { readJsonSafe } from "../../../shared/http.ts";
 import { computeMlFeatures, type MlCandle } from "../../../shared/ml-features.ts";
+import { calibratedExpectedMove, calibrateExpectedReturns, classificationMetrics, modelHasNoEdge, momentumBaselineAccuracy, purgedChronologicalSplit, type ReturnCalibrationBucket } from "../../../shared/ml-baseline.ts";
 
 function corsHeaders(origin: string | undefined): Record<string, string> {
   return {
@@ -54,6 +55,8 @@ function backendUrl(): string | null {
 const BACKEND_URL = backendUrl();
 const PRED_HORIZON = 5; // candles ahead to predict
 const DEFAULT_LABEL_ATR_MULTIPLE = 0.1;
+const TRAINING_EPOCHS = 200;
+const TRAINING_LEARNING_RATE = 0.1;
 
 function labelAtrMultiple(): number {
   const configured = Deno.env.get("ML_LABEL_ATR_MULTIPLE");
@@ -62,14 +65,14 @@ function labelAtrMultiple(): number {
   if (!Number.isFinite(value) || value < 0) throw new Error("ML_LABEL_ATR_MULTIPLE must be a finite non-negative number.");
   return value;
 }
-const TRAIN_FRACTION = 0.7; // chronological split, no shuffling
+const FEATURE_SCHEMA_VERSION = 'ohlcv-14-v2';
 
 // In-memory model state. NOTE: edge functions may reset between requests, so this is
 // best-effort. For durable state we persist to the `ml_predictions` table on each retrain.
 interface ModelState {
   weights: number[];
   bias: number;
-  metrics: { accuracy: number; f1: number; samples: number };
+  metrics: ModelMetrics;
   trainedAt: string;
   dataRange: { start: number; end: number };
   version: string;
@@ -77,6 +80,7 @@ interface ModelState {
   std: number[];
   pair: string;
   timeframe: string;
+  returnCalibration: ReturnCalibrationBucket[];
 }
 const modelStates = new Map<string, ModelState>();
 const trainingFlights = new Map<string, Promise<{ ok: boolean; metrics: ModelMetrics; version: string }>>();
@@ -86,6 +90,11 @@ async function ensureModel(supabase: SupabaseClient, pair: string, timeframe: st
   const key = modelKey(pair, timeframe);
   const existing = modelStates.get(key);
   if (existing) return existing;
+  const persisted = await loadPersistedModel(supabase, pair, timeframe);
+  if (persisted) {
+    modelStates.set(key, persisted);
+    return persisted;
+  }
   let flight = trainingFlights.get(key);
   if (!flight) {
     flight = retrainInternal(supabase, pair, timeframe, accessToken);
@@ -104,8 +113,102 @@ async function ensureModel(supabase: SupabaseClient, pair: string, timeframe: st
 // ---- Feature engineering ----
 // Computes the same feature set as the Python spec: multi-window returns, RSI, MACD,
 // MAs (20/50/200), Bollinger width, volume change, ATR.
-function computeFeatures(candles: Candle[]): { features: number[][]; labels: number[]; valid: boolean } {
+function computeFeatures(candles: Candle[]): { features: number[][]; labels: Array<number | null>; sampleIndices: number[]; forwardReturns: number[]; valid: boolean } {
   return computeMlFeatures(candles as MlCandle[], { predictionHorizon: PRED_HORIZON, minimumMoveAtr: labelAtrMultiple() });
+}
+
+interface ModelMetrics {
+  accuracy: number;
+  f1: number;
+  samples: number;
+  trainAccuracy: number;
+  trainF1: number;
+  trainSamples: number;
+  momentumBaselineAccuracy: number;
+  noEdge: boolean;
+}
+
+interface StoredModelArtifact {
+  symbol: string;
+  timeframe: string;
+  version: string;
+  prediction_horizon: unknown;
+  weights: unknown;
+  bias: unknown;
+  feature_mean: unknown;
+  feature_std: unknown;
+  training_metrics: unknown;
+  test_metrics: unknown;
+  momentum_baseline_accuracy: unknown;
+  no_edge: unknown;
+  return_calibration: unknown;
+  data_start: unknown;
+  data_end: unknown;
+  trained_at: unknown;
+  algorithm: unknown;
+  feature_schema_version: unknown;
+}
+
+function numberArray(value: unknown): number[] | undefined {
+  return Array.isArray(value) && value.every((item) => typeof item === 'number' && Number.isFinite(item)) ? value : undefined;
+}
+
+function storedMetrics(value: unknown): { accuracy: number; f1: number; samples: number } | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const metrics = value as Record<string, unknown>;
+  if (typeof metrics.accuracy !== 'number' || !Number.isFinite(metrics.accuracy)
+    || typeof metrics.f1 !== 'number' || !Number.isFinite(metrics.f1)
+    || metrics.accuracy < 0 || metrics.accuracy > 1 || metrics.f1 < 0 || metrics.f1 > 1
+    || typeof metrics.samples !== 'number' || !Number.isInteger(metrics.samples) || metrics.samples <= 0) return undefined;
+  return { accuracy: metrics.accuracy, f1: metrics.f1, samples: metrics.samples };
+}
+
+function storedCalibration(value: unknown): ReturnCalibrationBucket[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const valid = value.every((item) => {
+    if (!item || typeof item !== 'object') return false;
+    const bucket = item as Record<string, unknown>;
+    return typeof bucket.lowerProbability === 'number' && bucket.lowerProbability >= 0 && bucket.lowerProbability <= 1
+      && typeof bucket.upperProbability === 'number' && bucket.upperProbability >= bucket.lowerProbability && bucket.upperProbability <= 1
+      && typeof bucket.samples === 'number' && Number.isInteger(bucket.samples) && bucket.samples >= 0
+      && (bucket.expectedReturnPct === null || (typeof bucket.expectedReturnPct === 'number' && Number.isFinite(bucket.expectedReturnPct)));
+  });
+  return valid ? value as ReturnCalibrationBucket[] : undefined;
+}
+
+async function loadPersistedModel(supabase: SupabaseClient, pair: string, timeframe: string): Promise<ModelState | undefined> {
+  const { data, error } = await supabase.from('ml_model_artifacts').select('*')
+    .eq('symbol', pair).eq('timeframe', timeframe).order('trained_at', { ascending: false }).limit(1).maybeSingle();
+  if (error) throw new Error(`Could not load persisted ML model: ${error.message}`);
+  if (!data) return undefined;
+  const row = data as unknown as StoredModelArtifact;
+  const weights = numberArray(row.weights);
+  const mean = numberArray(row.feature_mean);
+  const std = numberArray(row.feature_std);
+  const train = storedMetrics(row.training_metrics);
+  const test = storedMetrics(row.test_metrics);
+  const calibration = storedCalibration(row.return_calibration);
+  const baseline = Number(row.momentum_baseline_accuracy);
+  const dataStart = Number(row.data_start);
+  const dataEnd = Number(row.data_end);
+  if (row.algorithm !== 'logistic-regression' || row.feature_schema_version !== FEATURE_SCHEMA_VERSION
+    || Number(row.prediction_horizon) !== PRED_HORIZON || typeof row.version !== 'string'
+    || !weights || !mean || !std || weights.length !== 14 || weights.length !== mean.length || mean.length !== std.length
+    || std.some((value) => value <= 0) || typeof row.bias !== 'number' || !Number.isFinite(row.bias)
+    || !train || !test || !Number.isFinite(baseline) || baseline < 0 || baseline > 1
+    || typeof row.no_edge !== 'boolean' || !calibration
+    || !Number.isFinite(dataStart) || !Number.isFinite(dataEnd) || dataEnd < dataStart
+    || typeof row.trained_at !== 'string') throw new Error('Persisted ML model artifact failed schema validation.');
+  const metrics: ModelMetrics = {
+    accuracy: test.accuracy, f1: test.f1, samples: test.samples,
+    trainAccuracy: train.accuracy, trainF1: train.f1, trainSamples: train.samples,
+    momentumBaselineAccuracy: baseline, noEdge: row.no_edge,
+  };
+  return {
+    weights, mean, std, bias: row.bias, metrics, returnCalibration: calibration,
+    trainedAt: row.trained_at, dataRange: { start: dataStart, end: dataEnd },
+    version: row.version, pair, timeframe,
+  };
 }
 
 // ---- Logistic regression with gradient descent ----
@@ -150,14 +253,20 @@ function predictProba(model: { weights: number[]; bias: number; mean: number[]; 
 // ---- Data fetching ----
 // Routes through the backend market data service so ML predictions use the same
 // provider (Massive/Twelve Data) as the UI, not a separate legacy feed.
-async function fetchCandles(symbol: string, timeframe: string, limit: number, accessToken: string): Promise<{ candles: Candle[]; provider: string; quoteCurrency: string }> {
+async function fetchCandles(symbol: string, timeframe: string, limit: number, accessToken: string): Promise<{ candles: Candle[]; provider: string; quoteCurrency: string; sourceInstrument: string; datasetId: string }> {
   if (!BACKEND_URL) throw new Error('Market data service is not configured.');
   const url = `${BACKEND_URL}/api/v1/market/candles/${encodeURIComponent(symbol)}?timeframe=${encodeURIComponent(timeframe)}&limit=${limit}`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
-  const { payload } = await readJsonSafe<{ candles: Candle[]; dataset: { provider: string; quoteCurrency: string } }>(res);
+  const { payload } = await readJsonSafe<{ candles: Candle[]; dataset: { id: string; provider: string; quoteCurrency: string; sourceInstrument: string } }>(res);
   if (!res.ok) throw new Error(`Market data service ${res.status}`);
   if (payload === null) throw new Error('Market data service returned an empty or invalid response.');
-  return { candles: payload.candles, provider: payload.dataset.provider, quoteCurrency: payload.dataset.quoteCurrency };
+  return {
+    candles: payload.candles,
+    provider: payload.dataset.provider,
+    quoteCurrency: payload.dataset.quoteCurrency,
+    sourceInstrument: payload.dataset.sourceInstrument,
+    datasetId: payload.dataset.id,
+  };
 }
 
 // ---- Rate limiting (durable via Supabase table) ----
@@ -204,30 +313,52 @@ Deno.serve(async (req: Request) => {
     const url = new URL(req.url);
     const path = url.pathname.split('/').pop() ?? '';
 
-    // /model/status is public (metadata only); /predict and /retrain require the API key.
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+    );
+
+    // /model/status is public (metadata only); artifact weights remain service-role only.
     if (path === 'model-status' || path === 'status') {
       const pair = url.searchParams.get('pair');
       const timeframe = url.searchParams.get('timeframe');
       const modelState = pair && timeframe
         ? modelStates.get(modelKey(pair, timeframe))
         : Array.from(modelStates.values()).at(-1);
+      let artifact: Record<string, unknown> | null = null;
+      if (!modelState) {
+        let query = supabase.from('ml_model_artifacts')
+          .select('symbol,timeframe,version,trained_at,data_start,data_end,training_metrics,test_metrics,momentum_baseline_accuracy,no_edge')
+          .order('trained_at', { ascending: false }).limit(1);
+        if (pair && timeframe) query = query.eq('symbol', pair).eq('timeframe', timeframe);
+        const { data, error } = await query.maybeSingle();
+        if (error) return jsonResponse({ error: 'Model status is temporarily unavailable.' }, 503, headers);
+        artifact = data as Record<string, unknown> | null;
+      }
+      const modelMetrics = modelState?.metrics ?? (artifact ? {
+        accuracy: artifact.test_metrics && (artifact.test_metrics as Record<string, unknown>).accuracy,
+        f1: artifact.test_metrics && (artifact.test_metrics as Record<string, unknown>).f1,
+        samples: artifact.test_metrics && (artifact.test_metrics as Record<string, unknown>).samples,
+        trainAccuracy: artifact.training_metrics && (artifact.training_metrics as Record<string, unknown>).accuracy,
+        trainF1: artifact.training_metrics && (artifact.training_metrics as Record<string, unknown>).f1,
+        trainSamples: artifact.training_metrics && (artifact.training_metrics as Record<string, unknown>).samples,
+        momentumBaselineAccuracy: Number(artifact.momentum_baseline_accuracy),
+        noEdge: artifact.no_edge,
+      } : null);
+      const noEdge = modelState?.metrics.noEdge ?? artifact?.no_edge;
       return jsonResponse({
-        trained: Boolean(modelState),
-        version: modelState?.version ?? 'untrained',
-        trainedAt: modelState?.trainedAt ?? null,
-        metrics: modelState?.metrics ?? null,
-        dataRange: modelState?.dataRange ?? null,
-        pair: modelState?.pair ?? null,
-        timeframe: modelState?.timeframe ?? null,
+        trained: Boolean(modelState || artifact),
+        version: modelState?.version ?? artifact?.version ?? 'untrained',
+        trainedAt: modelState?.trainedAt ?? artifact?.trained_at ?? null,
+        metrics: modelMetrics,
+        edgeStatus: noEdge === undefined ? 'untrained' : (noEdge ? 'no-edge' : 'beats-momentum-baseline'),
+        dataRange: modelState?.dataRange ?? (artifact ? { start: artifact.data_start, end: artifact.data_end } : null),
+        pair: modelState?.pair ?? artifact?.symbol ?? pair ?? null,
+        timeframe: modelState?.timeframe ?? artifact?.timeframe ?? timeframe ?? null,
         availableModels: [...modelStates.values()].map(({ pair: modelPair, timeframe: modelTimeframe, version }) => ({ pair: modelPair, timeframe: modelTimeframe, version })),
         horizon: PRED_HORIZON,
       }, 200, headers);
     }
-
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
-    );
 
     if (path === 'predict' && req.method === 'POST') {
       const userId = await authenticatedUser(req);
@@ -253,7 +384,8 @@ Deno.serve(async (req: Request) => {
       const last = features[features.length - 1];
       const probUp = predictProba(modelState, last);
       const prediction = probUp > 0.55 ? 'up' : probUp < 0.45 ? 'down' : 'flat';
-      const expectedMovePct = (probUp - 0.5) * 2 * (modelState.metrics.accuracy * 5);
+      const calibratedMove = calibratedExpectedMove(probUp, modelState.returnCalibration);
+      const expectedMovePct = calibratedMove === null ? null : Number(calibratedMove.toFixed(2));
       const confidence = probUp > 0.7 || probUp < 0.3 ? 'high' : probUp > 0.6 || probUp < 0.4 ? 'medium' : 'low';
 
       const out = {
@@ -261,8 +393,11 @@ Deno.serve(async (req: Request) => {
         timeframe,
         prediction,
         probability: Number(probUp.toFixed(3)),
-        expected_move_pct: Number(expectedMovePct.toFixed(2)),
+        expected_move_pct: expectedMovePct,
+        expected_move_calibrated: expectedMovePct !== null,
         model_version: modelState.version,
+        edge_status: modelState.metrics.noEdge ? 'no-edge' : 'beats-momentum-baseline',
+        momentum_baseline_accuracy: modelState.metrics.momentumBaselineAccuracy,
         confidence,
         dataProvider: provider,
         quoteCurrency,
@@ -315,54 +450,113 @@ function jsonResponse(body: unknown, status = 200, headersOverride?: Record<stri
   });
 }
 
-interface ModelMetrics { accuracy: number; f1: number; samples: number }
+interface ModelMetrics {
+  accuracy: number;
+  f1: number;
+  samples: number;
+  trainAccuracy: number;
+  trainF1: number;
+  trainSamples: number;
+  momentumBaselineAccuracy: number;
+  noEdge: boolean;
+}
 
 async function retrainInternal(supabase: SupabaseClient, symbol: string, timeframe: string, accessToken?: string): Promise<{ ok: boolean; metrics: ModelMetrics; version: string }> {
   const token = accessToken ?? Deno.env.get('SERVICE_ACCESS_TOKEN') ?? '';
-  const { candles } = await fetchCandles(symbol, timeframe, 1000, token);
-  const { features, labels, valid } = computeFeatures(candles);
+  const { candles, provider, quoteCurrency, sourceInstrument, datasetId } = await fetchCandles(symbol, timeframe, 1000, token);
+  const { features, labels, sampleIndices, forwardReturns, valid } = computeFeatures(candles);
   if (!valid) throw new Error('Insufficient data for training');
 
-  // Chronological split: first 70% train, next 15% val, last 15% test. No shuffling.
-  const n = features.length;
-  const trainEnd = Math.floor(n * TRAIN_FRACTION);
-  const valEnd = Math.floor(n * 0.85);
-  const trainX = features.slice(0, trainEnd);
-  const trainY = labels.slice(0, trainEnd);
-  const testX = features.slice(valEnd);
-  const testY = labels.slice(valEnd);
-
-  const model = trainLogistic(trainX, trainY, 200, 0.1);
-  // Evaluate on test set.
-  let tp = 0, fp = 0, tn = 0, fn = 0;
-  for (let i = 0; i < testX.length; i++) {
-    const p = predictProba(model, testX[i]);
-    const pred = p > 0.5 ? 1 : 0;
-    if (pred === 1 && testY[i] === 1) tp++;
-    else if (pred === 1 && testY[i] === 0) fp++;
-    else if (pred === 0 && testY[i] === 0) tn++;
-    else fn++;
+  // Split by candle time and purge forward-label windows across every boundary.
+  const split = purgedChronologicalSplit(sampleIndices, candles.length, PRED_HORIZON);
+  const labeled = (indices: number[]) => indices.filter((row) => labels[row] !== null);
+  const featuresFor = (indices: number[]) => indices.map((row) => features[row]!);
+  const labelsFor = (indices: number[]) => indices.map((row) => labels[row]!);
+  const trainingRows = labeled(split.train);
+  const validationRows = split.validation;
+  const testRows = labeled(split.test);
+  const training = { x: featuresFor(trainingRows), y: labelsFor(trainingRows) };
+  const validation = { x: featuresFor(validationRows), returns: validationRows.map((row) => forwardReturns[row]!) };
+  const test = { x: featuresFor(testRows), y: labelsFor(testRows) };
+  if (training.y.length < 50 || validation.y.length < 10 || test.y.length < 10) {
+    throw new Error('Insufficient purged chronological train, validation, or test samples.');
   }
-  const accuracy = (tp + tn) / (testX.length || 1);
-  const precision = tp / (tp + fp || 1);
-  const recall = tp / (tp + fn || 1);
-  const f1 = 2 * (precision * recall) / (precision + recall || 1);
-  const version = new Date().toISOString().slice(0, 10);
+
+  const model = trainLogistic(training.x, training.y, TRAINING_EPOCHS, TRAINING_LEARNING_RATE);
+  const trainMetrics = classificationMetrics(training.x.map((features) => predictProba(model, features) > 0.5 ? 1 : 0), training.y);
+  const validationProbabilities = validation.x.map((features) => predictProba(model, features));
+  const returnCalibration = calibrateExpectedReturns(validationProbabilities, validation.returns, 5);
+  // The test period is untouched by training and calibration.
+  const testPredictions = test.x.map((features) => predictProba(model, features) > 0.5 ? 1 : 0);
+  const testMetrics = classificationMetrics(testPredictions, test.y);
+  const baselineAccuracy = momentumBaselineAccuracy(test.x.map((features) => features[0]!), test.y);
+  const noEdge = modelHasNoEdge(testMetrics.accuracy, baselineAccuracy);
+  const trainedAt = new Date().toISOString();
+  const version = `${trainedAt.replace(/[-:.TZ]/g, '')}-${crypto.randomUUID()}`;
+  const persistedTestMetrics = {
+    accuracy: Number(testMetrics.accuracy.toFixed(3)),
+    f1: Number(testMetrics.f1.toFixed(3)),
+    samples: testMetrics.samples,
+    validationSamples: validation.x.length,
+    testStartIndex: split.testBoundary,
+    predictionHorizon: PRED_HORIZON,
+  };
 
   const modelState: ModelState = {
     weights: model.weights,
     bias: model.bias,
-    metrics: { accuracy: Number(accuracy.toFixed(3)), f1: Number(f1.toFixed(3)), samples: n },
-    trainedAt: new Date().toISOString(),
+    metrics: {
+      accuracy: Number(testMetrics.accuracy.toFixed(3)),
+      f1: Number(testMetrics.f1.toFixed(3)),
+      samples: testMetrics.samples,
+      trainAccuracy: Number(trainMetrics.accuracy.toFixed(3)),
+      trainF1: Number(trainMetrics.f1.toFixed(3)),
+      trainSamples: trainMetrics.samples,
+      momentumBaselineAccuracy: Number(baselineAccuracy.toFixed(3)),
+      noEdge,
+    },
+    trainedAt,
     dataRange: { start: candles[0].time, end: candles[candles.length - 1].time },
     version,
     mean: model.mean,
     std: model.std,
     pair: symbol,
     timeframe,
+    returnCalibration,
   };
+  const { error: persistError } = await supabase.from('ml_model_artifacts').insert({
+    symbol,
+    timeframe,
+    version,
+    algorithm: 'logistic-regression',
+    feature_schema_version: FEATURE_SCHEMA_VERSION,
+    prediction_horizon: PRED_HORIZON,
+    minimum_move_atr: labelAtrMultiple(),
+    training_parameters: { epochs: TRAINING_EPOCHS, learningRate: TRAINING_LEARNING_RATE, trainFraction: 0.7, validationFraction: 0.15, testFraction: 0.15 },
+    dataset_id: datasetId,
+    provider,
+    source_instrument: sourceInstrument,
+    quote_currency: quoteCurrency,
+    weights: model.weights,
+    bias: model.bias,
+    feature_mean: model.mean,
+    feature_std: model.std,
+    training_metrics: {
+      accuracy: Number(trainMetrics.accuracy.toFixed(3)),
+      f1: Number(trainMetrics.f1.toFixed(3)),
+      samples: trainMetrics.samples,
+    },
+    test_metrics: persistedTestMetrics,
+    momentum_baseline_accuracy: Number(baselineAccuracy.toFixed(3)),
+    no_edge: noEdge,
+    return_calibration: returnCalibration,
+    data_start: candles[0]!.time,
+    data_end: candles.at(-1)!.time,
+    trained_at: trainedAt,
+  });
+  if (persistError) throw new Error(`Could not persist trained ML model artifact: ${persistError.message}`);
   modelStates.set(modelKey(symbol, timeframe), modelState);
-  console.log(`[ml] retrained on ${symbol} ${timeframe}: acc=${accuracy.toFixed(3)} f1=${f1.toFixed(3)} samples=${n}`);
+  console.log(`[ml] retrained on ${symbol} ${timeframe}: test_acc=${testMetrics.accuracy.toFixed(3)} momentum_acc=${baselineAccuracy.toFixed(3)} no_edge=${noEdge} test_samples=${testMetrics.samples}`);
   return { ok: true, metrics: modelState.metrics, version };
 }
 

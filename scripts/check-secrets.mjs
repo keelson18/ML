@@ -44,6 +44,28 @@ if (historicalPaths.some((file) => {
   return basename === '.env' || (basename?.startsWith('.env.') && basename !== '.env.example');
 })) violations.push('Git history: environment file is present; remove it from all reachable commits');
 
+// Search every reachable commit's changed lines for secret-shaped values.
+// Git prints only the commit/path metadata here; matching source content is
+// captured by the process and never included in the diagnostic.
+const historicalPatterns = [
+  { name: 'Supabase secret key', pattern: 'sb_secret_[A-Za-z0-9_-]{8,}' },
+  { name: 'JWT-shaped token', pattern: 'eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}' },
+  { name: 'Massive API key assignment', pattern: 'MASSIVE_API_KEY[[:space:]]*=[[:space:]]*[^[:space:]#]+' },
+  { name: 'remote database URL with user info', pattern: '(postgres|postgresql|mysql|redis)://[^/[:space:]@]+@[^/[:space:]?#]+' },
+];
+for (const { name, pattern } of historicalPatterns) {
+  try {
+    const matchedPaths = execFileSync('git', [
+      'log', '--all', '--format=', '--name-only', '-G', pattern,
+      '--', '.', ':(exclude)**/.env.example',
+    ], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 32 * 1024 * 1024 })
+      .split(/\r?\n/).filter(Boolean);
+    if (matchedPaths.length) violations.push(`Git history: ${name}-shaped material found; rotate affected credentials before history cleanup`);
+  } catch (error) {
+    if (error?.status !== 1) violations.push(`Git history: could not inspect commits for ${name} patterns`);
+  }
+}
+
 for (const file of files) {
   const basename = file.split(/[\\/]/).at(-1);
   if (file === '.env.example') continue;

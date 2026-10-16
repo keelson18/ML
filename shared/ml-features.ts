@@ -32,12 +32,12 @@ export function computeRsi(closes: number[], period = 14): number[] {
 export function computeMlFeatures(
   candles: MlCandle[],
   options: { predictionHorizon?: number; minimumMoveAtr?: number } = {},
-): { features: number[][]; labels: number[]; valid: boolean } {
+): { features: number[][]; labels: Array<number | null>; sampleIndices: number[]; forwardReturns: number[]; valid: boolean } {
   const predictionHorizon = options.predictionHorizon ?? 5;
   const minimumMoveAtr = options.minimumMoveAtr ?? 0.1;
   if (!Number.isInteger(predictionHorizon) || predictionHorizon < 1) throw new Error('Prediction horizon must be a positive integer.');
   if (!Number.isFinite(minimumMoveAtr) || minimumMoveAtr < 0) throw new Error('Minimum ATR move must be finite and non-negative.');
-  if (candles.length < 210) return { features: [], labels: [], valid: false };
+  if (candles.length < 210) return { features: [], labels: [], sampleIndices: [], forwardReturns: [], valid: false };
 
   const closes = candles.map((candle) => candle.close);
   const highs = candles.map((candle) => candle.high);
@@ -73,14 +73,14 @@ export function computeMlFeatures(
   }
 
   const features: number[][] = [];
-  const labels: number[] = [];
+  const labels: Array<number | null> = [];
+  const sampleIndices: number[] = [];
+  const forwardReturns: number[] = [];
   for (let i = 200; i < closes.length - predictionHorizon; i += 1) {
     const price = closes[i]!;
     const threshold = minimumMoveAtr * atr[i]!;
     const future = closes[i + predictionHorizon]!;
     const label = future > price + threshold ? 1 : future < price - threshold ? 0 : undefined;
-    if (label === undefined) continue;
-
     const ret = (period: number) => price / closes[i - period]! - 1;
     features.push([
       ret(1), ret(3), ret(5), ret(10), ret(20), rsi[i]! / 100,
@@ -88,7 +88,9 @@ export function computeMlFeatures(
       ma20[i]! / price - 1, ma50[i]! / price - 1, ma200[i]! / price - 1,
       bbWidth[i]!, volumeChange[i]!, atr[i]! / price,
     ]);
-    labels.push(label);
+    labels.push(label ?? null);
+    sampleIndices.push(i);
+    forwardReturns.push((future - price) / price);
   }
-  return { features, labels, valid: features.length > 50 };
+  return { features, labels, sampleIndices, forwardReturns, valid: labels.filter((label) => label !== null).length > 50 };
 }

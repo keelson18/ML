@@ -95,7 +95,7 @@ export const mlRepository = {
       timeframe: data.timeframe,
       prediction: data.prediction,
       probability: Number(data.probability),
-      expected_move_pct: Number(data.expected_move_pct),
+      expected_move_pct: data.expected_move_pct === null ? null : Number(data.expected_move_pct),
       model_version: data.model_version,
       confidence: data.confidence,
     };

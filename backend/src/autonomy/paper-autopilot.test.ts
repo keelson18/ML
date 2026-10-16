@@ -75,6 +75,32 @@ describe('paper autopilot scheduling helpers', () => {
     expect(replayCandlesAfter(candles, 900, 2).map((candle) => candle.time)).toEqual([1800, 2700]);
   });
 
+  it('resumes after a worker restart from the last durable candle checkpoint', async () => {
+    const candles = [0, 900, 1800, 2700].map((time) => ({ time, open: 1, high: 1, low: 1, close: 1, volume: 1 }));
+    const uninterrupted = { checkpoint: undefined as number | undefined, events: [] as number[] };
+    const interrupted = { checkpoint: undefined as number | undefined, events: [] as number[] };
+
+    const processCandles = (state: typeof uninterrupted, failAfter?: number) => replaySequentialCandles(
+      candles,
+      state.checkpoint,
+      10,
+      async (candle) => {
+        // The production callback commits the mutation and checkpoint together
+        // through record_paper_account_update before returning.
+        state.events.push(candle.time);
+        state.checkpoint = candle.time;
+        if (failAfter !== undefined && state.events.length === failAfter) throw new Error('simulated worker termination');
+      },
+    );
+
+    await processCandles(uninterrupted);
+    await expect(processCandles(interrupted, 2)).rejects.toThrow('simulated worker termination');
+    await processCandles(interrupted);
+
+    expect(interrupted).toEqual(uninterrupted);
+    expect(new Set(interrupted.events).size).toBe(candles.length);
+  });
+
   it('manages catch-up candles chronologically so the first touched stop closes the position', async () => {
     const opened = simulatePaperOrder({ accountId: 'catch-up', cash: 10_000, positions: [], trades: [] }, {
       orderId: 'entry', positionId: 'position', decisionId: 'decision', assetId: 'BTCUSD', symbol: 'BTCUSD',

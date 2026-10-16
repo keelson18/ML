@@ -31,7 +31,7 @@ function makeStrategy(
 ): Strategy {
   return {
     id,
-    version: '1.0.0',
+    version: '1.1.0',
     name,
     category,
     type,
@@ -60,9 +60,9 @@ function crossedBelow(previous: number, current: number, level: number): boolean
   return previous >= level && current < level;
 }
 
-function latestSwings(candles: Candle[], lookback = 100) {
+function latestSwings(candles: Candle[], lookback = 100, left = 3, right = 3) {
   const offset = Math.max(0, candles.length - lookback);
-  const swings = findSwings(candles.slice(offset), 3, 3);
+  const swings = findSwings(candles.slice(offset), left, right);
   return {
     highs: swings.highs.map((point) => ({ ...point, index: point.index + offset })),
     lows: swings.lows.map((point) => ({ ...point, index: point.index + offset })),
@@ -177,20 +177,22 @@ const trendContinuation: Strategy = {
   name: 'Trend Continuation',
   category: 'Trend',
   description: 'ADX ≥25, directional movement, 20/50 SMA alignment, and the existing swing-structure trend must agree.',
-  detect(candles, timeframe) {
-    return trendFollowingStrategy.detect(candles, timeframe).map((signal) => ({ ...signal, strategy: 'Trend Continuation' }));
+  detect(candles, timeframe, parameters = trendFollowingStrategy.defaultParameters) {
+    return trendFollowingStrategy.detect(candles, timeframe, parameters).map((signal) => ({ ...signal, strategy: 'Trend Continuation' }));
   },
 };
 
 export const STRATEGY_LIBRARY: Strategy[] = [
-  makeStrategy('ma-crossover', 'Moving Average Trend', 'Trend', 'trend', 'Signals when the 20 SMA crosses above or below the 50 SMA.', 55, (candles) => {
+  makeStrategy('ma-crossover', 'Moving Average Trend', 'Trend', 'trend', 'Signals when the fast SMA crosses above or below the slow SMA.', 55, (candles, _timeframe, parameters) => {
     const closes = candles.map((candle) => candle.close);
-    const fast = sma(closes, 20);
-    const slow = sma(closes, 50);
+    const fastPeriod = parameters?.fastPeriod ?? 20;
+    const slowPeriod = parameters?.slowPeriod ?? 50;
+    const fast = sma(closes, fastPeriod);
+    const slow = sma(closes, slowPeriod);
     const i = candles.length - 1;
     if (!valid(fast[i - 1], slow[i - 1], fast[i], slow[i])) return [];
-    if (fast[i - 1] <= slow[i - 1] && fast[i] > slow[i]) return emit('Moving Average Trend', 'buy', '20 SMA crossed above 50 SMA.');
-    if (fast[i - 1] >= slow[i - 1] && fast[i] < slow[i]) return emit('Moving Average Trend', 'sell', '20 SMA crossed below 50 SMA.');
+    if (fast[i - 1] <= slow[i - 1] && fast[i] > slow[i]) return emit('Moving Average Trend', 'buy', `${fastPeriod} SMA crossed above ${slowPeriod} SMA.`);
+    if (fast[i - 1] >= slow[i - 1] && fast[i] < slow[i]) return emit('Moving Average Trend', 'sell', `${fastPeriod} SMA crossed below ${slowPeriod} SMA.`);
     return [];
   }, { defaultParameters: { fastPeriod: 20, slowPeriod: 50 }, timeframes: ['1h', '4h', '1d', '1w'] }),
   makeStrategy('ema-trend', 'EMA Trend', 'Trend', 'trend', 'Bullish when close > EMA20 > EMA50; bearish when close < EMA20 < EMA50.', 50, (candles) => {
@@ -281,10 +283,10 @@ export const STRATEGY_LIBRARY: Strategy[] = [
     if (crossedBelow(previous.close, current.close, range.low)) return emit('Range Breakout', 'sell', 'Close broke below the prior 20-candle range.');
     return [];
   }, { defaultParameters: { rangePeriod: 20 } }),
-  makeStrategy('donchian-breakout', 'Donchian Breakout', 'Breakout', 'breakout', 'Signals when close clears the prior 20-bar Donchian high or low.', 22, (candles) => {
+  makeStrategy('donchian-breakout', 'Donchian Breakout', 'Breakout', 'breakout', 'Signals when close clears the prior Donchian high or low.', 22, (candles, _timeframe, parameters) => {
     const current = candles[candles.length - 1];
     const previous = candles[candles.length - 2];
-    const channel = donchian(candles, 20);
+    const channel = donchian(candles, parameters?.channelPeriod ?? 20);
     const i = candles.length - 1;
     const upper = channel.upper[i - 1];
     const lower = channel.lower[i - 1];
@@ -321,12 +323,15 @@ export const STRATEGY_LIBRARY: Strategy[] = [
     return [];
   }, { defaultParameters: { rangePeriod: 10, maximumRangePct: 4 } }),
 
-  makeStrategy('mean-reversion', 'RSI Mean Reversion', 'Mean Reversion', 'contrarian', 'Fades RSI(14) at or below 28 as oversold and at or above 72 as overbought.', 30, (candles) => {
-    const values = rsi(candles.map((candle) => candle.close), 14);
+  makeStrategy('mean-reversion', 'RSI Mean Reversion', 'Mean Reversion', 'contrarian', 'Fades configurable RSI oversold/overbought levels.', 30, (candles, _timeframe, parameters) => {
+    const period = parameters?.period ?? 14;
+    const oversold = parameters?.oversold ?? 28;
+    const overbought = parameters?.overbought ?? 72;
+    const values = rsi(candles.map((candle) => candle.close), period);
     const value = values[values.length - 1];
     if (!Number.isFinite(value)) return [];
-    if (value <= 28) return emit('RSI Mean Reversion', 'buy', `RSI(14) is oversold at ${value.toFixed(1)}.`);
-    if (value >= 72) return emit('RSI Mean Reversion', 'sell', `RSI(14) is overbought at ${value.toFixed(1)}.`);
+    if (value <= oversold) return emit('RSI Mean Reversion', 'buy', `RSI(${period}) is oversold at ${value.toFixed(1)}.`);
+    if (value >= overbought) return emit('RSI Mean Reversion', 'sell', `RSI(${period}) is overbought at ${value.toFixed(1)}.`);
     return [];
   }, { defaultParameters: { period: 14, oversold: 28, overbought: 72 }, timeframes: ['5m', '15m', '30m', '1h', '4h'] }),
   makeStrategy('vwap-mean-reversion', 'VWAP Mean Reversion', 'Mean Reversion', 'contrarian', 'Signals when price crosses back above/below the current UTC-session VWAP after trading on the other side.', 2, (candles) => {
@@ -339,16 +344,17 @@ export const STRATEGY_LIBRARY: Strategy[] = [
     if (previous.close >= values[i - 1] && current.close < values[i]) return emit('VWAP Mean Reversion', 'sell', 'Close crossed back below UTC-session VWAP.');
     return [];
   }, { requiresVolume: true, timeframes: TIMEFRAMES.filter((timeframe) => Boolean(SECONDS_PER_TIMEFRAME[timeframe]) && SECONDS_PER_TIMEFRAME[timeframe]! <= 14400) }),
-  makeStrategy('support-resistance', 'Support/Resistance Reversion', 'Mean Reversion', 'contrarian', 'Uses the last three confirmed swing highs/lows as resistance/support; signals within 8% of either end of that range.', 40, (candles) => {
-    const { highs, lows } = latestSwings(candles);
+  makeStrategy('support-resistance', 'Support/Resistance Reversion', 'Mean Reversion', 'contrarian', 'Uses confirmed swing highs/lows as resistance/support; signals within configurable proximity.', 40, (candles, _timeframe, parameters) => {
+    const { highs, lows } = latestSwings(candles, 100, parameters?.swingLeft ?? 3, parameters?.swingRight ?? 3);
     const last = candles[candles.length - 1]?.close;
     const resistance = highs.length ? Math.max(...highs.slice(-3).map((point) => point.value)) : last;
     const support = lows.length ? Math.min(...lows.slice(-3).map((point) => point.value)) : last;
     const width = (resistance ?? 0) - (support ?? 0);
     if (!Number.isFinite(last) || !Number.isFinite(resistance) || !Number.isFinite(support) || width <= 0) return [];
     const position = (last - support) / width;
-    if (position >= 0.92) return emit('Support/Resistance Reversion', 'sell', 'Price is testing the recent swing resistance zone.');
-    if (position <= 0.08) return emit('Support/Resistance Reversion', 'buy', 'Price is testing the recent swing support zone.');
+    const proximity = parameters?.proximity ?? 0.08;
+    if (position >= 1 - proximity) return emit('Support/Resistance Reversion', 'sell', 'Price is testing the recent swing resistance zone.');
+    if (position <= proximity) return emit('Support/Resistance Reversion', 'buy', 'Price is testing the recent swing support zone.');
     return [];
   }, { defaultParameters: { swingLeft: 3, swingRight: 3, proximity: 0.08 }, timeframes: ['15m', '1h', '4h', '1d'] }),
   makeStrategy('volatility-expansion-reversion', 'Volatility Expansion/Reversion', 'Mean Reversion', 'contrarian', 'Signals when close re-enters the 20-period, 2σ Bollinger bands after closing outside a band.', 22, (candles) => {
@@ -537,9 +543,10 @@ export const STRATEGY_LIBRARY: Strategy[] = [
     return [];
   }, { requiresVolume: true }),
 
-  makeStrategy('rsi-divergence', 'RSI Divergence', 'Divergence', 'contrarian', 'Compares price and RSI(14) at the last two confirmed swing highs or lows.', 35, (candles) => {
-    const values = rsi(candles.map((candle) => candle.close), 14);
-    const { highs, lows } = latestSwings(candles);
+  makeStrategy('rsi-divergence', 'RSI Divergence', 'Divergence', 'contrarian', 'Compares price and RSI at the last two confirmed swing highs or lows.', 35, (candles, _timeframe, parameters) => {
+    const period = parameters?.period ?? 14;
+    const values = rsi(candles.map((candle) => candle.close), period);
+    const { highs, lows } = latestSwings(candles, 100, parameters?.swingLeft ?? 3, parameters?.swingRight ?? 3);
     if (highs.length >= 2) {
       const first = highs[highs.length - 2];
       const second = highs[highs.length - 1];

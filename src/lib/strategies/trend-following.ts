@@ -8,7 +8,7 @@ const MIN_CANDLES = 100;
 // Trend Following Strategy: strong ADX + trend structure alignment
 export const trendFollowingStrategy = {
   id: 'trend-following',
-  version: '1.0.0',
+  version: '1.1.0',
   name: 'Trend Following',
   type: 'trend' as const,
   description: 'Combines ADX, directional movement, moving averages, and structure.',
@@ -16,24 +16,28 @@ export const trendFollowingStrategy = {
   minCandles: MIN_CANDLES,
   defaultParameters: { adxPeriod: 14, minimumAdx: 25, fastPeriod: 20, slowPeriod: 50 },
 
-  detect(candles: Candle[], _timeframe: Timeframe): Signal[] {
-    if (candles.length < MIN_CANDLES) return [];
+  detect(candles: Candle[], _timeframe: Timeframe, parameters: Readonly<Record<string, number>> = { adxPeriod: 14, minimumAdx: 25, fastPeriod: 20, slowPeriod: 50 }): Signal[] {
+    const adxPeriod = parameters.adxPeriod ?? 14;
+    const minimumAdx = parameters.minimumAdx ?? 25;
+    const fastPeriod = parameters.fastPeriod ?? 20;
+    const slowPeriod = parameters.slowPeriod ?? 50;
+    if (candles.length < Math.max(MIN_CANDLES, slowPeriod + 2)) return [];
     
     const closes = candles.map((c) => c.close);
-    const { adx: adxVals, plusDI, minusDI } = calcAdx(candles, 14);
+    const { adx: adxVals, plusDI, minusDI } = calcAdx(candles, adxPeriod);
     const structure = analyzeMarketStructure(candles.slice(-100));
     const i = closes.length - 1;
 
     // Need strong trend
-    if (isNaN(adxVals[i]) || adxVals[i] < 25) return [];
+    if (isNaN(adxVals[i]) || adxVals[i] < minimumAdx) return [];
 
     const signals: Signal[] = [];
 
     // Bullish: ADX > 25, +DI > -DI, bullish structure
     if (plusDI[i] > minusDI[i] && structure.state === 'bullish') {
-      const sma20 = sma(closes, 20);
-      const sma50 = sma(closes, 50);
-      if (sma20[i] > sma50[i]) {
+      const fast = sma(closes, fastPeriod);
+      const slow = sma(closes, slowPeriod);
+      if (fast[i] > slow[i]) {
         signals.push({
           strategy: 'Trend Following',
           strategyId: 'trend-following',
@@ -47,9 +51,9 @@ export const trendFollowingStrategy = {
 
     // Bearish: ADX > 25, -DI > +DI, bearish structure
     if (minusDI[i] > plusDI[i] && structure.state === 'bearish') {
-      const sma20 = sma(closes, 20);
-      const sma50 = sma(closes, 50);
-      if (sma20[i] < sma50[i]) {
+      const fast = sma(closes, fastPeriod);
+      const slow = sma(closes, slowPeriod);
+      if (fast[i] < slow[i]) {
         signals.push({
           strategy: 'Trend Following',
           strategyId: 'trend-following',

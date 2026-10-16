@@ -35,7 +35,7 @@ describe('core reliability contracts', () => {
     const expectedCounts = [6, 5, 5, 4, 5, 4, 5, 4, 3, 3, 6];
     expect(STRATEGY_CATEGORIES.slice(0, 11).map((category) => STRATEGY_REGISTRY.filter((strategy) => strategy.category === category).length)).toEqual(expectedCounts);
     expect(availability.find((item) => item.strategy.id === 'trend-following')?.eligible).toBe(true);
-    expect(availability.find((item) => item.strategy.id === 'mean-reversion')?.strategy.version).toBe('1.0.0');
+    expect(availability.find((item) => item.strategy.id === 'mean-reversion')?.strategy.version).toBe('1.1.0');
   });
 
   it('emits a moving-average signal only on a confirmed crossover', () => {
