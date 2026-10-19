@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 import { readJsonSafe } from '../../shared/http';
-import type { Candle, MarketDataProvider, Timeframe } from './types';
+import type { Candle, MarketDataProvider, MLPrediction, Timeframe } from './types';
 
 export async function authenticatedBackendRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const { data: { session } } = await supabase.auth.getSession();
@@ -62,6 +62,13 @@ export async function requestBackendDecision(symbol: string, timeframe: Timefram
     body: JSON.stringify({ symbol, timeframe }),
   });
   return payload.decision?.result ?? null;
+}
+
+export async function requestMLPrediction(pair: string, timeframe: Timeframe): Promise<MLPrediction> {
+  return authenticatedBackendRequest<MLPrediction>('/api/v1/ml/predict', {
+    method: 'POST',
+    body: JSON.stringify({ pair, timeframe }),
+  });
 }
 
 export interface PaperPosition {

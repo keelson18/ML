@@ -1,11 +1,11 @@
 import type { MLPrediction, Timeframe } from './types';
 import { mlApi, coachApi, type CoachMessage } from '../api';
+import { requestMLPrediction } from './backend-api';
 
 // Fetch a fresh ML prediction from the backend.
 export async function fetchMLPrediction(symbol: string, timeframe: Timeframe): Promise<MLPrediction | null> {
   try {
-    const { prediction } = await mlApi.predict(symbol, timeframe);
-    return prediction;
+    return await requestMLPrediction(symbol, timeframe);
   } catch (e) {
     console.warn('ML predict error', e);
     return null;

@@ -49,10 +49,6 @@ export const mlApi = {
     };
   },
 
-  async predict(symbol: string, timeframe: Timeframe): Promise<{ prediction: MLPrediction | null }> {
-    const result = await callEdgeFunction<MLPrediction>('ml-predict/predict', { pair: symbol, timeframe });
-    return { prediction: result };
-  },
 
   async getVersions(): Promise<{ versions: Array<{ model_version: string; created_at: string }> }> {
     const { data, error } = await supabase

@@ -33,4 +33,6 @@ Until that evidence is supplied, duplicates remain in place. Applying files thro
 
 `supabase/migrations/20261020000000_research_holdout_registration_window.sql` locks each draft's research split to a future test start recorded at experiment creation.
 
+`supabase/migrations/20261024000000_fenced_paper_autopilot_leases.sql` follows `20261022000000_paper_autopilot_manage_open_positions_when_disabled.sql`. It fences concurrent paper-autopilot workers with service-only leases and updates account writes to require a valid lease when supplied. Apply it only after confirming the target project's prior migration history; the schema verifier now also requires `paper_autopilot_leases` and its lease RPCs.
+
 `supabase/migrations/20261021000000_accumulate_research_holdout_candles.sql` adds the append-only bounded forward candle store and service-only batch RPC. Its migration contract is `supabase/tests/research_collection.test.sql`; run it only after applying earlier versions in order and inspecting the target project's history. The SQL has not been executed against local PostgreSQL or the hosted project in this session.

@@ -8,6 +8,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.57.4";
 import { readJsonSafe } from "../../../shared/http.ts";
+import { resolveCorsOrigin } from "../../../shared/cors.ts";
 import { computeMlFeatures, type MlCandle } from "../../../shared/ml-features.ts";
 import { calibratedExpectedMove, calibrateExpectedReturns, classificationMetrics, modelHasNoEdge, momentumBaselineAccuracy, purgedChronologicalSplit, type ReturnCalibrationBucket } from "../../../shared/ml-baseline.ts";
 
@@ -301,13 +302,16 @@ async function authenticatedUser(req: Request): Promise<string | null> {
 
 // ---- Main handler ----
 Deno.serve(async (req: Request) => {
-  const origin = Deno.env.get('CORS_ORIGIN') || undefined;
+  const configuredOrigins = Deno.env.get('CORS_ORIGIN') ?? '';
+  const allowLoopbackPorts = Deno.env.get('ML_FUNCTION_ENV') === 'development';
+  const origin = resolveCorsOrigin(req.headers.get('origin'), configuredOrigins, allowLoopbackPorts);
   const headers = corsHeaders(origin);
 
-  if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers });
-  if (!origin) {
+  if (!configuredOrigins.split(',').some((value) => value.trim()) && !origin) {
     return jsonResponse({ error: 'Service misconfigured' }, 500, headers);
   }
+  if (req.method === 'OPTIONS') return new Response(null, { status: origin ? 204 : 403, headers });
+  if (req.headers.has('origin') && !origin) return jsonResponse({ error: 'Origin not allowed' }, 403, headers);
 
   try {
     const url = new URL(req.url);
@@ -443,10 +447,10 @@ Deno.serve(async (req: Request) => {
   }
 });
 
-function jsonResponse(body: unknown, status = 200, headersOverride?: Record<string, string>) {
+function jsonResponse(body: unknown, status: number, headers: Record<string, string>) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...(headersOverride ?? corsHeaders(Deno.env.get('CORS_ORIGIN') || undefined)), 'Content-Type': 'application/json' },
+    headers: { ...headers, 'Content-Type': 'application/json' },
   });
 }
 

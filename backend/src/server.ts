@@ -20,6 +20,7 @@ import { newsRoutes } from './routes/news';
 import { personalDataRoutes } from './routes/personal-data';
 import { learningResearchRoutes } from './routes/learning-research';
 import { coachContextRoutes } from './routes/coach-context';
+import { mlRoutes } from './routes/ml';
 import { registerLiveStream } from './live/register-stream';
 import { readJsonSafe } from '../../shared/http';
 import { createHash } from 'node:crypto';
@@ -180,6 +181,7 @@ export function buildServer() {
   void app.register(marketAvailabilityRoutes);
   void app.register(traderRoutes);
   void app.register(coachContextRoutes);
+  void app.register(mlRoutes);
   void app.register(adminUserRoutes);
   void app.register(adminOverviewRoutes);
   void app.register(eventRoutes);

@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity, Sun, Moon, Wifi, WifiOff, TrendingUp, TrendingDown,
-  Bell,
+  Bell, ChevronDown, LogOut, Settings, ShieldCheck,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -65,6 +65,27 @@ export default function Dashboard() {
   const [mlStatus, setMlStatus] = useState<'idle' | 'loading' | 'ready' | 'cached' | 'unavailable'>('idle');
   const candlesRef = useRef<Candle[]>([]);
   const candleCacheRef = useRef(new Map<string, Candle[]>());
+  const notificationRef = useRef<HTMLDivElement>(null);
+  const accountMenuRef = useRef<HTMLDivElement>(null);
+  const [openHeaderPanel, setOpenHeaderPanel] = useState<'notifications' | 'account' | null>(null);
+
+  useEffect(() => {
+    if (!openHeaderPanel) return;
+    const dismissOutside = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node) || notificationRef.current?.contains(target) || accountMenuRef.current?.contains(target)) return;
+      setOpenHeaderPanel(null);
+    };
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpenHeaderPanel(null);
+    };
+    document.addEventListener('pointerdown', dismissOutside);
+    document.addEventListener('keydown', dismissOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', dismissOutside);
+      document.removeEventListener('keydown', dismissOnEscape);
+    };
+  }, [openHeaderPanel]);
 
   const isAdmin = profile?.role === 'admin';
   const perfOverlayEnabled = isPerfOverlayEnabled(window.location.search, isAdmin, import.meta.env.DEV);
@@ -382,14 +403,10 @@ export default function Dashboard() {
 
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
-        <header className="h-14 border-b border-border bg-surface/80 backdrop-blur-md flex items-center justify-between px-4 lg:px-6 shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center">
-                <Activity className="w-3.5 h-3.5 text-primary" />
-              </div>
-              <span className="font-semibold tracking-tight text-sm hidden sm:inline">Quantum Intelligence</span>
-            </div>
+        <header className="app-header h-14 border-b border-border bg-surface/80 backdrop-blur-md flex items-center justify-between px-4 lg:px-6 shrink-0">
+          <div className="app-header-brand">
+            <div className="app-header-mark"><Activity className="w-4 h-4 text-primary" /></div>
+            <span className="app-header-wordmark">Quantum <small>INTELLIGENCE</small></span>
           </div>
           {sidebarTab !== 'dashboard' && <div className="hidden md:flex min-w-0 flex-1 items-center justify-center gap-2 px-3">
             <label className="sr-only" htmlFor="global-market-type">Market type</label>
@@ -410,13 +427,13 @@ export default function Dashboard() {
               {TIMEFRAMES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
             </select>
           </div>}
-          <div className="flex items-center gap-2.5">
+          <div className="app-header-actions">
             <WsIndicator status={wsStatus} />
-            <button onClick={toggle} aria-label="Toggle theme" className="p-2 rounded-lg hover:bg-bg transition-colors text-muted hover:text-text" title="Toggle theme">
+            <button onClick={toggle} aria-label="Toggle theme" className="app-header-icon-button p-2 rounded-lg hover:bg-bg transition-colors text-muted hover:text-text" title="Toggle theme">
               {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
-            <NotificationBell userId={user?.id} onOpenNews={() => navigateToTab('news')} />
-            <AvatarMenu email={user?.email ?? ''} displayName={profile?.displayName} avatarPath={profile?.avatarUrl} role={profile?.role ?? 'user'} onSettings={() => navigateToTab('settings')} onSignOut={signOut} />
+            <NotificationBell ref={notificationRef} open={openHeaderPanel === 'notifications'} onToggle={() => setOpenHeaderPanel((current) => current === 'notifications' ? null : 'notifications')} userId={user?.id} onOpenNews={() => { setOpenHeaderPanel(null); navigateToTab('news'); }} />
+            <AvatarMenu ref={accountMenuRef} open={openHeaderPanel === 'account'} onToggle={() => setOpenHeaderPanel((current) => current === 'account' ? null : 'account')} email={user?.email ?? ''} displayName={profile?.displayName} avatarPath={profile?.avatarUrl} role={profile?.role ?? 'user'} onSettings={() => { setOpenHeaderPanel(null); navigateToTab('settings'); }} onSignOut={() => { setOpenHeaderPanel(null); void signOut(); }} />
           </div>
         </header>
 
@@ -469,9 +486,8 @@ function WsIndicator({ status }: { status: WsStatus }) {
   );
 }
 
-function NotificationBell({ userId, onOpenNews }: { userId?: string; onOpenNews: () => void }) {
+const NotificationBell = forwardRef<HTMLDivElement, { open: boolean; onToggle: () => void; userId?: string; onOpenNews: () => void }>(function NotificationBell({ open, onToggle, userId, onOpenNews }, ref) {
   const [notifications, setNotifications] = useState<InAppNotification[]>([]);
-  const [open, setOpen] = useState(false);
   const [error, setError] = useState(false);
   useEffect(() => {
     let active = true;
@@ -490,41 +506,39 @@ function NotificationBell({ userId, onOpenNews }: { userId?: string; onOpenNews:
         setNotifications((items) => items.map((item) => item.id === notification.id ? { ...item, read_at: new Date().toISOString() } : item));
       } catch { setError(true); }
     }
-    setOpen(false);
     onOpenNews();
   };
-  return <div className="relative">
-    <button type="button" aria-label={`Notifications${notifications.some((item) => !item.read_at) ? `, ${notifications.filter((item) => !item.read_at).length} unread` : ''}`} aria-expanded={open} onClick={() => setOpen((value) => !value)} className="relative rounded-lg p-2 text-muted hover:bg-bg hover:text-text">
+  return <div ref={ref} className="relative">
+    <button type="button" aria-label={`Notifications${notifications.some((item) => !item.read_at) ? `, ${notifications.filter((item) => !item.read_at).length} unread` : ''}`} aria-expanded={open} onClick={onToggle} className="relative rounded-lg p-2 text-muted hover:bg-bg hover:text-text">
       <Bell className="h-4 w-4" />
       {!!notifications.filter((item) => !item.read_at).length && <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-primary" />}
     </button>
     {open && <div className="absolute right-0 top-full z-50 mt-2 w-80 rounded-xl border border-border bg-surface p-2 shadow-xl"><div className="px-3 py-2 text-xs font-semibold">News updates</div>{error && <p role="alert" className="px-3 py-2 text-xs text-warning">Notifications are unavailable.</p>}{notifications.length ? <div className="max-h-80 overflow-y-auto">{notifications.map((item) => <button type="button" key={item.id} onClick={() => void openNews(item)} className={`block w-full rounded-lg px-3 py-2 text-left hover:bg-bg ${item.read_at ? 'text-muted' : 'text-text'}`}><span className="block text-xs font-medium">{item.title}</span>{item.body && <span className="mt-1 block text-xs text-muted">{item.body}</span>}<time className="mt-1 block text-xs text-muted">{new Date(item.created_at).toLocaleString()}</time></button>)}</div> : !error && <p className="px-3 py-4 text-xs text-muted">No news updates yet.</p>}</div>}
   </div>;
-}
+});
 
-function AvatarMenu({ email, displayName, avatarPath, role, onSettings, onSignOut }: { email: string; displayName?: string; avatarPath?: string; role: string; onSettings: () => void; onSignOut: () => void }) {
-  const [open, setOpen] = useState(false);
+const AvatarMenu = forwardRef<HTMLDivElement, { open: boolean; onToggle: () => void; email: string; displayName?: string; avatarPath?: string; role: string; onSettings: () => void; onSignOut: () => void }>(function AvatarMenu({ open, onToggle, email, displayName, avatarPath, role, onSettings, onSignOut }, ref) {
   const [avatar, setAvatar] = useState<string | null>(null);
   useEffect(() => { let active = true; void resolveAvatarUrl(avatarPath).then((url) => { if (active) setAvatar(url); }); return () => { active = false; }; }, [avatarPath]);
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false); };
-    window.addEventListener('keydown', close);
-    return () => window.removeEventListener('keydown', close);
-  }, [open]);
   const initials = (displayName || email).split(/[\s@._-]+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'U';
-  return <div className="relative">
-    <button type="button" onClick={() => setOpen((value) => !value)} aria-haspopup="menu" aria-expanded={open} aria-label="Open account menu" className="flex items-center gap-2 rounded-full p-1.5 text-muted hover:bg-bg hover:text-text">
-      {avatar ? <img src={avatar} alt="" className="h-8 w-8 rounded-full object-cover" /> : <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">{initials}</span>}
-      <span className="hidden max-w-40 truncate text-xs font-medium sm:block">{displayName || email}</span>
+  return <div ref={ref} className="relative">
+    <button type="button" onClick={onToggle} aria-haspopup="menu" aria-expanded={open} aria-label="Open account menu" className="account-trigger flex items-center gap-2 rounded-full p-1.5 text-muted hover:bg-bg hover:text-text">
+      {avatar ? <img src={avatar} alt="" className="account-trigger-avatar h-8 w-8 rounded-full object-cover" /> : <span className="account-trigger-avatar flex h-8 w-8 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">{initials}</span>}
+      <span className="account-trigger-name hidden max-w-40 truncate text-xs font-medium sm:block">{displayName || email}</span>
+      <ChevronDown className="account-trigger-chevron hidden h-3.5 w-3.5 sm:block" aria-hidden="true" />
     </button>
-    {open && <div role="menu" className="absolute right-0 top-full z-50 mt-2 w-64 rounded-xl border border-border bg-surface p-2 shadow-xl">
-      <div className="border-b border-border px-3 py-2"><div className="truncate text-sm font-medium text-text">{displayName || 'Account details'}</div><div className="truncate text-xs text-muted">{email}</div><div className="mt-1 text-xs uppercase tracking-wide text-muted">{role}</div></div>
-      <button type="button" role="menuitem" onClick={() => { setOpen(false); onSettings(); }} className="mt-1 w-full rounded-lg px-3 py-2 text-left text-sm text-text hover:bg-bg">Profile & settings</button>
-      <button type="button" role="menuitem" onClick={onSignOut} className="w-full rounded-lg px-3 py-2 text-left text-sm text-danger hover:bg-danger/10">Sign out</button>
+    {open && <div role="menu" aria-label="Account options" className="account-menu-panel absolute right-0 top-full z-50 mt-2 w-64 rounded-xl border border-border bg-surface p-2 shadow-xl">
+      <div className="account-profile-card">
+        <div className="account-profile-avatar">{avatar ? <img src={avatar} alt="" /> : initials}</div>
+        <div className="account-profile-details"><strong>{displayName || 'Account details'}</strong><span>{email}</span><span className="account-role"><ShieldCheck aria-hidden="true" /> {role}</span></div>
+      </div>
+      <div className="account-menu-actions">
+        <button type="button" role="menuitem" onClick={onSettings} className="account-menu-action"><Settings aria-hidden="true" /><span>Profile & settings</span><ChevronDown className="-rotate-90" aria-hidden="true" /></button>
+        <button type="button" role="menuitem" onClick={onSignOut} className="account-menu-action is-danger"><LogOut aria-hidden="true" /><span>Sign out</span></button>
+      </div>
     </div>}
   </div>;
-}
+});
 
 // Published articles list — shown to non-admin users under the CMS/knowledge-base tab.
 // Fetches only published content via the read_published_cms RLS policy.

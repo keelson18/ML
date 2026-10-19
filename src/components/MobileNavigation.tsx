@@ -66,7 +66,7 @@ export default function MobileNavigation({ activeTab, isAdmin, onNavigate, onSig
     </nav>
     {moreOpen && <div className="mobile-more-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) closeMore(); }}>
       <div ref={sheetRef} role="dialog" aria-modal="true" aria-labelledby="mobile-more-title" className="mobile-more-sheet" onKeyDown={onSheetKeyDown}>
-        <header><div><p>Navigation</p><h2 id="mobile-more-title">More pages</h2></div><button data-sheet-close type="button" onClick={closeMore} aria-label="Close More menu"><X aria-hidden="true" /></button></header>
+        <header><div className="mobile-more-heading"><span className="mobile-more-mark"><Activity aria-hidden="true" /></span><div><p>YOUR WORKSPACE</p><h2 id="mobile-more-title">Explore</h2></div></div><button data-sheet-close type="button" onClick={closeMore} aria-label="Close More menu"><X aria-hidden="true" /></button></header>
         <nav aria-label="More pages">{MORE.filter((item) => !item.adminOnly || isAdmin).map(({ tab, label, icon: Icon }) => <button key={tab} type="button" onClick={() => navigate(tab)} aria-current={activeTab === tab ? 'page' : undefined} className={activeTab === tab ? 'mobile-more-link is-active' : 'mobile-more-link'}><Icon aria-hidden="true" /><span>{label}</span>{activeTab === tab && <Check className="mobile-more-check" aria-hidden="true" />}</button>)}</nav>
         <button type="button" onClick={onSignOut} className="mobile-sign-out"><LogOut aria-hidden="true" /><span>Sign out</span></button>
       </div>

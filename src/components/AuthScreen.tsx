@@ -1,13 +1,19 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Eye, EyeOff, Activity } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 // Sign-in / sign-up screen with extended fields.
 // Sign-up collects: first name, last name, email, phone, password, confirm password.
 // Includes password visibility toggle (eye icon).
-export default function AuthScreen() {
+interface Props {
+  initialMode?: 'signin' | 'signup';
+  onHome?: () => void;
+  onModeChange?: (mode: 'signin' | 'signup') => void;
+}
+
+export default function AuthScreen({ initialMode = 'signin', onHome, onModeChange }: Props) {
   const { signIn, signUp } = useAuth();
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
+  const [mode, setMode] = useState<'signin' | 'signup'>(initialMode);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
@@ -20,6 +26,8 @@ export default function AuthScreen() {
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const passwordStrong = password.length >= 12 && /[a-z]/.test(password) && /[A-Z]/.test(password) && /[0-9]/.test(password);
+
+  useEffect(() => { setMode(initialMode); }, [initialMode]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,7 +79,9 @@ export default function AuthScreen() {
   };
 
   const toggleMode = () => {
-    setMode(mode === 'signin' ? 'signup' : 'signin');
+    const nextMode = mode === 'signin' ? 'signup' : 'signin';
+    setMode(nextMode);
+    onModeChange?.(nextMode);
     setError(null);
     setNotice(null);
   };
@@ -79,18 +89,21 @@ export default function AuthScreen() {
   const inputClass = "w-full px-3 py-2.5 rounded-lg bg-surface border border-border text-text placeholder:text-muted focus:outline-none focus:border-primary transition-colors pr-10";
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 bg-bg text-text">
-      <div className="w-full max-w-sm animate-fade-in">
-        <div className="flex items-center gap-3 mb-8">
-          <div className="w-10 h-10 rounded-lg bg-primary/15 flex items-center justify-center">
-            <Activity className="w-5 h-5 text-primary" />
-          </div>
-          <div>
-            <h1 className="text-lg font-semibold tracking-tight">Quantum Intelligence</h1>
-            <p className="text-xs text-muted">AI Trading Intelligence Platform</p>
-          </div>
+    <main className="auth-screen">
+      <aside className="auth-story">
+        <a className="auth-back-home" href="/" onClick={(event) => { event.preventDefault(); onHome?.(); }}><span>←</span> Back to overview</a>
+        <div className="auth-story-content">
+          <div className="auth-story-kicker"><Activity aria-hidden="true" /> MARKET INTELLIGENCE, IN CONTEXT</div>
+          <h1>Bring your market workflow into focus.</h1>
+          <p>Price action, supporting evidence, and risk oversight—connected in one workspace.</p>
+          <div className="auth-story-visual" aria-hidden="true"><div /><div /><div /><div /><div /><div /><div /><div /><div /><div /><div /><div /></div>
+          <div className="auth-story-foot"><span>01 / 03</span><span>Understand the full picture</span></div>
         </div>
-
+      </aside>
+      <section className="auth-form-column">
+      <div className="auth-form-card animate-fade-in">
+        <a className="auth-mobile-brand" href="/" onClick={(event) => { event.preventDefault(); onHome?.(); }}><span><Activity aria-hidden="true" /></span><strong>Quantum <small>INTELLIGENCE</small></strong></a>
+        <div className="auth-form-heading"><span>{mode === 'signin' ? 'WELCOME BACK' : 'GET STARTED'}</span><h2>{mode === 'signin' ? 'Sign in to your workspace' : 'Create your account'}</h2><p>{mode === 'signin' ? 'Pick up where your market research left off.' : 'Set up your secure workspace in a few steps.'}</p></div>
         <form onSubmit={submit} className="space-y-4">
           {mode === 'signup' && (
             <>
@@ -261,12 +274,14 @@ export default function AuthScreen() {
         </form>
 
         <button
+          type="button"
           onClick={toggleMode}
           className="w-full mt-4 text-sm text-muted hover:text-text transition-colors"
         >
           {mode === 'signin' ? "Don't have an account? Sign up" : 'Already have an account? Sign in'}
         </button>
       </div>
-    </div>
+      </section>
+    </main>
   );
 }
