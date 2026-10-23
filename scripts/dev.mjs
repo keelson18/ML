@@ -58,7 +58,7 @@ async function waitUntilReady(name, url, child) {
 async function start() {
   const api = launchService('Autonomy API', [resolve(root, 'node_modules/tsx/dist/cli.mjs'), 'watch', 'backend/src/server.ts'], { AUTONOMY_PORT: autonomyPort });
   await waitUntilReady('Autonomy API', `http://127.0.0.1:${autonomyPort}/health`, api);
-  if (!stopping) launchService('Web', [resolve(root, 'node_modules/vite/bin/vite.js')]);
+  if (!stopping) launchService('Web', [resolve(root, 'node_modules/vite/bin/vite.js')], { AUTONOMY_PROXY_TARGET: `http://127.0.0.1:${autonomyPort}` });
 }
 
 start().catch((error) => {

@@ -11,8 +11,8 @@ import { traderConfig } from '../trader/config';
 // Provider base URLs — configurable via env for testing overrides
 const MASSIVE_REST = process.env.MASSIVE_REST_URL ?? 'https://api.massive.com';
 const TWELVEDATA_REST = process.env.TWELVEDATA_REST_URL ?? 'https://api.twelvedata.com';
-const TWELVEDATA_TIMEFRAMES: Record<Timeframe, string> = {
-  '1m': '1min', '3m': '3min', '5m': '5min', '15m': '15min', '30m': '30min',
+const TWELVEDATA_TIMEFRAMES: Record<Exclude<Timeframe, '3m'>, string> = {
+  '1m': '1min', '5m': '5min', '15m': '15min', '30m': '30min',
   '1h': '1h', '4h': '4h', '1d': '1day', '1w': '1week', '1M': '1month',
 };
 const MASSIVE_TIMEFRAMES: Record<Timeframe, { multiplier: number; timespan: 'minute' | 'hour' | 'day' | 'week' | 'month'; minutes: number }> = {
@@ -327,7 +327,7 @@ async function fetchFromProvider(instrument: Market, timeframe: Timeframe, reque
     const minutes = interval.minutes * limit * 1.5;
     const from = new Date(Date.now() - minutes * 60_000).toISOString().slice(0, 10);
     const to = new Date().toISOString().slice(0, 10);
-    const query = new URLSearchParams({ adjusted: 'true', sort: 'asc', limit: String(limit) });
+    const query = new URLSearchParams({ adjusted: 'true', sort: 'desc', limit: String(limit) });
     const url = `${MASSIVE_REST}/v2/aggs/ticker/${encodeURIComponent(sourceSymbol)}/range/${interval.multiplier}/${interval.timespan}/${from}/${to}?${query}`;
     // API key in Authorization header, never in URL query string
     await acquireRequestSlot(massiveBudget, 'Massive', priority);
@@ -349,7 +349,7 @@ async function fetchFromProvider(instrument: Market, timeframe: Timeframe, reque
     if (body.ticker !== sourceSymbol) throw new Error(`Massive returned mismatched instrument metadata for ${instrument.canonicalSymbol}.`);
     const candles = (body.results ?? []).map((bar) => ({
       time: Math.floor(bar.t / 1000), open: Number(bar.o), high: Number(bar.h), low: Number(bar.l), close: Number(bar.c), volume: Number(bar.v ?? 0),
-    }));
+    })).reverse();
     if (candles.length === 0) throw new Error(`Massive returned no candles for ${instrument.canonicalSymbol}.`);
     return candles;
   }
@@ -358,7 +358,9 @@ async function fetchFromProvider(instrument: Market, timeframe: Timeframe, reque
     const apiKey = config.twelveDataApiKey;
     if (!apiKey) throw new Error('TWELVEDATA_API_KEY is not configured on the server.');
     const limit = Math.min(requestedLimit, 1000);
-    const query = new URLSearchParams({ symbol: sourceSymbol, interval: TWELVEDATA_TIMEFRAMES[timeframe], outputsize: String(limit), timezone: 'UTC', apikey: apiKey });
+    const sourceTimeframe = timeframe === '3m' ? '1m' : timeframe;
+    const sourceLimit = timeframe === '3m' ? Math.min(limit * 3, 3000) : limit;
+    const query = new URLSearchParams({ symbol: sourceSymbol, interval: TWELVEDATA_TIMEFRAMES[sourceTimeframe], outputsize: String(sourceLimit), timezone: 'UTC', apikey: apiKey });
     await acquireRequestSlot(twelveDataBudget, 'Twelve Data', priority);
     const response = await fetchWithTimeout(`${TWELVEDATA_REST}/time_series?${query}`);
     const { payload: body } = await readJsonSafe<{
@@ -383,10 +385,52 @@ async function fetchFromProvider(instrument: Market, timeframe: Timeframe, reque
       open: Number(bar.open), high: Number(bar.high), low: Number(bar.low), close: Number(bar.close), volume: Number(bar.volume ?? 0),
     })).reverse();
     if (candles.length === 0) throw new Error(`Twelve Data returned no candles for ${instrument.canonicalSymbol}.`);
-    return candles;
+    return timeframe === '3m' ? aggregateThreeMinuteCandles(candles, limit) : candles;
   }
 
   throw new Error(`Unsupported provider for ${instrument.canonicalSymbol}.`);
+}
+
+function aggregateThreeMinuteCandles(candles: Candle[], limit: number, nowMs = Date.now()): Candle[] {
+  const intervalSeconds = 3 * 60;
+  const aggregated: Candle[] = [];
+  let current: Candle | undefined;
+  let count = 0;
+  let lastSourceTime: number | undefined;
+
+  const finish = () => {
+    if (!current) return;
+    const intervalIsOpen = (current.time + intervalSeconds) * 1000 > nowMs;
+    if (count === 3 || intervalIsOpen) aggregated.push(current);
+  };
+
+  for (const candle of candles) {
+    const bucketStart = Math.floor(candle.time / intervalSeconds) * intervalSeconds;
+    if (bucketStart !== current?.time) {
+      finish();
+      current = candle.time === bucketStart ? { ...candle } : undefined;
+      count = current ? 1 : 0;
+      lastSourceTime = current ? candle.time : undefined;
+      continue;
+    }
+    if (candle.time !== lastSourceTime! + 60 || count >= 3) {
+      current = undefined;
+      count = 0;
+      lastSourceTime = undefined;
+      continue;
+    }
+    current = {
+      ...current,
+      high: Math.max(current.high, candle.high),
+      low: Math.min(current.low, candle.low),
+      close: candle.close,
+      volume: current.volume + candle.volume,
+    };
+    count += 1;
+    lastSourceTime = candle.time;
+  }
+  finish();
+  return aggregated.slice(-limit);
 }
 
 function parseUtcTimestamp(value: string): number {

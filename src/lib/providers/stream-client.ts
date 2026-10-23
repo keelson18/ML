@@ -60,9 +60,8 @@ class StreamClient {
     try {
       ({ ticket } = await authenticatedBackendRequest<{ ticket: string }>('/api/v1/stream/ticket', { method: 'POST' }));
     } catch (error) {
-      // A 404 means the backend was built with live streaming disabled. Keep
-      // the candle poller active without retrying a known-missing route.
-      if (error instanceof Error && /\(404\)/.test(error.message)) {
+      // A disabled or missing stream endpoint should leave candle polling active.
+      if (error instanceof Error && (error.message === 'Live streaming is disabled.' || /\(404\)/.test(error.message))) {
         this.unavailable = true;
         this.connecting = false;
         for (const symbol of this.listeners.keys()) this.emitMode(symbol, 'polling');

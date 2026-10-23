@@ -65,6 +65,26 @@ describe('market data instrument mapping', () => {
     expect(result.dataset).toMatchObject({ provider: 'massive', sourceInstrument: 'X:BTCUSD', quoteCurrency: 'USD', timeframe: '1h' });
   });
 
+  it('requests the newest Massive bars and returns them in chronological order', async () => {
+    config.massiveApiKey = 'test-key';
+    const newest = Math.floor(Date.now() / 3_600_000) * 3_600_000 - 3_600_000;
+    const older = newest - 3_600_000;
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      status: 'OK',
+      ticker: 'X:BTCUSD',
+      results: [
+        { t: newest, o: 101, h: 103, l: 100, c: 102, v: 50 },
+        { t: older, o: 100, h: 102, l: 99, c: 101, v: 40 },
+      ],
+    }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await fetchMarketData('BTCUSD', '1h', 2);
+
+    expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get('sort')).toBe('desc');
+    expect(result.candles.map(({ time }) => time)).toEqual([older / 1000, newest / 1000]);
+  });
+
   it('maps BTCUSD through Twelve Data using the verified BTC/USD source symbol', async () => {
     if (!btcMarket) throw new Error('BTCUSD market missing.');
     btcMarket.provider = 'twelvedata';
@@ -82,6 +102,59 @@ describe('market data instrument mapping', () => {
     expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get('symbol')).toBe('BTC/USD');
     expect(result.instrument).toMatchObject({ canonicalSymbol: 'BTCUSD', sourceSymbol: 'BTC/USD', provider: 'twelvedata' });
     expect(result.dataset).toMatchObject({ provider: 'twelvedata', sourceInstrument: 'BTC/USD', quoteCurrency: 'USD', timeframe: '4h' });
+  });
+
+  it('builds supported 3m candles from consecutive Twelve Data 1m candles', async () => {
+    if (!btcMarket) throw new Error('BTCUSD market missing.');
+    btcMarket.provider = 'twelvedata';
+    btcMarket.sourceSymbol = 'BTC/USD';
+    btcMarket.exchange = 'Twelve Data';
+    config.twelveDataApiKey = 'server-twelve-key';
+    const start = Date.parse('2026-10-14T20:00:00Z');
+    const values = Array.from({ length: 6 }, (_, index) => {
+      const minute = index + 1;
+      return {
+        datetime: new Date(start + index * 60_000).toISOString().replace('T', ' ').slice(0, 19),
+        open: String(100 + index), high: String(102 + index), low: String(99 + index),
+        close: String(101 + index), volume: String(minute),
+      };
+    }).reverse();
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      status: 'ok', meta: { symbol: 'BTC/USD' }, values,
+    }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await fetchMarketData('BTCUSD', '3m', 2);
+
+    const request = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(request.searchParams.get('interval')).toBe('1min');
+    expect(request.searchParams.get('outputsize')).toBe('6');
+    expect(result.candles).toEqual([
+      { time: start / 1000, open: 100, high: 104, low: 99, close: 103, volume: 6 },
+      { time: (start + 180_000) / 1000, open: 103, high: 107, low: 102, close: 106, volume: 15 },
+    ]);
+  });
+
+  it('does not create a 3m candle across a missing one-minute source bar', async () => {
+    if (!btcMarket) throw new Error('BTCUSD market missing.');
+    btcMarket.provider = 'twelvedata';
+    btcMarket.sourceSymbol = 'BTC/USD';
+    btcMarket.exchange = 'Twelve Data';
+    config.twelveDataApiKey = 'server-twelve-key';
+    const start = Date.parse('2026-10-14T20:00:00Z');
+    const values = [0, 2, 3, 4, 5].map((minute) => ({
+      datetime: new Date(start + minute * 60_000).toISOString().replace('T', ' ').slice(0, 19),
+      open: '100', high: '102', low: '99', close: '101', volume: '1',
+    })).reverse();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      status: 'ok', meta: { symbol: 'BTC/USD' }, values,
+    }), { status: 200 })));
+
+    const result = await fetchMarketData('BTCUSD', '3m', 2);
+
+    expect(result.candles).toEqual([
+      { time: (start + 180_000) / 1000, open: 100, high: 102, low: 99, close: 101, volume: 3 },
+    ]);
   });
 
   it('changes dataset identity when a provider corrects candle content at the same timestamps', async () => {

@@ -39,7 +39,7 @@ import AutonomousCommandCenter from './AutonomousCommandCenter';
 import { fetchMarketAvailability, requestBackendDecision, type BackendDecision } from '../lib/backend-api';
 import { resolveAvatarUrl } from '../lib/avatar';
 import { fetchNotifications, markNotificationRead, type InAppNotification } from '../api/notifications';
-import { MULTI_TIMEFRAME_PANELS } from '../lib/terminal';
+import { MULTI_TIMEFRAME_ANALYSIS_PANELS } from '../lib/terminal';
 
 type WsStatus = 'connecting' | 'open' | 'polling' | 'closed' | 'reconnecting';
 
@@ -305,7 +305,7 @@ export default function Dashboard() {
               {availableMarkets.map((p) => <option key={p.symbol} value={p.symbol}>{p.label}</option>)}
             </select>
             <div className="flex items-center gap-1 rounded-lg bg-surface border border-border p-1" role="group" aria-label="Jump to terminal timeframe">
-              {MULTI_TIMEFRAME_PANELS.map(({ timeframe: frame, label }) => <button key={frame} type="button" onClick={() => document.getElementById(`terminal-${frame}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })} aria-label={`Show ${label} chart`} aria-controls={`terminal-${frame}`} className="rounded px-2 py-1 text-xs font-medium text-muted hover:bg-bg hover:text-text">{label}</button>)}
+              {MULTI_TIMEFRAME_ANALYSIS_PANELS.map(({ timeframe: frame, label }) => <button key={frame} type="button" onClick={() => document.getElementById(`terminal-${frame}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })} aria-label={`Show ${label} chart`} aria-controls={`terminal-${frame}`} className="rounded px-2 py-1 text-xs font-medium text-muted hover:bg-bg hover:text-text">{label}</button>)}
             </div>
             <span className="text-lg font-semibold tabular-nums ml-auto text-text">{formatMarketPrice(symbol, livePrice)}</span>
           </div>

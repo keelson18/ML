@@ -345,7 +345,7 @@ small { font-size: var(--fs-xs); }
   .app-header-actions > button[aria-label]:hover { border-color: rgb(var(--border)); background: rgb(var(--bg)); }
   .app-header-actions .relative > button[aria-label] { width: 40px; min-width: 40px; min-height: 40px; display: grid; place-items: center; border: 1px solid transparent; border-radius: 12px; }
   .app-header-actions .relative > button[aria-label]:hover { border-color: rgb(var(--border)); background: rgb(var(--bg)); }
-  .app-header-actions button[aria-haspopup="menu"] { display: flex; min-width: 40px; min-height: 40px; align-items: center; justify-content: center; padding: 2px; }
+  .app-header-actions .relative > button[aria-haspopup="menu"] { display: flex; width: auto; min-width: 40px; min-height: 40px; align-items: center; justify-content: center; gap: 6px; padding: 2px 6px; }
   .app-header-actions button[aria-haspopup="menu"] img.account-trigger-avatar, .app-header-actions button[aria-haspopup="menu"] > .account-trigger-avatar { width: 34px; height: 34px; }
   .app-header-actions button[aria-haspopup="menu"] > .account-trigger-avatar { border: 1px solid rgb(var(--primary) / 0.25); }
   .app-main { padding-bottom: calc(68px + env(safe-area-inset-bottom)); }
@@ -439,13 +439,22 @@ small { font-size: var(--fs-xs); }
   input[type="checkbox"], input[type="radio"] { width: 20px; height: 20px; min-height: 20px; }
 }
 
+@media (max-width: 767px) {
+  .command-center-grid { grid-template-columns: minmax(0, 1fr); }
+  .command-chart { grid-column: auto; grid-row: auto; order: 0; }
+  .context-panel { grid-column: auto; order: 1; }
+  .evidence-panel { grid-column: auto; order: 2; }
+}
+
 @media (max-width: 639px) {
   .dashboard-page { padding: 16px; }
-  .dashboard-heading { align-items: center; gap: 10px; margin: -16px -16px 10px; padding: 10px 16px; }
-  .dashboard-title h1 { margin: 2px 0; font-size: var(--fs-lg); }
-  .dashboard-title p, .dashboard-eyebrow { display: none; }
-  .dashboard-market-price { width: auto; min-width: 0; align-items: flex-end; padding: 4px 0 4px 8px; border: 0; background: transparent; box-shadow: none; }
-  .dashboard-market-price > strong { font-size: var(--fs-price); }
+  .dashboard-heading { align-items: center; gap: 12px; margin: -16px -16px 14px; padding: 12px 16px; border-bottom: 1px solid rgb(var(--border) / 0.75); background: rgb(var(--surface) / 0.58); }
+  .dashboard-title { flex: 1 1 0; min-width: 0; }
+  .dashboard-eyebrow { display: flex; font-size: 10px; }
+  .dashboard-title h1 { margin: 3px 0 0; font-size: var(--fs-lg); }
+  .dashboard-title p { display: block; max-width: 38ch; margin-top: 4px; font-size: 12px; line-height: 1.45; }
+  .dashboard-market-price { width: 48%; min-width: 128px; max-width: 208px; flex: 0 1 48%; align-items: flex-end; padding: 8px; border: 1px solid rgb(var(--border) / 0.8); border-radius: 10px; background: rgb(var(--bg) / 0.7); box-shadow: none; }
+  .dashboard-market-price > strong { font-size: clamp(1.15rem, 5.5vw, 1.5rem); }
   .dashboard-price-change small { display: none; }
   .dashboard-controls { align-items: stretch; }
   .dashboard-market-filters { width: 100%; }
@@ -467,6 +476,8 @@ small { font-size: var(--fs-xs); }
   .decision-risk:nth-of-type(3) { grid-column: 1; grid-row: 3; }
   .decision-risk:nth-of-type(4) { grid-column: 2; grid-row: 3; }
   .page-frame { padding: 16px; }
+  .chart-outside-view-status { top: 4rem; left: 8px; right: auto; max-width: calc(100% - 16px); }
+  .chart-layer-save-error { top: 6rem; max-width: calc(100% - 16px); }
 
   .mtf-terminal { grid-template-columns: minmax(0, 1fr); grid-template-rows: repeat(4, 220px); }
 }
@@ -476,7 +487,7 @@ small { font-size: var(--fs-xs); }
   .mobile-tab { min-height: 46px; flex-direction: row; gap: 6px; }
   .app-main { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
   .terminal-chart-frame { height: calc(100dvh - 190px); min-height: 220px; }
-  .command-chart { height: clamp(220px, calc(100dvh - 245px), 420px); }
+  .command-chart { height: clamp(260px, calc(100dvh - 245px), 420px); }
 }
 
 .landing-page { min-height: 100svh; overflow: hidden; color: rgb(var(--text)); background: radial-gradient(ellipse at 77% 20%, rgb(var(--primary) / 0.09), transparent 35%), rgb(var(--bg)); }

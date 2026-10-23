@@ -86,12 +86,31 @@ describe('server-side decision analysis', () => {
     await app.close();
   });
 
-  it('blocks an unverified market before fetching or analysis', async () => {
+  it('rejects markets outside the verification registry', async () => {
+    const app = await createApp();
+    const response = await analyzeRequest(app, 'user-unconfigured', { symbol: 'AAPL', timeframe: '1h' });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: 'Market is not configured for verification.' });
+    expect(mocks.fetchMarketData).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('analyzes an unverified market only after fetching fresh validated candles', async () => {
     mocks.availabilityStatus = 'unverified';
     const app = await createApp();
     const response = await analyzeRequest(app, 'user-unverified');
+    expect(response.statusCode).toBe(200);
+    expect(mocks.fetchMarketData).toHaveBeenCalledWith('BTCUSD', '1h', 1000);
+    expect(mocks.analyze).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it('blocks a market known to be unavailable from its configured provider', async () => {
+    mocks.availabilityStatus = 'unavailable';
+    const app = await createApp();
+    const response = await analyzeRequest(app, 'user-unavailable');
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({ error: 'Market is not verified as available.' });
+    expect(response.json()).toEqual({ error: 'Market is unavailable from the configured provider.' });
     expect(mocks.fetchMarketData).not.toHaveBeenCalled();
     expect(mocks.analyze).not.toHaveBeenCalled();
     await app.close();

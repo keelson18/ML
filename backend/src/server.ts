@@ -189,6 +189,8 @@ export function buildServer() {
   void app.register(personalDataRoutes);
   void app.register(learningResearchRoutes);
   if (config.liveFeed.enabled) registerLiveStream(app, allowedOrigins());
+  else app.post('/api/v1/stream/ticket', { preHandler: app.requireAuth }, async (_request, reply) =>
+    reply.code(503).send({ error: 'Live streaming is disabled.' }));
   const healthResponse = async () => ({
     status: 'ok', service: 'quantum-api', autonomy: pipeline.getSnapshot(), schema: await readSchemaHealth(), paperLedger: await readPaperLedgerHealth(),
   });

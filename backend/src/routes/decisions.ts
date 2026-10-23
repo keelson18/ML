@@ -29,9 +29,9 @@ function validateDecisionRequest(body: DecisionRequest | undefined): { symbol: s
   if (typeof body.symbol !== 'string' || !SYMBOL_PATTERN.test(body.symbol)) return 'Invalid symbol.';
   if (typeof body.timeframe !== 'string' || !VALID_TIMEFRAMES.has(body.timeframe)) return 'Invalid timeframe.';
   if (!getMarket(body.symbol)) return 'Unknown market symbol.';
-  if (getMarketAvailability().find((market) => market.symbol === body.symbol)?.status !== 'available') {
-    return 'Market is not verified as available.';
-  }
+  const availability = getMarketAvailability().find((market) => market.symbol === body.symbol);
+  if (!availability) return 'Market is not configured for verification.';
+  if (availability.status === 'unavailable') return 'Market is unavailable from the configured provider.';
   return { symbol: body.symbol, timeframe: body.timeframe as Timeframe };
 }
 

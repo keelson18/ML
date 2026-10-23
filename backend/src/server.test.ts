@@ -17,6 +17,7 @@ const originalCorsOrigin = process.env.CORS_ORIGIN;
 const originalMarketRateLimitMax = config.marketRateLimitMax;
 const originalSupabaseUrl = config.supabaseUrl;
 const originalServiceRoleKey = config.supabaseServiceRoleKey;
+const originalLiveFeedEnabled = config.liveFeed.enabled;
 
 afterEach(() => {
   if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
@@ -26,6 +27,7 @@ afterEach(() => {
   config.marketRateLimitMax = originalMarketRateLimitMax;
   config.supabaseUrl = originalSupabaseUrl;
   config.supabaseServiceRoleKey = originalServiceRoleKey;
+  config.liveFeed.enabled = originalLiveFeedEnabled;
   vi.mocked(getSupabaseClient).mockReset();
 });
 
@@ -165,6 +167,24 @@ describe('Fastify security headers', () => {
     expect(settings.statusCode).toBe(401);
     expect(run.statusCode).toBe(401);
     expect(oldAdvance.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('returns a clear authenticated response when live streaming is disabled', async () => {
+    process.env.NODE_ENV = 'test';
+    config.liveFeed.enabled = false;
+    const { app } = buildServer();
+
+    const unauthenticated = await app.inject({ method: 'POST', url: '/api/v1/stream/ticket' });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/stream/ticket',
+      headers: { authorization: 'Bearer test-token' },
+    });
+
+    expect(unauthenticated.statusCode).toBe(401);
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ error: 'Live streaming is disabled.' });
     await app.close();
   });
 

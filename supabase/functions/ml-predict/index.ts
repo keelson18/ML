@@ -307,9 +307,7 @@ Deno.serve(async (req: Request) => {
   const origin = resolveCorsOrigin(req.headers.get('origin'), configuredOrigins, allowLoopbackPorts);
   const headers = corsHeaders(origin);
 
-  if (!configuredOrigins.split(',').some((value) => value.trim()) && !origin) {
-    return jsonResponse({ error: 'Service misconfigured' }, 500, headers);
-  }
+  // Server-to-server requests may omit Origin; browser origins still require the allowlist.
   if (req.method === 'OPTIONS') return new Response(null, { status: origin ? 204 : 403, headers });
   if (req.headers.has('origin') && !origin) return jsonResponse({ error: 'Origin not allowed' }, 403, headers);
 

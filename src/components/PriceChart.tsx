@@ -218,10 +218,10 @@ export default function PriceChart({ candles, overlays, theme, trades = [], posi
         {([['structure', 'Structure'], ['zones', 'Zones'], ['tradeLevels', 'Trade levels'], ['signals', 'Signals'], ['trades', 'Trades']] as const).map(([key, label]) =>
           <button key={key} type="button" className={`min-h-11 shrink-0 rounded-md px-3 text-sm font-medium ${layers[key] ? 'bg-primary text-white' : 'bg-bg text-muted'}`} aria-pressed={layers[key]} onClick={() => onToggleLayer(key)}>{label}</button>)}
       </div>}
-      {layers.trades && outsideViewTradeCount > 0 && <span className="absolute right-2 top-2 z-10 rounded-md border border-border bg-surface/95 px-2 py-1 text-sm text-muted" role="status">
+      {layers.trades && outsideViewTradeCount > 0 && <span className="chart-outside-view-status absolute right-2 top-2 z-10 rounded-md border border-border bg-surface/95 px-2 py-1 text-sm text-muted" role="status">
         {outsideViewTradeCount} trade{outsideViewTradeCount === 1 ? '' : 's'} outside chart view
       </span>}
-      {layerSaveError && <span className="absolute left-2 top-14 z-10 rounded-md bg-danger px-2 py-1 text-sm text-white" role="status">Layer preference could not be saved.</span>}
+      {layerSaveError && <span className="chart-layer-save-error absolute left-2 top-14 z-10 rounded-md bg-danger px-2 py-1 text-sm text-white" role="status">Layer preference could not be saved.</span>}
       <svg aria-label="Analytical chart zones" className="absolute inset-0 w-full h-full pointer-events-none overflow-visible" style={{ zIndex: 4 }}>
         {zones.map(({ zone, y1, y2 }) => <g key={zone.id}>
           <rect x="0" y={Math.min(Number(y1), Number(y2))} width="100%" height={Math.max(2, Math.abs(Number(y1) - Number(y2)))}
