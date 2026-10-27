@@ -31,14 +31,18 @@ export default function LandingPage({ onSignIn, onSignUp }: Props) {
 
       <section className="landing-hero">
         <div className="landing-copy">
-          <div className="landing-eyebrow"><span /> A CLEARER VIEW OF THE MARKET</div>
+          <div className="landing-eyebrow"><span /> CRYPTO &amp; COMMODITY MARKET RESEARCH</div>
           <h1>Make every market decision <em>make sense.</em></h1>
-          <p className="landing-lede">One focused workspace for price action, signal context, and risk oversight. Understand what the system sees before you decide what comes next.</p>
+          <p className="landing-lede">Research crypto and commodity markets with explainable analysis and a paper-trading workflow. Every decision stays reviewable: no live orders or real-money execution.</p>
           <div className="landing-hero-actions">
             <button type="button" className="landing-primary-cta" onClick={onSignUp}>Create your workspace <ArrowRight aria-hidden="true" /></button>
             <button type="button" className="landing-secondary-cta" onClick={onSignIn}>Sign in <span>Already have an account?</span></button>
           </div>
-          <div className="landing-proof-row"><span><ShieldCheck aria-hidden="true" /> Risk-aware by design</span><span><Activity aria-hidden="true" /> Evidence alongside signals</span></div>
+          <div className="landing-proof-row">
+            <span><Activity aria-hidden="true" /> Crypto &amp; commodity markets</span>
+            <span><Brain aria-hidden="true" /> Evidence you can inspect</span>
+            <span><ShieldCheck aria-hidden="true" /> Paper trading only</span>
+          </div>
         </div>
 
         <div className="landing-preview" aria-label="Illustrative preview of the market intelligence workspace">
@@ -65,11 +69,11 @@ export default function LandingPage({ onSignIn, onSignUp }: Props) {
       </section>
 
       <section id="platform" className="landing-platform">
-        <div className="landing-section-heading"><span>THE WORKSPACE</span><h2>Clarity across the whole decision.</h2><p>Keep the pieces connected, from first signal to risk review.</p></div>
+        <div className="landing-section-heading"><span>THE WORKSPACE</span><h2>Research with the reasoning in view.</h2><p>Explore market context, inspect the evidence, and review risk without live execution.</p></div>
         <div className="landing-feature-grid">
-          <article><span className="landing-feature-icon"><BarChart3 aria-hidden="true" /></span><h3>Read the market</h3><p>Bring chart structure and timeframe context into one place.</p></article>
-          <article><span className="landing-feature-icon"><Brain aria-hidden="true" /></span><h3>See the reasoning</h3><p>Explore signals and supporting evidence instead of relying on a black box.</p></article>
-          <article><span className="landing-feature-icon"><ShieldCheck aria-hidden="true" /></span><h3>Keep risk in view</h3><p>Make risk review a visible part of the workflow, not an afterthought.</p></article>
+          <article><span className="landing-feature-icon"><BarChart3 aria-hidden="true" /></span><h3>Explore market context</h3><p>Review crypto and commodity price action alongside timeframe context.</p></article>
+          <article><span className="landing-feature-icon"><Brain aria-hidden="true" /></span><h3>Inspect the reasoning</h3><p>See supporting evidence and uncertainty instead of relying on a black box.</p></article>
+          <article><span className="landing-feature-icon"><ShieldCheck aria-hidden="true" /></span><h3>Keep it paper-only</h3><p>Evaluate ideas in a paper-trading workflow without live broker execution.</p></article>
         </div>
       </section>
 

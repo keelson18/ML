@@ -1,17 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import TradingTerminal from './TradingTerminal';
-import type { MarketType, Timeframe } from '../lib/types';
+import type { Timeframe } from '../lib/types';
 import { getDataProvider } from '../lib/providers';
 import { fetchMultiTimeframeAnalysis, MULTI_TIMEFRAME_ANALYSIS_PANELS, type MultiTimeframeSeriesResult } from '../lib/terminal';
 
 interface Props {
   symbol: string;
-  marketType: MarketType;
   theme: 'light' | 'dark';
-  wsStatus: string;
 }
 
-export default function MultiTimeframeTerminal({ symbol, marketType, theme, wsStatus }: Props) {
+export default function MultiTimeframeTerminal({ symbol, theme }: Props) {
   const [series, setSeries] = useState<Partial<Record<Timeframe, MultiTimeframeSeriesResult>>>({});
   const [loading, setLoading] = useState(true);
   const dataProvider = useMemo(() => getDataProvider(symbol), [symbol]);
@@ -36,7 +34,7 @@ export default function MultiTimeframeTerminal({ symbol, marketType, theme, wsSt
             <header className="mtf-chart-header"><div><strong>{panel.label}</strong><span>{panel.role}</span></div><small>{candles.length ? `${candles.length} candles` : result?.error ? 'Error' : loading ? 'Loading' : 'No data'}</small></header>
             <div className="mtf-chart-body">
               {candles.length > 0
-                ? <TradingTerminal symbol={symbol} marketType={marketType} candles={candles} overlays={[]} timeframe={panel.timeframe} theme={theme} wsStatus={wsStatus} />
+                ? <TradingTerminal candles={candles} theme={theme} />
                 : <span className="command-empty" role={result?.error ? 'alert' : undefined}>
                   {result?.error ? `Request failed: ${result.error}` : loading ? 'Loading timeframe' : 'No data available'}
                 </span>}

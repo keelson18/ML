@@ -9,7 +9,6 @@ interface Snapshot {
   fps: number;
   longTasks: number;
   chartCandlesMs: number | null;
-  chartOverlaysMs: number | null;
   fetchMs: number | null;
 }
 
@@ -20,7 +19,7 @@ function formatMs(value: number | null): string {
 }
 
 export default function PerfOverlay({ candleCount }: Props) {
-  const [snapshot, setSnapshot] = useState<Snapshot>({ fps: 0, longTasks: 0, chartCandlesMs: null, chartOverlaysMs: null, fetchMs: null });
+  const [snapshot, setSnapshot] = useState<Snapshot>({ fps: 0, longTasks: 0, chartCandlesMs: null, fetchMs: null });
 
   useEffect(() => {
     let longTasks = 0;
@@ -39,7 +38,6 @@ export default function PerfOverlay({ candleCount }: Props) {
         fps: Math.round((frames * 1000) / REFRESH_MS),
         longTasks,
         chartCandlesMs: latestTiming('chart.candles'),
-        chartOverlaysMs: latestTiming('chart.overlays'),
         fetchMs: latestTiming('candles.fetch'),
       });
       frames = 0;
@@ -59,7 +57,6 @@ export default function PerfOverlay({ candleCount }: Props) {
       <p>Long tasks: {snapshot.longTasks}</p>
       <p>Last fetch: {formatMs(snapshot.fetchMs)}</p>
       <p>Chart candles: {formatMs(snapshot.chartCandlesMs)}</p>
-      <p>Chart overlays: {formatMs(snapshot.chartOverlaysMs)}</p>
     </aside>
   );
 }

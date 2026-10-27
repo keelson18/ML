@@ -137,6 +137,8 @@ export async function buildAdminOverview(): Promise<AdminOverview> {
       ...tile(schedulerHealth.status, schedulerHealth.reason, checkedAt),
       state: schedulerState,
       enabled: schedulerEnabled, entriesEnabled: config.autonomousTradingEnabled, running: schedulerDiagnostics.running, cycleInProgress: schedulerDiagnostics.cycleInProgress, lastCycleAt: schedulerDiagnostics.lastCycleAt,
+      activeLeaseCount: schedulerDiagnostics.activeLeaseCount, leaseContentionCount: schedulerDiagnostics.leaseContentionCount,
+      leaseClaimFailureCount: schedulerDiagnostics.leaseClaimFailureCount, leaseRenewalFailureCount: schedulerDiagnostics.leaseRenewalFailureCount,
       lastBoundaries: schedulerDiagnostics.lastBoundaries, nextScheduledAt: schedulerDiagnostics.nextScheduledAt,
       lastError: schedulerDiagnostics.lastError ? 'Scheduler cycle failed; inspect server logs.' : null,
     },

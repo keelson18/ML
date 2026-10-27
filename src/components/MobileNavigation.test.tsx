@@ -7,14 +7,16 @@ const renderNavigation = (isAdmin: boolean) => renderToStaticMarkup(
 );
 
 describe('MobileNavigation', () => {
-  it('renders exactly the five primary destinations and More entry', () => {
+  it('renders four user primary destinations and More entry', () => {
     const markup = renderNavigation(false);
-    expect(markup.match(/class="mobile-tab(?: is-active)?"/g)).toHaveLength(5);
-    for (const label of ['Chart', 'Trader', 'Portfolio', 'Research', 'More']) expect(markup).toContain(`>${label}<`);
+    expect(markup.match(/class="mobile-tab(?: is-active)?"/g)).toHaveLength(4);
+    for (const label of ['Chart', 'Trader', 'Portfolio', 'More']) expect(markup).toContain(`>${label}<`);
     expect(markup).not.toContain('sidebar-backdrop');
+    expect(markup).not.toContain('AI Learning');
   });
 
   it('keeps the More entry available as a dialog trigger', () => {
     expect(renderNavigation(true)).toContain('aria-haspopup="dialog"');
+    expect(renderNavigation(true)).toContain('AI Learning');
   });
 });

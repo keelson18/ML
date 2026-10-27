@@ -1,4 +1,4 @@
-import type { Candle, Signal, Overlay } from '../types';
+import type { Candle, Signal } from '../types';
 import { findSwings } from '../indicators';
 
 // Extracted legacy pattern detection functions from original strategies.ts
@@ -16,10 +16,10 @@ export function detectHeadShoulders(candles: Candle[]): Signal | null {
   const last = candles[candles.length - 1].close;
   const neckline = Math.min(a.value, c.value);
   if (isRegular && last < neckline) {
-    return { strategy: 'Head & Shoulders', side: 'sell', confidence: 0.62, reason: 'Bearish H&S confirmed, neckline broken', overlays: [markerOverlay(last3, 'arrowDown', 'H&S')] };
+    return { strategy: 'Head & Shoulders', side: 'sell', confidence: 0.62, reason: 'Bearish H&S confirmed, neckline broken' };
   }
   if (isInverse && last > neckline) {
-    return { strategy: 'Inverse H&S', side: 'buy', confidence: 0.62, reason: 'Bullish inverse H&S confirmed, neckline broken', overlays: [markerOverlay(last3, 'arrowUp', 'iH&S')] };
+    return { strategy: 'Inverse H&S', side: 'buy', confidence: 0.62, reason: 'Bullish inverse H&S confirmed, neckline broken' };
   }
   return null;
 }
@@ -33,7 +33,7 @@ export function detectDoubleTopBottom(candles: Candle[]): Signal | null {
       const last = candles[candles.length - 1].close;
       const trough = Math.min(...candles.slice(a.index, b.index + 1).map((c) => c.low));
       if (last < trough) {
-        return { strategy: 'Double Top', side: 'sell', confidence: 0.58, reason: 'Double top confirmed by breakdown', overlays: [markerOverlay([a, b], 'arrowDown', 'DT')] };
+        return { strategy: 'Double Top', side: 'sell', confidence: 0.58, reason: 'Double top confirmed by breakdown' };
       }
     }
   }
@@ -43,7 +43,7 @@ export function detectDoubleTopBottom(candles: Candle[]): Signal | null {
       const last = candles[candles.length - 1].close;
       const peak = Math.max(...candles.slice(a.index, b.index + 1).map((c) => c.high));
       if (last > peak) {
-        return { strategy: 'Double Bottom', side: 'buy', confidence: 0.58, reason: 'Double bottom confirmed by breakout', overlays: [markerOverlay([a, b], 'arrowUp', 'DB')] };
+        return { strategy: 'Double Bottom', side: 'buy', confidence: 0.58, reason: 'Double bottom confirmed by breakout' };
       }
     }
   }
@@ -62,20 +62,11 @@ export function detectTriangleFlag(candles: Candle[]): Signal | null {
   if (converging) {
     const last = candles[candles.length - 1].close;
     const side = last > (hh[0].value + hh[1].value) / 2 ? 'buy' as const : 'neutral' as const;
-    return { strategy: 'Triangle', side, confidence: 0.5, reason: 'Converging trendlines — breakout pending', overlays: [lineOverlay([hh[0], hh[1]], '#f59e0b', 'resist'), lineOverlay([ll[0], ll[1]], '#f59e0b', 'support')] };
+    return { strategy: 'Triangle', side, confidence: 0.5, reason: 'Converging trendlines — breakout pending' };
   }
   if (flagParallel) {
     const dir = slopeHigh > 0 ? 'buy' as const : 'sell' as const;
-    return { strategy: 'Flag', side: dir, confidence: 0.48, reason: 'Parallel channel — flag continuation likely', overlays: [lineOverlay([hh[0], hh[1]], '#06b6d4', 'upper'), lineOverlay([ll[0], ll[1]], '#06b6d4', 'lower')] };
+    return { strategy: 'Flag', side: dir, confidence: 0.48, reason: 'Parallel channel — flag continuation likely' };
   }
   return null;
 }
-
-function markerOverlay(swings: { time: number; value: number }[], shape: 'arrowUp' | 'arrowDown', label: string): Overlay {
-  return { type: 'markers' as const, id: label, markers: swings.map((s) => ({ time: s.time, position: 'belowBar' as const, color: shape === 'arrowUp' ? '#22c55e' : '#ef4444', shape, text: label })) };
-}
-
-function lineOverlay(points: { time: number; value: number }[], color: string, label: string): Overlay {
-  return { type: 'line' as const, id: label, points, color, label };
-}
-

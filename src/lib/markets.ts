@@ -91,7 +91,7 @@ export const MARKET_UNIVERSE: Market[] = [
   { symbol: 'INTC', baseAsset: 'INTC', quoteAsset: 'USD', marketType: 'stock', exchange: 'NASDAQ', label: 'Intel Corp.', provider: 'massive', category: 'Technology', sector: 'Semiconductors', isActive: true },
 ];
 
-export type MarketAvailabilityStatus = 'available' | 'unavailable' | 'unverified';
+export type MarketAvailabilityStatus = 'verified' | 'partially_verified' | 'unverified' | 'unavailable' | 'stale' | 'error';
 export interface MarketAvailabilityRecord { symbol: string; status: MarketAvailabilityStatus; checkedAt: number | null }
 const marketAvailability = new Map<string, MarketAvailabilityRecord>();
 let marketAvailabilityRevision = 0;

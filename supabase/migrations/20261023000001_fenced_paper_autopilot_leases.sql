@@ -23,7 +23,15 @@ BEGIN
     OR p_lease_ms NOT BETWEEN 10000 AND 300000 THEN
     RAISE EXCEPTION 'invalid paper-autopilot lease request' USING ERRCODE = '42501';
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM public.paper_autopilot WHERE account_id = p_account_id AND enabled) THEN
+  IF NOT EXISTS (
+    SELECT 1 FROM public.paper_autopilot WHERE account_id = p_account_id AND enabled
+    UNION ALL
+    SELECT 1 FROM public.paper_sim_accounts account
+      CROSS JOIN LATERAL jsonb_array_elements(
+        CASE WHEN jsonb_typeof(account.state->'positions') = 'array' THEN account.state->'positions' ELSE '[]'::jsonb END
+      ) AS positions(value)
+      WHERE account.account_id = p_account_id::text AND positions.value->>'status' = 'open'
+  ) THEN
     RETURN;
   END IF;
 
@@ -162,7 +170,8 @@ DECLARE
   required_tables text[] := ARRAY[
     'paper_sim_accounts','decision_ledger','paper_fills','shadow_trades','paper_autopilot','autopilot_settings',
     'paper_ledger_verification_checkpoints','research_experiments','research_runs','research_results','research_approvals',
-    'research_holdout_claims','strategy_promotions','research_collection_state','research_collection_candles','paper_autopilot_leases'
+    'research_holdout_claims','strategy_promotions','research_collection_state','research_collection_candles',
+    'ml_model_artifacts','paper_autopilot_leases'
   ];
   required_rpcs text[] := ARRAY[
     'record_paper_account_update','set_paper_autopilot','list_enabled_paper_autopilots','pause_paper_autopilot',
@@ -172,8 +181,14 @@ DECLARE
     'validate_research_holdout_registration','append_research_collection_batch','claim_paper_autopilot_lease',
     'renew_paper_autopilot_lease','release_paper_autopilot_lease','verify_paper_schema'
   ];
+  required_triggers text[] := ARRAY[
+    'research_holdout_no_overlap','research_experiment_holdout_registration','research_collection_candles_immutable',
+    'research_collection_candles_no_truncate','research_runs_immutable','research_results_immutable',
+    'research_experiment_immutable_after_run','ml_model_artifacts_no_update_delete','ml_model_artifacts_no_truncate'
+  ];
   missing text[] := ARRAY[]::text[];
   item text;
+  target_table text;
 BEGIN
   IF auth.role() IS DISTINCT FROM 'service_role' THEN RAISE EXCEPTION 'service role required' USING ERRCODE = '42501'; END IF;
   FOREACH item IN ARRAY required_tables LOOP
@@ -183,6 +198,21 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = item) THEN
       missing := array_append(missing, 'rpc:' || item);
     END IF;
+  END LOOP;
+  FOREACH item IN ARRAY required_triggers LOOP
+    target_table := CASE
+      WHEN item = 'research_holdout_no_overlap' THEN 'research_holdout_claims'
+      WHEN item IN ('research_experiment_holdout_registration','research_experiment_immutable_after_run') THEN 'research_experiments'
+      WHEN item = 'research_runs_immutable' THEN 'research_runs'
+      WHEN item = 'research_results_immutable' THEN 'research_results'
+      WHEN item LIKE 'ml_model_artifacts_%' THEN 'ml_model_artifacts'
+      ELSE 'research_collection_candles'
+    END;
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_trigger trigger_row
+      WHERE trigger_row.tgname = item AND trigger_row.tgrelid = to_regclass('public.' || target_table)
+        AND NOT trigger_row.tgisinternal
+    ) THEN missing := array_append(missing, 'trigger:' || item); END IF;
   END LOOP;
   RETURN jsonb_build_object('ok', cardinality(missing) = 0, 'missing', missing);
 END;

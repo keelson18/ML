@@ -31,7 +31,8 @@ export default function BacktestingCenter({ candles, timeframe, symbol, theme, m
   const availability = useMemo(() => getStrategyAvailability(testCandles, timeframe), [testCandles, timeframe]);
   const selectedAvailability = availability.find(({ strategy }) => strategy.id === selectedStrategy);
   const minimumTestCandles = Math.max(67, (selectedDefinition?.minCandles ?? 0) + 7);
-  const canRun = Boolean(!marketLoading && !marketError && selectedDefinition && selectedAvailability?.eligible && testCandles.length >= minimumTestCandles && Number(capitalInput) > 0);
+  const initialCapital = Number(capitalInput);
+  const canRun = Boolean(!marketLoading && !marketError && selectedDefinition && selectedAvailability?.eligible && testCandles.length >= minimumTestCandles && Number.isFinite(initialCapital) && initialCapital > 0);
 
   const runSelectedBacktest = () => {
     const capital = Number(capitalInput);
@@ -133,11 +134,11 @@ export default function BacktestingCenter({ candles, timeframe, symbol, theme, m
       </div>
       {runError && <div role="alert" className="text-xs text-danger bg-danger/10 border border-danger/20 rounded-lg p-3">{runError}</div>}
 
-      <div className="grid grid-cols-3 lg:grid-cols-6 gap-3">{metrics.map((metric) => <div key={metric.label} className="bg-surface border border-border rounded-xl p-3"><div className="text-[10px] text-muted mb-1">{metric.label}</div><div className={`text-lg font-semibold tabular-nums ${metric.color}`}>{metric.value}</div></div>)}</div>
+      <div className="grid grid-cols-3 lg:grid-cols-6 gap-3">{metrics.map((metric) => <div key={metric.label} className="bg-surface border border-border rounded-xl p-3"><div className="text-xs text-muted mb-1">{metric.label}</div><div className={`text-lg font-semibold tabular-nums ${metric.color}`}>{metric.value}</div></div>)}</div>
 
       <section className="bg-surface border border-border rounded-xl p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-3"><h2 className="text-xs font-medium text-muted">Equity Curve</h2>{lastRun && <span className="text-[10px] text-muted">{getStrategy(lastRun.strategyId)?.name} · {lastRun.candleCount} candles · ${lastRun.capital.toLocaleString()}</span>}</div>
-        <div className="h-64 border border-border rounded-lg overflow-hidden">{running ? <div className="h-full flex items-center justify-center text-xs text-muted"><RefreshCw className="w-4 h-4 animate-spin mr-2" />Running simulation</div> : equityCandles.length ? <PriceChart candles={equityCandles} overlays={[]} theme={theme} /> : <div className="h-full flex items-center justify-center text-xs text-muted">Run a backtest to render the equity curve.</div>}</div>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-3"><h2 className="text-xs font-medium text-muted">Equity Curve</h2>{lastRun && <span className="text-xs text-muted">{getStrategy(lastRun.strategyId)?.name} · {lastRun.candleCount} candles · ${lastRun.capital.toLocaleString()}</span>}</div>
+        <div className="h-64 border border-border rounded-lg overflow-hidden">{running ? <div className="h-full flex items-center justify-center text-xs text-muted"><RefreshCw className="w-4 h-4 animate-spin mr-2" />Running simulation</div> : equityCandles.length ? <PriceChart candles={equityCandles} theme={theme} /> : <div className="h-full flex items-center justify-center text-xs text-muted">Run a backtest to render the equity curve.</div>}</div>
       </section>
 
       <section className="bg-surface border border-border rounded-xl p-4">

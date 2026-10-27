@@ -2,7 +2,12 @@ import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import rateLimit from '@fastify/rate-limit';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { config } from '../config';
+import { MARKET_UNIVERSE, setMarketAvailability } from '../../../src/lib/markets';
+import { setMarketCoverageOverrides } from '../../../src/lib/market-coverage';
 import { marketRoutes } from './market';
+
+vi.mock('../services/marketCoverage', () => ({ refreshMarketCoverageOverrides: async () => undefined }));
+const originalTwelveDataApiKey = config.twelveDataApiKey;
 
 async function createApp() {
   const app = Fastify();
@@ -30,6 +35,9 @@ async function createApp() {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  setMarketCoverageOverrides([]);
+  setMarketAvailability(MARKET_UNIVERSE.map(({ symbol }) => ({ symbol, status: 'unverified', checkedAt: null })));
+  config.twelveDataApiKey = originalTwelveDataApiKey;
 });
 
 describe('market candle route', () => {
@@ -67,6 +75,47 @@ describe('market candle route', () => {
     expect(invalidLimit.statusCode).toBe(400);
     expect(invalidTimeframe.statusCode).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('rejects blocked instruments before fetching provider data', async () => {
+    const app = await createApp();
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await app.inject({
+      url: '/api/v1/market/candles/JP225?timeframe=1h',
+      headers: { authorization: 'Bearer test-token' },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({ error: 'Market coverage is blocked.', reason: expect.any(String), tier: 'blocked' });
+    expect(fetchMock).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('allows read-only provider verification for default-blocked instruments but honors explicit admin blocks', async () => {
+    const app = await createApp();
+    config.twelveDataApiKey = 'test-provider-key';
+    const fetchMock = vi.fn().mockResolvedValue(new Response('unavailable', { status: 503 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await app.inject({
+      url: '/api/v1/market/candles/XAUUSD?timeframe=1h&limit=100',
+      headers: { authorization: 'Bearer test-token' },
+    });
+
+    expect(response.statusCode).toBe(502);
+    expect(response.json()).toEqual({ error: 'Market data unavailable.' });
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    setMarketCoverageOverrides([{ symbol: 'XAUUSD', tier: 'blocked', reason: 'Owner block', providerMappingVerified: false, sessionCalendarVerified: false }]);
+    const blockedResponse = await app.inject({
+      url: '/api/v1/market/candles/XAUUSD?timeframe=1h&limit=100',
+      headers: { authorization: 'Bearer test-token' },
+    });
+    expect(blockedResponse.statusCode).toBe(403);
+    expect(fetchMock).toHaveBeenCalledOnce();
     await app.close();
   });
 

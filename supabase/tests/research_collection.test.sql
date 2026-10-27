@@ -1,5 +1,5 @@
 begin;
-select plan(11);
+select plan(16);
 
 insert into auth.users (id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data)
 values ('e0f36c22-1ae9-48d1-8ae7-3bf8f9be8001', 'authenticated', 'authenticated', 'research-collection-test@example.invalid', '', now(),
@@ -17,6 +17,16 @@ select ok(not has_table_privilege('authenticated', 'public.research_collection_c
   'authenticated clients cannot author provider candles');
 select ok(not has_function_privilege('authenticated', 'public.append_research_collection_batch(uuid,uuid,text,boolean,jsonb)', 'EXECUTE'),
   'authenticated clients cannot call the collection write RPC');
+select ok(has_table_privilege('service_role', 'public.research_collection_state', 'SELECT'),
+  'service-role collection reads are allowed');
+select ok(not has_table_privilege('authenticated', 'public.research_collection_state', 'SELECT'),
+  'authenticated clients cannot inspect collection state');
+select ok(not has_table_privilege('service_role', 'public.research_collection_state', 'INSERT,UPDATE,DELETE'),
+  'service role cannot bypass the transactional collection RPC with direct writes');
+select ok(has_function_privilege('service_role', 'public.append_research_collection_batch(uuid,uuid,text,boolean,jsonb)', 'EXECUTE'),
+  'service role can append collection state through the restricted RPC');
+select ok((select prosecdef from pg_proc where oid = 'public.append_research_collection_batch(uuid,uuid,text,boolean,jsonb)'::regprocedure),
+  'collection RPC is security definer so its transaction can write revoked table state');
 select ok(exists (select 1 from pg_trigger where tgname = 'research_collection_candles_immutable' and not tgisinternal),
   'stored forward candles cannot be edited or deleted');
 select ok(exists (select 1 from pg_trigger where tgname = 'research_collection_candles_no_truncate' and not tgisinternal),

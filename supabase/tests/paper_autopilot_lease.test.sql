@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(8);
+SELECT plan(10);
 SELECT set_config('request.jwt.claim.role', 'service_role', true);
 
 INSERT INTO auth.users (id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data)
@@ -37,11 +37,19 @@ SELECT throws_ok(
   'an expired worker cannot mutate paper account state');
 SELECT is(public.record_paper_account_update(
   'd47b5be5-ec9e-483a-a6f3-22161af47c21', -1,
-  '{"cash":1000,"positions":[],"trades":[]}'::jsonb, '[]'::jsonb,
+  '{"cash":1000,"positions":[{"id":"open-paper-position","status":"open"}],"trades":[]}'::jsonb, '[]'::jsonb,
   'd47b5be5-ec9e-483a-a6f3-22161af47c32', 2
 ), 0::bigint, 'current fenced worker can perform its account mutation');
+SELECT public.release_paper_autopilot_lease(
+  'd47b5be5-ec9e-483a-a6f3-22161af47c21', 'd47b5be5-ec9e-483a-a6f3-22161af47c32', 2);
+UPDATE public.paper_autopilot SET enabled = false WHERE account_id = 'd47b5be5-ec9e-483a-a6f3-22161af47c21';
+SELECT is((SELECT fencing_token FROM public.claim_paper_autopilot_lease(
+  'd47b5be5-ec9e-483a-a6f3-22161af47c21', 'd47b5be5-ec9e-483a-a6f3-22161af47c33', 90000)), 3::bigint,
+  'disabled autopilot with an open position can lease management-only processing');
 SELECT ok(NOT has_function_privilege('authenticated', 'public.claim_paper_autopilot_lease(uuid,uuid,integer)', 'EXECUTE'),
   'lease claims are restricted to the backend service role');
+SELECT ok((public.verify_paper_schema()->>'ok')::boolean,
+  'the schema contract checks the lease and protected ML/research artifacts');
 
 SELECT * FROM finish();
 ROLLBACK;

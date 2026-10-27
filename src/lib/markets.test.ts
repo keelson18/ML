@@ -36,6 +36,20 @@ describe('crypto market universe', () => {
   });
 });
 
+describe('supported market scope', () => {
+  it('exposes every registered market category in category selectors', async () => {
+    const { MARKET_TYPES } = await import('./types');
+    expect(MARKET_TYPES.map(({ value }) => value)).toEqual(['crypto', 'forex', 'commodity', 'index', 'stock']);
+  });
+
+  it('returns registered forex, index, and stock instruments in category queries', () => {
+    expect(getMarketsByType('forex').length).toBeGreaterThan(0);
+    expect(getMarketsByType('index').length).toBeGreaterThan(0);
+    expect(getMarketsByType('stock').length).toBeGreaterThan(0);
+    expect(getMarketsByType('commodity').some((market) => market.symbol === 'XAUUSD')).toBe(true);
+  });
+});
+
 describe('canonical symbol lookup', () => {
   it('does not reinterpret a different quote asset as USD', () => {
     expect(getMarket('BTCUSDT')).toBeUndefined();

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { getSupabaseClient, getSupabaseClientWithToken } from '../db';
 import type { Timeframe } from '../../../src/lib/types';
 import { getMarket } from '../../../src/lib/markets';
@@ -12,6 +12,7 @@ import { config } from '../config';
 import { candleSeconds } from '../trader/candle-math';
 import { createHash } from 'node:crypto';
 import { stitchResearchCollection, researchCollectionProgress, type StoredResearchCandle } from '../trader/research-collection';
+import { appendAiLearningJournalEvent } from '../services/aiLearningJournal';
 
 const learningEventSchema = z.object({
   sourceType: z.enum(['paper_trade', 'research', 'risk_event', 'data_quality']),
@@ -68,8 +69,56 @@ async function loadResearchCollection(experimentId: string, timeframes: Timefram
   return rows;
 }
 
+async function writeJournalEvent(request: FastifyRequest, event: Parameters<typeof appendAiLearningJournalEvent>[0]): Promise<boolean> {
+  try {
+    await appendAiLearningJournalEvent(event);
+    return true;
+  } catch {
+    request.log.warn({ userId: request.authenticatedUserId, eventType: event.eventType }, 'AI Learning journal persistence failed');
+    return false;
+  }
+}
+
 export async function learningResearchRoutes(app: FastifyInstance) {
-  app.post('/api/v1/learning/events', { preHandler: app.requireAuth }, async (request, reply) => {
+  // Use the caller's token so the database admin RLS policy remains an independent check.
+  app.get('/api/v1/admin/ai/overview', { preHandler: app.requireAdmin, config: { rateLimit: { max: config.marketRateLimitMax, timeWindow: config.rateLimitWindowMs } } }, async (request, reply) => {
+    if (!request.accessToken) return reply.code(401).send({ error: 'Authentication required.' });
+    try {
+      const client = getSupabaseClientWithToken(request.accessToken);
+      const [versions, strategies, events, experiments, knowledge, runs, results, journal, collections] = await Promise.all([
+        client.from('model_versions').select('id,version,algorithm,status,metrics,created_at').order('created_at', { ascending: false }).limit(50),
+        client.from('strategy_versions').select('id,strategy_id,version,status,logic_definition,risk_definition,parameters,created_at').order('created_at', { ascending: false }).limit(100),
+        client.from('learning_events').select('id,source_type,source_id,observation,hypothesis,status,created_at').order('created_at', { ascending: false }).limit(100),
+        client.from('research_experiments').select('id,name,hypothesis,dataset_id,status,parameters,created_at').order('created_at', { ascending: false }).limit(100),
+        client.from('knowledge_nodes').select('id,node_type,title,content,tags,confidence,status,version,created_at,updated_at').order('updated_at', { ascending: false }).limit(100),
+        client.from('research_runs').select('id,experiment_id,run_version,seed,configuration,status,started_at,completed_at').order('started_at', { ascending: false }).limit(100),
+        client.from('research_results').select('id,run_id,metrics,artifacts,conclusion,created_at').order('created_at', { ascending: false }).limit(100),
+        client.from('ai_learning_journal').select('id,event_key,event_type,title,detail,symbol,timeframe,source_service,correlation_id,related_records,evidence,created_at').order('created_at', { ascending: false }).limit(100),
+        client.from('research_collection_state').select('experiment_id,user_id,symbol,provider,continuous,test_start_time,initialized_at').order('initialized_at', { ascending: false }).limit(100),
+      ]);
+      if ([versions, strategies, events, experiments, knowledge, runs, results, journal, collections].some((query) => query.error)) {
+        throw new Error('AI Learning records unavailable.');
+      }
+      return {
+        versions: versions.data ?? [],
+        strategyVersions: strategies.data ?? [],
+        events: events.data ?? [],
+        experiments: experiments.data ?? [],
+        knowledge: knowledge.data ?? [],
+        runs: runs.data ?? [],
+        results: results.data ?? [],
+        journal: journal.data ?? [],
+        collections: collections.data ?? [],
+        refreshedAt: new Date().toISOString(),
+      };
+    } catch {
+      request.log.warn('AI Learning records are unavailable.');
+      return reply.code(503).send({ error: 'AI Learning records are temporarily unavailable.' });
+    }
+  });
+
+  // The database function inserts the note and audit row atomically after its own role check.
+  app.post('/api/v1/admin/ai/events', { preHandler: app.requireAdmin, config: { rateLimit: { max: 10, timeWindow: config.rateLimitWindowMs } } }, async (request, reply) => {
     if (!request.authenticatedUserId || !request.accessToken) return reply.code(401).send({ error: 'Authentication required.' });
     const parsed = learningEventSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid learning event.' });
@@ -78,20 +127,14 @@ export async function learningResearchRoutes(app: FastifyInstance) {
     }
     try {
       const { data, error } = await getSupabaseClientWithToken(request.accessToken)
-        .from('learning_events')
-        .insert({
-          user_id: request.authenticatedUserId,
-          source_type: parsed.data.sourceType,
-          source_id: parsed.data.sourceId ?? null,
-          observation: parsed.data.observation,
-          hypothesis: parsed.data.hypothesis,
-          // Client booleans and requested status are intentionally not accepted as validation proof.
-          status: 'hypothesis',
-        })
-        .select('id')
-        .single();
+        .rpc('admin_create_learning_event', {
+          p_source_type: parsed.data.sourceType,
+          p_source_id: parsed.data.sourceId ?? null,
+          p_observation: parsed.data.observation,
+          p_hypothesis: parsed.data.hypothesis,
+        });
       if (error || !data) throw new Error('Learning event insert failed.');
-      return reply.code(201).send({ id: data.id });
+      return reply.code(201).send({ id: data });
     } catch {
       request.log.warn({ userId: request.authenticatedUserId }, 'Learning event persistence failed');
       return reply.code(503).send({ error: 'Learning event persistence is temporarily unavailable.' });
@@ -117,7 +160,18 @@ export async function learningResearchRoutes(app: FastifyInstance) {
         .select('id')
         .single();
       if (error || !data) throw new Error('Research experiment insert failed.');
-      return reply.code(201).send({ id: data.id });
+      const journalRecorded = await writeJournalEvent(request, {
+        eventKey: `research-experiment-created:${data.id}`,
+        userId: request.authenticatedUserId,
+        eventType: 'research_experiment_created',
+        title: `Research experiment created: ${parsed.data.name}`,
+        detail: parsed.data.hypothesis,
+        sourceService: 'learning-research-api',
+        correlationId: request.id,
+        relatedRecords: { experimentId: data.id },
+        evidence: { datasetReference: parsed.data.datasetId, parameters: parsed.data.parameters },
+      });
+      return reply.code(201).send({ id: data.id, journalStatus: journalRecorded ? 'recorded' : 'failed' });
     } catch {
       request.log.warn({ userId: request.authenticatedUserId }, 'Research experiment persistence failed');
       return reply.code(503).send({ error: 'Research experiment persistence is temporarily unavailable.' });
@@ -204,10 +258,23 @@ export async function learningResearchRoutes(app: FastifyInstance) {
       const collectedDays = latestStoredBar !== null && latestStoredBar >= firstHoldoutBar
         ? (latestStoredBar + candleSeconds(triggerTimeframe, latestStoredBar) - firstHoldoutBar) / 86_400 : 0;
       if (collectedDays < traderConfig.MIN_FORWARD_DAYS || collectedBars < minimumForwardBars) {
+        const journalRecorded = await writeJournalEvent(request, {
+          eventKey: `research-collection:${experiment.id}:${latestStoredBar ?? 'initialized'}`,
+          userId: request.authenticatedUserId,
+          eventType: 'research_experiment_collecting',
+          title: `Research collection updated: ${experiment.name}`,
+          detail: 'The pre-registered forward holdout is collecting; validation has not completed.',
+          symbol: parsed.data.symbol,
+          timeframe: triggerTimeframe,
+          sourceService: 'learning-research-api',
+          correlationId: request.id,
+          relatedRecords: { experimentId: experiment.id },
+          evidence: { collectedBars, collectedDays, requiredBars: minimumForwardBars, requiredDays: traderConfig.MIN_FORWARD_DAYS },
+        });
         return reply.code(202).send({ state: 'collecting', testStartTime: parameters.testStartTime,
           initialized: true, newCandles: collection.newCandles ?? 0,
           collectedDays, collectedBars,
-          requiredDays: traderConfig.MIN_FORWARD_DAYS, requiredBars: minimumForwardBars,
+          requiredDays: traderConfig.MIN_FORWARD_DAYS, requiredBars: minimumForwardBars, journalStatus: journalRecorded ? 'recorded' : 'failed',
           requiredTrades: traderConfig.MIN_FORWARD_TRADES });
       }
       const storedRows = await loadResearchCollection(experiment.id, timeframes);
@@ -229,9 +296,29 @@ export async function learningResearchRoutes(app: FastifyInstance) {
         codeRevision: revision,
       });
       if (artifact.metrics.testDays < traderConfig.MIN_FORWARD_DAYS || artifact.metrics.tradeCount < traderConfig.MIN_FORWARD_TRADES) {
+        const journalRecorded = await writeJournalEvent(request, {
+          eventKey: `research-collection:${experiment.id}:${triggerCandles.at(-1)?.time ?? 'awaiting-trades'}`,
+          userId: request.authenticatedUserId,
+          eventType: 'research_experiment_collecting',
+          title: `Research holdout still collecting: ${experiment.name}`,
+          detail: 'The holdout window or minimum trade sample is not yet sufficient for validation.',
+          symbol: parsed.data.symbol,
+          timeframe: triggerTimeframe,
+          sourceService: 'learning-research-api',
+          correlationId: request.id,
+          relatedRecords: { experimentId: experiment.id },
+          evidence: {
+            collectedBars: progress.collectedBars,
+            collectedDays: artifact.metrics.testDays,
+            tradeCount: artifact.metrics.tradeCount,
+            requiredDays: traderConfig.MIN_FORWARD_DAYS,
+            requiredTrades: traderConfig.MIN_FORWARD_TRADES,
+          },
+        });
         return reply.code(202).send({ state: 'collecting', initialized: true, collectedDays: artifact.metrics.testDays,
           collectedBars: progress.collectedBars,
           requiredDays: traderConfig.MIN_FORWARD_DAYS, tradeThresholdMet: artifact.metrics.tradeCount >= traderConfig.MIN_FORWARD_TRADES,
+          journalStatus: journalRecorded ? 'recorded' : 'failed',
           message: 'The fixed holdout is collecting forward candles. No run or holdout claim is persisted until the evidence window and trade minimum are reached.' });
       }
       const runVersion = createHash('sha256').update(JSON.stringify({ experimentId: experiment.id, datasetId: artifact.datasetId, configHash: artifact.configHash, codeRevision: artifact.codeRevision })).digest('hex');
@@ -246,9 +333,36 @@ export async function learningResearchRoutes(app: FastifyInstance) {
         p_conclusion: artifact.validation.passed ? 'Server-side chronological replay passed configured evidence checks.' : `Not validated: ${artifact.validation.reasons.join(' ')}`,
       });
       if (persistError || typeof runId !== 'string') throw new Error('Research run persistence failed.');
-      return reply.code(201).send({ runId, runVersion, datasetId: artifact.datasetId, metrics: artifact.metrics, validation: artifact.validation });
+      const journalRecorded = await writeJournalEvent(request, {
+        eventKey: `research-run-completed:${runId}`,
+        userId: request.authenticatedUserId,
+        eventType: 'research_experiment_completed',
+        title: `Research evaluation completed: ${experiment.name}`,
+        detail: artifact.validation.passed
+          ? 'The immutable forward replay passed configured evidence checks; this does not promote or activate a strategy.'
+          : `The replay did not pass validation: ${artifact.validation.reasons.join(' ')}`,
+        symbol: parsed.data.symbol,
+        timeframe: triggerTimeframe,
+        sourceService: 'learning-research-api',
+        correlationId: request.id,
+        relatedRecords: { experimentId: experiment.id, runId },
+        evidence: { datasetId: artifact.datasetId, metrics: artifact.metrics, validation: artifact.validation },
+      });
+      return reply.code(201).send({ runId, runVersion, datasetId: artifact.datasetId, metrics: artifact.metrics, validation: artifact.validation, journalStatus: journalRecorded ? 'recorded' : 'failed' });
     } catch (error) {
       request.log.warn({ userId: request.authenticatedUserId, reason: error instanceof Error ? error.message : 'unknown' }, 'Research replay failed');
+      await writeJournalEvent(request, {
+        eventKey: `research-run-failed:${experimentId.data}:${request.id}`,
+        userId: request.authenticatedUserId,
+        eventType: 'research_experiment_failed',
+        title: 'Research replay failed',
+        detail: 'The requested research replay could not complete and persist a validated result. Inspect the sanitized backend error category.',
+        symbol: parsed.data.symbol,
+        timeframe: parsed.data.timeframe,
+        sourceService: 'learning-research-api',
+        correlationId: request.id,
+        relatedRecords: { experimentId: experimentId.data },
+      });
       return reply.code(503).send({ error: 'Research replay could not be completed or persisted.' });
     }
   });
@@ -269,7 +383,17 @@ export async function learningResearchRoutes(app: FastifyInstance) {
         return reply.code(error.code === '42501' ? 403 : error.code === '23514' ? 409 : 503)
           .send({ error: error.code === '23514' ? 'Stored research evidence has not passed the server promotion gates.' : 'Research promotion was rejected.' });
       }
-      return { promoted: true };
+      const journalRecorded = await writeJournalEvent(request, {
+        eventKey: `research-strategy-promoted:${experimentId.data}:${parsed.data.runId}`,
+        userId: request.authenticatedUserId,
+        eventType: 'research_strategy_promoted',
+        title: 'Validated research strategy promoted',
+        detail: 'The server-side promotion procedure accepted the immutable research run. Promotion was performed by an administrator and retains its rollback reference.',
+        sourceService: 'learning-research-api',
+        correlationId: request.id,
+        relatedRecords: { experimentId: experimentId.data, runId: parsed.data.runId },
+      });
+      return { promoted: true, journalStatus: journalRecorded ? 'recorded' : 'failed' };
     } catch {
       return reply.code(503).send({ error: 'Research promotion is temporarily unavailable.' });
     }

@@ -206,8 +206,6 @@ export function buildServer() {
 export async function startServer() {
   const { app, pipeline } = buildServer();
   const scheduler = paperAutopilotScheduler;
-  const schema = await readSchemaHealth();
-  if (!schema.ok) app.log.error({ missing: schema.missing, failure: schema.failure }, 'Database readiness failed; trading routes and scheduler are fail-closed');
   const port = Number(process.env.AUTONOMY_PORT ?? process.env.PORT ?? 8787);
   try {
     await app.listen({ port, host: '0.0.0.0' });
@@ -227,6 +225,8 @@ export async function startServer() {
     }
     throw error;
   }
+  const schema = await readSchemaHealth();
+  if (!schema.ok) app.log.error({ missing: schema.missing, failure: schema.failure }, 'Database readiness failed; trading routes and scheduler are fail-closed');
   if (process.env.NODE_ENV !== 'test' && schema.ok) {
     scheduler.start();
     if (!config.autonomousTradingEnabled) app.log.info('Paper worker is active for existing-position management; new entries are disabled.');

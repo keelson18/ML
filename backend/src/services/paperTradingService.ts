@@ -176,7 +176,16 @@ export async function advanceStoredTradePlans(input: {
         if (!eventDecision.approved) return gateResult = { approved: false, quantity: 0, reason: eventDecision.reason, activeEventIds: eventDecision.activeEventIds };
         const market = getMarket(plan.symbol);
         const availability = getMarketAvailability().find((candidate) => candidate.symbol === plan.symbol)?.status;
-        if (!market?.isActive || market.priceCurrency !== 'USD' || availability !== 'available') return gateResult = { approved: false, quantity: 0, reason: availability === 'unavailable' ? 'Market is unavailable from the configured provider.' : availability === 'unverified' ? 'Market availability is unverified; entry is blocked.' : 'Market is inactive or not USD quoted.' };
+        if (!market?.isActive || market.priceCurrency !== 'USD' || availability !== 'verified') return gateResult = {
+          approved: false,
+          quantity: 0,
+          reason: availability === 'unavailable' ? 'Market is unavailable from the configured provider.'
+            : availability === 'stale' ? 'Market verification is stale; paper entry is blocked.'
+              : availability === 'error' ? 'Market verification failed; paper entry is blocked.'
+                : availability === 'partially_verified' ? 'Market verification is partial; paper entry is blocked.'
+                  : availability === 'unverified' ? 'Market availability is unverified; entry is blocked.'
+                    : 'Market is inactive or not USD quoted.',
+        };
         if (plan.side !== 'long') return gateResult = { approved: false, quantity: 0, reason: 'Spot paper accounts only support long entries.' };
         if (!traderConfig.ALLOWED_GRADES.includes(plan.grade) || !traderConfig.ALLOWED_SETUP_TYPES.includes(plan.setupType)) return gateResult = { approved: false, quantity: 0, reason: 'Setup grade or type is not enabled.' };
         if (!isShadow && !promotedSetups.has(plan.setupType)) return gateResult = { approved: false, quantity: 0, reason: 'Setup has not passed the server-validated research promotion gate.' };

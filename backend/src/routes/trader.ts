@@ -6,18 +6,19 @@ import { MARKET_UNIVERSE } from '../../../src/lib/markets';
 import type { Market } from '../../../src/lib/types';
 import { getSupabaseClientWithToken } from '../db';
 import { config } from '../config';
-import { fetchMarketData } from '../services/marketDataService';
+import { fetchMarketData, getCachedCandleFreshness } from '../services/marketDataService';
 import { getMarketAvailability, type MarketAvailability } from '../services/marketAvailability';
 import { traderConfig } from '../trader/config';
 import { createTradePlan, rankPlannerResults } from '../trader/planner';
 import { getAccount, listStoredTradePlans, storeTradePlan } from '../services/paperTradingService';
 import { markToMarket } from '../trader/risk';
 import type { TradePlan } from '../trader/types';
-import { candleSeconds, isClosed, selectClosedCandles } from '../trader/candle-math';
+import { candleIndex, candleSeconds, isClosed, selectClosedCandles } from '../trader/candle-math';
 import { hasFreshClosedCandleData } from '../trader/market-data-quality';
 import { reconcilePaperAccount } from '../trader/decision-ledger';
 import { getSupabaseClient } from '../db';
 import { paperAutopilotScheduler, isAutopilotSymbol, type PaperAutopilotConfig } from '../autonomy/paper-autopilot';
+import { refreshMarketCoverageOverrides } from '../services/marketCoverage';
 
 const listQuery = z.object({ status: z.enum(['WATCHING', 'ARMED', 'PENDING_ORDER', 'OPEN', 'MANAGING', 'CLOSED']).optional() }).strict();
 const historyQuery = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) }).strict();
@@ -29,7 +30,7 @@ const ledgerVerificationCache = new Map<string, { checkedAt: number; status: 've
 
 export function selectVerifiedPlannerMarkets(selectedSymbols: readonly string[], availability: readonly MarketAvailability[]): Market[] {
   const selected = new Set(selectedSymbols);
-  const verified = new Set(availability.filter((market) => market.status === 'available').map((market) => market.symbol));
+  const verified = new Set(availability.filter((market) => market.status === 'verified').map((market) => market.symbol));
   return MARKET_UNIVERSE.filter((market) => selected.has(market.symbol) && verified.has(market.symbol)
     && market.isActive && market.marketType === 'crypto' && ['massive', 'twelvedata'].includes(market.provider) && market.priceCurrency === 'USD');
 }
@@ -57,6 +58,7 @@ export async function traderRoutes(app: FastifyInstance) {
     config: { rateLimit: { max: config.marketRateLimitMax, timeWindow: config.rateLimitWindowMs } },
   }, async (request, reply) => {
     if (!request.accessToken || !request.authenticatedUserId) return reply.code(401).send({ error: 'Authentication required.' });
+    await refreshMarketCoverageOverrides();
     const { data, error } = await getSupabaseClientWithToken(request.accessToken).from('paper_autopilot')
       .select('account_id,enabled,symbols,paused_reason,last_run_at').eq('account_id', request.authenticatedUserId).maybeSingle();
     if (error) return reply.code(503).send({ error: 'Autopilot settings are unavailable; apply the paper core migration.' });
@@ -75,9 +77,10 @@ export async function traderRoutes(app: FastifyInstance) {
     const parsed = autopilotUpdate.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Choose one or more supported symbols.' });
     if (!request.accessToken || !request.authenticatedUserId) return reply.code(401).send({ error: 'Authentication required.' });
+    await refreshMarketCoverageOverrides();
     if (new Set(parsed.data.symbols).size !== parsed.data.symbols.length) return reply.code(400).send({ error: 'Symbols must be unique.' });
     const unavailable = parsed.data.symbols.filter((symbol) => !isAutopilotSymbol(symbol)
-      || getMarketAvailability().find((candidate) => candidate.symbol === symbol)?.status !== 'available');
+      || getMarketAvailability().find((candidate) => candidate.symbol === symbol)?.status !== 'verified');
     if (parsed.data.enabled && unavailable.length) return reply.code(409).send({ error: `Autopilot requires active, verified configured USD crypto markets: ${unavailable.join(', ')}.` });
     const { data, error } = await getSupabaseClientWithToken(request.accessToken).rpc('set_paper_autopilot', {
       p_enabled: parsed.data.enabled, p_symbols: parsed.data.symbols,
@@ -173,13 +176,37 @@ export async function traderRoutes(app: FastifyInstance) {
     try {
       const account = await getAccount(request.authenticatedUserId);
       const symbol = query.data.symbol;
-      const positions = account.positions.filter((position) => position.symbol === symbol);
+      const symbolPositions = account.positions.filter((position) => position.symbol === symbol);
+      const positionFreshness = getCachedCandleFreshness([symbol], ['1m'], config.marketDataMaxStaleTtlMultiplier)[0];
+      const currentPrice = positionFreshness?.status === 'ok' ? positionFreshness.latestClosedPrice ?? undefined : undefined;
+      const markedPositions = markToMarket(account, currentPrice === undefined ? {} : { [symbol]: currentPrice }).positions;
+      const positions = symbolPositions.map((position) => {
+        const mark = markedPositions.find((candidate) => candidate.position.id === position.id);
+        const verifiedMark = position.status === 'open' && currentPrice !== undefined ? mark : undefined;
+        return { ...position, currentPrice: verifiedMark?.currentPrice, unrealizedPnl: verifiedMark?.pnl,
+          rMultiple: position.initialRisk && position.initialRisk > 0 && verifiedMark ? verifiedMark.pnl / (position.initialRisk * position.quantity) : undefined,
+          valuationStale: position.status === 'open' && !verifiedMark };
+      });
       const positionIds = new Set(positions.map((position) => position.id));
       const trades = account.trades.filter((trade) => trade.symbol === symbol || positionIds.has(trade.positionId))
         .sort((left, right) => Date.parse(left.openedAt) - Date.parse(right.openedAt));
       const plans = (account.tradePlans ?? []).filter((plan) => plan.symbol === symbol);
       const journal = (account.tradeJournal ?? []).filter((entry) => entry.symbol === symbol);
-      return { symbol, trades, positions, plans, journal };
+      // Plan drawings are only exposed while the stored plan is active and its
+      // trigger-timeframe candle cache has verified freshness.
+      const activePlans = plans.filter((plan) => ['WATCHING', 'ARMED', 'PENDING_ORDER'].includes(plan.status));
+      const freshness = getCachedCandleFreshness(activePlans.map((plan) => plan.symbol),
+        activePlans.map((plan) => plan.triggerTimeframe ?? '15m'), config.marketDataMaxStaleTtlMultiplier);
+      const planFreshness = new Map(freshness.map((row) => [`${row.symbol}:${row.timeframe}`, row]));
+      return { symbol, trades, positions, plans: plans.map((plan) => ({ ...plan,
+        stale: ['WATCHING', 'ARMED', 'PENDING_ORDER'].includes(plan.status)
+          && planFreshness.get(`${plan.symbol}:${plan.triggerTimeframe ?? '15m'}`)?.status !== 'ok',
+        expired: ['WATCHING', 'ARMED', 'PENDING_ORDER'].includes(plan.status)
+          && (() => {
+            const row = planFreshness.get(`${plan.symbol}:${plan.triggerTimeframe ?? '15m'}`);
+            return !row?.newestClosedCandleAt || candleIndex(plan.triggerTimeframe ?? '15m', Math.floor(Date.parse(row.newestClosedCandleAt) / 1000)) > plan.expiresAtBar;
+          })(),
+      })), journal };
     } catch (error) {
       request.log.error({ reason: error instanceof Error ? error.message : 'unknown', symbol: query.data.symbol }, 'Chart trade history failed');
       return reply.code(503).send({ error: 'Chart trade history is temporarily unavailable.' });

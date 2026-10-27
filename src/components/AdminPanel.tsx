@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Shield, Activity, Users, Brain, BookOpen, FileText, Settings, RefreshCw, Database, CalendarDays } from 'lucide-react';
-import { cancelEventBlackout, createEventBlackout, fetchAdminEventBlackouts, fetchAutonomyStatus, fetchMarketAvailability, probeMarkets, type AutonomyStatus, type EventBlackout, type MarketAvailabilityRecord } from '../lib/backend-api';
+import { cancelEventBlackout, createEventBlackout, fetchAdminEventBlackouts, fetchAutonomyStatus, fetchMarketAvailability, fetchAdminMarketCoverage, updateAdminMarketCoverage, probeMarkets, type AutonomyStatus, type EventBlackout, type MarketAvailabilityRecord, type MarketCoverageRecord, type ProviderBudgetStatus } from '../lib/backend-api';
 import AdminRoute from './AdminRoute';
 import SystemMetrics from './Admin/SystemMetrics';
 import UserManagement from './Admin/UserManagement';
@@ -9,6 +9,8 @@ import CMSManager from './CMS/CMSManager';
 import Logs from './Admin/Logs';
 import SystemHealth from './Admin/SystemHealth';
 import type { AdminOverview } from '../lib/backend-api';
+import { MARKET_UNIVERSE } from '../lib/markets';
+import { DEFAULT_TIER_A_SYMBOLS, getMarketCoverageTable } from '../lib/market-coverage';
 
 type AdminTab = 'health' | 'metrics' | 'users' | 'models' | 'cms' | 'logs' | 'markets' | 'events' | 'settings';
 
@@ -105,23 +107,60 @@ function MarketAvailabilityPanel() {
   const [markets, setMarkets] = useState<MarketAvailabilityRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [probing, setProbing] = useState(false);
-  const [error, setError] = useState(false);
+  const [probeSymbol, setProbeSymbol] = useState('BTCUSD');
+  const [error, setError] = useState('');
+  const [budgets, setBudgets] = useState<{ massive: ProviderBudgetStatus; twelveData: ProviderBudgetStatus } | null>(null);
+  const [coverage, setCoverage] = useState<MarketCoverageRecord[]>([]);
+  const [editSymbol, setEditSymbol] = useState<string>(DEFAULT_TIER_A_SYMBOLS[0]);
+  const [editTier, setEditTier] = useState<MarketCoverageRecord['tier']>('A');
+  const [editReason, setEditReason] = useState('Owner-reviewed coverage update.');
+  const [mappingVerified, setMappingVerified] = useState(false);
+  const [providerAvailable, setProviderAvailable] = useState(false);
+  const [sessionVerified, setSessionVerified] = useState(false);
+  const [savingCoverage, setSavingCoverage] = useState(false);
+  const [coverageMessage, setCoverageMessage] = useState('');
   const refresh = useCallback(async () => {
-    try { setMarkets(await fetchMarketAvailability(true)); setError(false); }
-    catch { setError(true); }
+    try {
+      const [availability, coverageData] = await Promise.all([fetchMarketAvailability(true), fetchAdminMarketCoverage()]);
+      setMarkets(availability);
+      setCoverage(coverageData.instruments);
+      setBudgets(coverageData.budgets);
+      setError('');
+    }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Market availability could not be loaded.'); }
     finally { setLoading(false); }
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
   const probe = async () => {
     setProbing(true);
-    try { setMarkets(await probeMarkets()); setError(false); }
-    catch { setError(true); }
+    try { setMarkets(await probeMarkets(probeSymbol)); setError(''); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Market availability could not be checked.'); }
     finally { setProbing(false); }
   };
+  const saveCoverage = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSavingCoverage(true);
+    setCoverageMessage('');
+    try {
+      await updateAdminMarketCoverage({ symbol: editSymbol, tier: editTier, reason: editReason.trim(), providerMappingVerified: mappingVerified, providerAvailable, sessionCalendarVerified: sessionVerified });
+      setCoverageMessage('Coverage updated and audited.');
+      await refresh();
+    } catch (cause) { setCoverageMessage(cause instanceof Error ? cause.message : 'Coverage settings could not be saved.'); }
+    finally { setSavingCoverage(false); }
+  };
+  const coverageRows = coverage.length ? coverage : getMarketCoverageTable();
+  const probeableMarkets = MARKET_UNIVERSE.filter((market) => market.isActive
+    && ['crypto', 'commodity'].includes(market.marketType)
+    && ['massive', 'twelvedata'].includes(market.provider)
+    && (market.sourceSymbol || (market.provider === 'twelvedata' && market.baseAsset && market.quoteAsset)));
   return <section className="bg-bg/50 border border-border/50 rounded-xl p-4 space-y-4">
-    <div className="flex items-center justify-between gap-3"><div><h3 className="text-sm font-semibold">Configured USD crypto market availability</h3><p className="text-xs text-muted mt-1">Probe checks configured autonomy symbols across all planner, trigger, and management timeframes. A market is available only with at least 50 fresh closed candles on each timeframe; unverified markets are blocked.</p></div><div className="flex gap-2"><button type="button" onClick={() => void refresh()} aria-label="Refresh market availability" className="p-2 rounded hover:bg-surface"><RefreshCw className="w-4 h-4 text-muted" /></button><button type="button" onClick={() => void probe()} disabled={probing} className="px-3 py-2 rounded-lg bg-primary text-black text-xs font-semibold disabled:opacity-50">{probing ? 'Checking…' : 'Probe markets'}</button></div></div>
-    {error && <p role="alert" className="text-xs text-danger">Market availability could not be loaded or checked.</p>}
-    {loading ? <p className="text-xs text-muted">Loading…</p> : <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">{markets.map((market) => <div key={market.symbol} className="rounded-lg bg-surface border border-border p-3"><div className="flex justify-between gap-2"><strong className="text-xs">{market.symbol}</strong><span className={`text-xs uppercase ${market.status === 'available' ? 'text-success' : market.status === 'unavailable' ? 'text-danger' : 'text-muted'}`}>{market.status}</span></div><p className="text-xs text-muted mt-1">{market.provider} · {market.sourceInstrument} · {market.checkedAt ? `Checked ${new Date(market.checkedAt).toLocaleString()}` : 'Not checked'}</p>{market.timeframes?.map((result) => <p key={result.timeframe} className={`text-xs mt-1 ${result.status === 'available' ? 'text-success' : result.status === 'unavailable' ? 'text-danger' : 'text-muted'}`}>{result.timeframe}: {result.closedCandleCount ?? 0}/50 closed{result.latestClosedCandleAt ? ` · latest ${new Date(result.latestClosedCandleAt).toLocaleString()}` : ''}{result.reason ? ` · ${result.reason}` : ''}</p>)}</div>)}</div>}
+    <div><h3 className="text-sm font-semibold">Market availability by instrument</h3><p className="text-xs text-muted mt-1">The table lists active registry instruments. Chart requests record checks for their timeframe; an admin probe checks one selected crypto or commodity across planner, trigger, and management timeframes. Only a complete set of fresh checks with at least 50 closed candles per timeframe is verified. Errors, stale data, and unavailable feeds are shown separately; unverified markets remain blocked.</p></div>
+    <div className="flex flex-wrap items-end gap-2"><label className="text-xs">Probe instrument<select aria-label="Probe instrument" value={probeSymbol} onChange={(event) => setProbeSymbol(event.target.value)} className="mt-1 block min-w-48 rounded-lg border border-border bg-bg px-2 py-2">{probeableMarkets.map((market) => <option key={market.symbol} value={market.symbol}>{market.symbol} · {market.marketType}</option>)}</select></label><button type="button" onClick={() => void probe()} disabled={probing || !probeableMarkets.some((market) => market.symbol === probeSymbol)} className="px-3 py-2 rounded-lg bg-primary text-black text-xs font-semibold disabled:opacity-50">{probing ? 'Checking…' : `Probe ${probeSymbol}`}</button><button type="button" onClick={() => void refresh()} aria-label="Refresh market availability" className="p-2 rounded hover:bg-surface"><RefreshCw className="w-4 h-4 text-muted" /></button></div>
+    {error && <p role="alert" className="text-xs text-danger">{error}</p>}
+    {loading ? <p className="text-xs text-muted">Loading…</p> : <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">{markets.map((market) => <div key={market.symbol} className="rounded-lg bg-surface border border-border p-3"><div className="flex justify-between gap-2"><strong className="text-xs">{market.symbol}</strong><span className={`text-xs uppercase ${market.status === 'verified' ? 'text-success' : ['unavailable', 'error'].includes(market.status) ? 'text-danger' : market.status === 'stale' ? 'text-warning' : 'text-muted'}`}>{market.status}</span></div><p className="text-xs text-muted mt-1">{market.provider} · {market.sourceInstrument} · {market.checkedAt ? `Checked ${new Date(market.checkedAt).toLocaleString()}` : 'Not checked'}{market.reason ? ` · ${market.reason}` : ''}</p>{market.timeframes?.map((result) => <p key={result.timeframe} className={`text-xs mt-1 ${result.status === 'verified' ? 'text-success' : ['unavailable', 'error'].includes(result.status) ? 'text-danger' : result.status === 'stale' ? 'text-warning' : 'text-muted'}`}>{result.timeframe}: {result.status} · {result.closedCandleCount ?? 0}/50 closed{result.testType ? ` · ${result.testType.replace('_', ' ')} (${result.environment ?? 'environment unknown'})` : ''}{result.checkedAt ? ` · checked ${new Date(result.checkedAt).toLocaleString()}` : ''}{result.latestClosedCandleAt ? ` · latest ${new Date(result.latestClosedCandleAt).toLocaleString()}` : ''}{result.errorCategory ? ` · ${result.errorCategory}` : ''}{result.reason ? ` · ${result.reason}` : ''}</p>)}</div>)}</div>}
+    <div className="rounded-xl border border-border bg-surface p-3"><h4 className="text-xs font-semibold">Provider budget headroom</h4><div className="mt-2 grid gap-2 sm:grid-cols-2">{(['massive', 'twelveData'] as const).map((provider) => { const budget = budgets?.[provider]; return <p key={provider} className="text-xs text-muted"><strong className="text-text">{provider === 'massive' ? 'Massive' : 'Twelve Data'}</strong> · {budget ? `${Math.max(0, budget.requestsPerWindow - budget.usedInWindow)}/${budget.requestsPerWindow} requests per ${Math.round(budget.windowMs / 1000)}s; ${budget.reservedForPriority} reserved for priority trader traffic${budget.dailyRequests ? `; ${Math.max(0, budget.dailyRequests - (budget.usedToday ?? 0))}/${budget.dailyRequests} daily credits, ${budget.reservedForPriorityDaily} reserved for trader` : ''}` : 'Budget status unverified'}</p>; })}</div></div>
+    <div className="rounded-xl border border-border bg-surface p-3"><h4 className="text-xs font-semibold">Instrument coverage</h4><p className="mt-1 text-xs text-muted">{coverageRows.length} active registry instruments · Tier A defaults: {DEFAULT_TIER_A_SYMBOLS.join(', ')}.</p><div className="mt-3 max-h-[32rem] overflow-auto"><table className="w-full text-left text-xs"><thead className="sticky top-0 bg-surface text-muted"><tr><th className="px-2 py-2">Symbol</th><th className="px-2 py-2">Tier</th><th className="px-2 py-2">Reason</th><th className="px-2 py-2">Last scanned</th></tr></thead><tbody>{coverageRows.map((row) => <tr key={row.symbol} className="border-t border-border/50"><td className="px-2 py-2 font-medium">{row.symbol}</td><td className="px-2 py-2">{row.label}</td><td className="px-2 py-2 text-muted">{row.reason}</td><td className="px-2 py-2 text-muted">{row.lastScannedAt ? new Date(row.lastScannedAt).toLocaleString() : 'Never'}</td></tr>)}</tbody></table></div></div>
+    <form onSubmit={(event) => void saveCoverage(event)} className="rounded-xl border border-border bg-surface p-3 space-y-3"><h4 className="text-xs font-semibold">Update coverage (administrator MFA required)</h4><div className="grid gap-3 sm:grid-cols-3"><label className="text-xs">Instrument<select value={editSymbol} onChange={(event) => setEditSymbol(event.target.value)} className="mt-1 block w-full rounded-lg border border-border bg-bg px-2 py-2">{MARKET_UNIVERSE.filter((market) => market.isActive).map((market) => <option key={market.symbol} value={market.symbol}>{market.symbol} · {market.label}</option>)}</select></label><label className="text-xs">Tier<select value={editTier} onChange={(event) => setEditTier(event.target.value as MarketCoverageRecord['tier'])} className="mt-1 block w-full rounded-lg border border-border bg-bg px-2 py-2"><option value="A">A · Autopilot</option><option value="B">B · Scan</option><option value="C">C · On-demand</option><option value="blocked">Blocked</option></select></label><label className="text-xs">Reason<input value={editReason} maxLength={500} onChange={(event) => setEditReason(event.target.value)} required className="mt-1 block w-full rounded-lg border border-border bg-bg px-2 py-2" /></label></div><div className="flex flex-wrap gap-4 text-xs">{[[mappingVerified, setMappingVerified, 'Provider mapping verified'], [providerAvailable, setProviderAvailable, 'Provider available'], [sessionVerified, setSessionVerified, 'Session calendar verified']].map(([checked, setter, label]) => <label key={String(label)} className="flex items-center gap-2"><input type="checkbox" checked={checked as boolean} onChange={(event) => (setter as (value: boolean) => void)(event.target.checked)} />{label as string}</label>)}</div><button type="submit" disabled={savingCoverage || !editReason.trim()} className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-black disabled:opacity-50">{savingCoverage ? 'Saving…' : 'Save tier'}</button>{coverageMessage && <p role="status" className="text-xs text-muted">{coverageMessage}</p>}</form>
   </section>;
 }
 

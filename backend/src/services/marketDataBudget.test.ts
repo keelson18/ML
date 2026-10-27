@@ -69,8 +69,8 @@ describe('Massive request budget', () => {
     const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => Promise.resolve(twelveDataOk(input)));
     vi.stubGlobal('fetch', fetchMock);
 
-    await fetchMarketData('EURUSD', '1h', 100);
-    const rejected = await fetchMarketData('EURUSD', '4h', 100).catch((error: unknown) => error);
+    await fetchMarketData('XAUUSD', '1h', 100);
+    const rejected = await fetchMarketData('XAUUSD', '4h', 100).catch((error: unknown) => error);
 
     expect(rejected).toMatchObject({ status: 429, provider: 'Twelve Data' });
     expect(fetchMock).toHaveBeenCalledTimes(1);

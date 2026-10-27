@@ -35,8 +35,10 @@ import RiskManagement from './pages/RiskManagement';
 import AILearning from './pages/AILearning';
 import SettingsPage from './pages/SettingsPage';
 import TraderDesk from './pages/TraderDesk';
+import MarketCoverageBadge from './MarketCoverageBadge';
 import AutonomousCommandCenter from './AutonomousCommandCenter';
-import { fetchMarketAvailability, requestBackendDecision, type BackendDecision } from '../lib/backend-api';
+import { fetchMarketAvailability, fetchMarketCoverage, requestBackendDecision, type BackendDecision } from '../lib/backend-api';
+import { setMarketCoverageOverrides } from '../lib/market-coverage';
 import { resolveAvatarUrl } from '../lib/avatar';
 import { fetchNotifications, markNotificationRead, type InAppNotification } from '../api/notifications';
 import { MULTI_TIMEFRAME_ANALYSIS_PANELS } from '../lib/terminal';
@@ -50,6 +52,7 @@ export default function Dashboard() {
   const [marketType, setMarketType] = useState<MarketType>('crypto');
   const [symbol, setSymbol] = useState<string>(getDefaultMarketSymbol());
   const [availabilityRevision, setAvailabilityRevision] = useState(0);
+  const [coverageVerified, setCoverageVerified] = useState(false);
   const [timeframe, setTimeframe] = useState<Timeframe>('1h');
   const [candles, setCandles] = useState<Candle[]>([]);
   const [decisionCandles, setDecisionCandles] = useState<Candle[]>([]);
@@ -90,7 +93,7 @@ export default function Dashboard() {
   const isAdmin = profile?.role === 'admin';
   const perfOverlayEnabled = isPerfOverlayEnabled(window.location.search, isAdmin, import.meta.env.DEV);
   const navigateToTab = (tab: SidebarTab, replace = false) => {
-    const nextTab = tab === 'admin' && !isAdmin ? 'dashboard' : tab;
+    const nextTab = (tab === 'admin' || tab === 'ai-learning') && !isAdmin ? 'dashboard' : tab;
     const path = pathForSidebarTab(nextTab);
     if (window.location.pathname !== path) {
       window.history[replace ? 'replaceState' : 'pushState']({}, '', path);
@@ -102,7 +105,7 @@ export default function Dashboard() {
     const handlePopState = () => setSidebarTab(sidebarTabFromPath(window.location.pathname));
     window.addEventListener('popstate', handlePopState);
     const requestedTab = sidebarTabFromPath(window.location.pathname);
-    if ((requestedTab === 'admin' && profile && !isAdmin) || (requestedTab === 'dashboard' && window.location.pathname !== '/')) {
+    if (((requestedTab === 'admin' || requestedTab === 'ai-learning') && profile && !isAdmin) || (requestedTab === 'dashboard' && window.location.pathname !== '/')) {
       window.history.replaceState({}, '', pathForSidebarTab('dashboard'));
       setSidebarTab('dashboard');
     }
@@ -128,6 +131,12 @@ export default function Dashboard() {
         ? getMarketsByType(marketType)[0]?.symbol ?? current
         : current);
     }).catch(() => undefined);
+    void fetchMarketCoverage().then((rows) => {
+      if (!active) return;
+      setMarketCoverageOverrides(rows.map((row) => ({ symbol: row.symbol, tier: row.tier, reason: row.reason, providerMappingVerified: false, sessionCalendarVerified: false, lastScannedAt: row.lastScannedAt })));
+      setCoverageVerified(true);
+      setAvailabilityRevision((revision) => revision + 1);
+    }).catch(() => { if (active) setCoverageVerified(false); });
     return () => { active = false; };
   }, [user, marketType]);
 
@@ -258,10 +267,6 @@ export default function Dashboard() {
     return { signals: sigs, recommendation: rec };
   }, [decisionCandles, ml, symbol, timeframe]);
 
-  const overlays = useMemo(() => {
-    return signals.flatMap((signal) => signal.overlays ?? []);
-  }, [signals]);
-
   const priceChange = useMemo(() => {
     if (candles.length < 2) return null;
     const first = candles[Math.max(0, candles.length - 24)].close;
@@ -294,7 +299,7 @@ export default function Dashboard() {
     if (sidebarTab === 'alerts') return <AlertsPage key={user?.id ?? 'local'} />;
     if (sidebarTab === 'news') return <NewsPage />;
     if (sidebarTab === 'risk') return <RiskManagement />;
-    if (sidebarTab === 'ai-learning') return <AILearning />;
+    if (sidebarTab === 'ai-learning') return <AdminRoute fallback={<div className="flex items-center justify-center py-8 text-sm text-muted">Page not found</div>}><AILearning /></AdminRoute>;
 
     if (sidebarTab === 'terminal') {
       return (
@@ -310,7 +315,7 @@ export default function Dashboard() {
             <span className="text-lg font-semibold tabular-nums ml-auto text-text">{formatMarketPrice(symbol, livePrice)}</span>
           </div>
           <div className="terminal-chart-frame bg-surface border border-border rounded-xl overflow-hidden relative">
-            <MultiTimeframeTerminal symbol={symbol} marketType={marketType} theme={theme} wsStatus={wsStatus} />
+            <MultiTimeframeTerminal symbol={symbol} theme={theme} />
           </div>
         </div>
       );
@@ -365,6 +370,7 @@ export default function Dashboard() {
             >
               {availableMarkets.map((p) => <option key={p.symbol} value={p.symbol}>{p.label}</option>)}
             </select>
+            <MarketCoverageBadge symbol={symbol} compact verified={coverageVerified} />
           </div>
 
           <div className="dashboard-timeframes" aria-label="Chart timeframe">
@@ -387,7 +393,7 @@ export default function Dashboard() {
             <button type="button" onClick={() => setReloadKey((key) => key + 1)} className="rounded border border-warning/40 px-2 py-1 font-medium hover:bg-warning/10">Retry</button>
           </div>
         )}
-        <AutonomousCommandCenter symbol={symbol} timeframe={timeframe} marketType={marketType} wsStatus={wsStatus} candles={candles} candlesStale={Boolean(dataError && candles.length)} overlays={overlays} recommendation={recommendation} serverDecision={serverDecision} serverDecisionError={serverDecisionError} signals={signals} markets={availableMarkets} onSymbolChange={setSymbol} theme={theme} livePrice={livePrice} loading={loading} />
+        <AutonomousCommandCenter symbol={symbol} timeframe={timeframe} candles={candles} candlesStale={Boolean(dataError && candles.length)} recommendation={recommendation} serverDecision={serverDecision} serverDecisionError={serverDecisionError} signals={signals} markets={availableMarkets} onSymbolChange={setSymbol} theme={theme} livePrice={livePrice} loading={loading} />
       </div>
     );
   };

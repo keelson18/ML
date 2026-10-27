@@ -39,6 +39,13 @@ describe('authenticated backend responses', () => {
     );
   });
 
+  it('turns browser connection failures into an actionable backend startup message', async () => {
+    fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
+    await expect(fetchCanonicalMarketData('BTCUSD', '1h')).rejects.toThrow(
+      'The trading backend is unreachable. Run `npm run dev` to start the API and web app, then retry.',
+    );
+  });
+
   it('does not expose an HTML proxy error body', async () => {
     fetchMock.mockResolvedValue(new Response('<html>upstream details</html>', { status: 502 }));
     await expect(fetchCanonicalMarketData('BTCUSD', '1h')).rejects.toThrow(

@@ -3,15 +3,18 @@ import { randomUUID } from 'node:crypto';
 import { getMarket } from '../../../src/lib/markets';
 import { getSupabaseClient } from '../db';
 import { config } from '../config';
-import { fetchMarketData, type MarketDataSeries } from '../services/marketDataService';
+import { fetchMarketData, getMassiveBudgetSnapshot, getTwelveDataBudgetSnapshot, MarketDataProviderError, type MarketDataSeries } from '../services/marketDataService';
 import { advanceStoredTradePlans, getAccount, listStoredTradePlans, manageOpenPositions, storeTradePlan } from '../services/paperTradingService';
-import { getMarketAvailability } from '../services/marketAvailability';
+import { getMarketAvailability, getTierBTimeframeLastScannedAt, recordProviderUnavailable, recordTierBScan } from '../services/marketAvailability';
 import { createTradePlan } from '../trader/planner';
 import { traderConfig } from '../trader/config';
 import { candleSeconds, latestClosedCandleTime, selectClosedCandles } from '../trader/candle-math';
 import { hasFreshClosedCandleData } from '../trader/market-data-quality';
 import { nextScheduledRunAt } from './candle-clock';
 import { claimPaperAutopilotLease, releasePaperAutopilotLease, renewPaperAutopilotLease, type PaperAutopilotLease } from '../services/paperAutopilotLease';
+import { MARKET_UNIVERSE } from '../../../src/lib/markets';
+import { canTierBScanWithBudget, getMarketCoverage } from '../../../src/lib/market-coverage';
+import { refreshMarketCoverageOverrides } from '../services/marketCoverage';
 
 const AUTOPILOT_LEASE_MS = 90_000;
 const AUTOPILOT_LEASE_RENEW_MS = 20_000;
@@ -77,8 +80,8 @@ export function accountEntriesAllowed(input: { autonomousEnabled: boolean; accou
 export function isAutopilotSymbol(symbol: string): boolean {
   const market = getMarket(symbol);
   const availability = getMarketAvailability().find((item) => item.symbol === symbol)?.status;
-  return Boolean(market?.isActive && ['massive', 'twelvedata'].includes(market.provider)
-    && market.marketType === 'crypto' && market.priceCurrency === 'USD' && availability === 'available');
+  return Boolean(market?.isActive && getMarketCoverage(market).tier === 'A' && ['massive', 'twelvedata'].includes(market.provider)
+    && market.marketType === 'crypto' && market.priceCurrency === 'USD' && availability === 'verified');
 }
 
 export function verifiedAutopilotSymbols(symbols: readonly string[]): string[] {
@@ -87,12 +90,19 @@ export function verifiedAutopilotSymbols(symbols: readonly string[]): string[] {
 
 export class PaperAutopilotScheduler {
   private timer?: ReturnType<typeof setTimeout>;
+  private tierBTimer?: ReturnType<typeof setTimeout>;
+  private tierBRunning = false;
+  private tierBScanOffset = 0;
   private active = false;
   private running?: Promise<void>;
   private readonly lastBoundaries = new Map<Timeframe, number>();
   private readonly accountQueues = new Map<string, Promise<void>>();
   private readonly manualRuns = new Set<string>();
   private readonly workerId = randomUUID();
+  private readonly activeLeaseAccounts = new Set<string>();
+  private leaseContentionCount = 0;
+  private leaseClaimFailureCount = 0;
+  private leaseRenewalFailureCount = 0;
   private lastCycleAt: string | null = null;
   private nextScheduledAt: string | null = null;
   private lastError: string | null = null;
@@ -101,6 +111,10 @@ export class PaperAutopilotScheduler {
     return {
       running: this.active,
       cycleInProgress: Boolean(this.running),
+      activeLeaseCount: this.activeLeaseAccounts.size,
+      leaseContentionCount: this.leaseContentionCount,
+      leaseClaimFailureCount: this.leaseClaimFailureCount,
+      leaseRenewalFailureCount: this.leaseRenewalFailureCount,
       lastCycleAt: this.lastCycleAt,
       lastBoundaries: Object.fromEntries(this.lastBoundaries),
       nextScheduledAt: this.nextScheduledAt,
@@ -112,17 +126,55 @@ export class PaperAutopilotScheduler {
     if (this.active) return;
     this.active = true;
     void this.runScheduledCycle();
+    void this.runTierBScan();
   }
 
   stop(): void {
     this.active = false;
     if (this.timer) clearTimeout(this.timer);
+    if (this.tierBTimer) clearTimeout(this.tierBTimer);
     this.timer = undefined;
+    this.tierBTimer = undefined;
     this.nextScheduledAt = null;
+  }
+
+  private async runTierBScan(): Promise<void> {
+    if (!this.active || this.tierBRunning) return;
+    this.tierBRunning = true;
+    try {
+      await refreshMarketCoverageOverrides();
+      const availability = new Map(getMarketAvailability().map((item) => [item.symbol, item]));
+      const candidates = MARKET_UNIVERSE.filter((market) => market.isActive)
+        .filter((market) => getMarketCoverage(market, availability.get(market.symbol)).tier === 'B')
+        .filter((market) => availability.get(market.symbol)?.status !== 'unavailable');
+      const now = Date.now();
+      const requests = candidates.flatMap((market) => (['4h', '1h'] as const)
+        .filter((timeframe) => now - (getTierBTimeframeLastScannedAt(market.symbol, timeframe) ?? 0) >= (timeframe === '4h' ? 4 * 3_600_000 : 3_600_000))
+        .map((timeframe) => ({ market, timeframe })));
+      if (requests.length) {
+        const { market, timeframe } = requests[this.tierBScanOffset % requests.length];
+        this.tierBScanOffset = (this.tierBScanOffset + 1) % requests.length;
+        const budget = market.provider === 'massive' ? getMassiveBudgetSnapshot() : getTwelveDataBudgetSnapshot();
+        if (canTierBScanWithBudget(budget)) {
+          try {
+            const series = await fetchMarketData(market.symbol, timeframe, 100, { priority: false });
+            if (!series.stale && hasFreshClosedCandleData(series.candles, timeframe, Date.now())) recordTierBScan(market.symbol, timeframe, series.fetchedAt);
+          } catch (error) {
+            if (error instanceof MarketDataProviderError && error.status === 404) recordProviderUnavailable(market.symbol, timeframe);
+          }
+        }
+      }
+    } catch {
+      // The scan is best-effort; it yields on provider budget, freshness, and transport failures.
+    } finally {
+      this.tierBRunning = false;
+      if (this.active) this.tierBTimer = setTimeout(() => { void this.runTierBScan(); }, config.tierBScanIntervalMs);
+    }
   }
 
   async queueAccountRun(accountId: string): Promise<{ queued: true }> {
     if (!config.autonomousTradingEnabled) throw new Error('AUTONOMOUS_TRADING is disabled; paper autopilot runs are blocked.');
+    await refreshMarketCoverageOverrides();
     const { data, error } = await getSupabaseClient().from('paper_autopilot').select('*').eq('account_id', accountId).maybeSingle();
     if (error) throw new Error('Autopilot settings are unavailable.');
     if (!data?.enabled) throw new Error('Enable paper autopilot before running it.');
@@ -151,6 +203,7 @@ export class PaperAutopilotScheduler {
     this.running = (async () => {
       try {
         const now = Date.now();
+        await refreshMarketCoverageOverrides();
         const due = new Set<Timeframe>();
         const boundaries = new Map<Timeframe, number>();
         for (const timeframe of AUTOPILOT_TIMEFRAMES) {
@@ -260,13 +313,20 @@ export class PaperAutopilotScheduler {
     for (const row of availableRows) {
       const account = snapshots.get(row.account_id)!;
       await this.withAccountLock(row.account_id, async () => {
-        const lease = await claimPaperAutopilotLease(row.account_id, this.workerId, AUTOPILOT_LEASE_MS);
-        if (!lease) return;
+        let lease: PaperAutopilotLease | null;
+        try { lease = await claimPaperAutopilotLease(row.account_id, this.workerId, AUTOPILOT_LEASE_MS); }
+        catch (error) { this.leaseClaimFailureCount += 1; throw error; }
+        if (!lease) { this.leaseContentionCount += 1; return; }
+        this.activeLeaseAccounts.add(row.account_id);
         let leaseLost = false;
+        const markLeaseLost = () => {
+          if (!leaseLost) this.leaseRenewalFailureCount += 1;
+          leaseLost = true;
+        };
         const heartbeat = setInterval(() => {
           void renewPaperAutopilotLease(lease, AUTOPILOT_LEASE_MS)
-            .then((renewed) => { if (!renewed) leaseLost = true; })
-            .catch(() => { leaseLost = true; });
+            .then((renewed) => { if (!renewed) markLeaseLost(); })
+            .catch(markLeaseLost);
         }, AUTOPILOT_LEASE_RENEW_MS);
         const requireLease = () => {
           if (leaseLost) throw new Error('Paper-autopilot lease was lost; account processing stopped.');
@@ -329,6 +389,7 @@ export class PaperAutopilotScheduler {
         await getSupabaseClient().rpc('touch_paper_autopilot_run', { p_account_id: row.account_id });
         } finally {
           clearInterval(heartbeat);
+          this.activeLeaseAccounts.delete(row.account_id);
           await releasePaperAutopilotLease(lease);
         }
       }).catch(async (error: unknown) => {

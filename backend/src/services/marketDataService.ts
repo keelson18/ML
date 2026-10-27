@@ -67,6 +67,9 @@ function createTwelveDataBudget(): ProviderBudget {
     windowMs: config.twelveDataBudgetWindowMs,
     maxWaitMs: config.twelveDataBudgetMaxWaitMs,
     maxQueue: config.twelveDataBudgetMaxQueue,
+    reservedForPriority: Math.min(config.twelveDataTraderReservedRequests, config.twelveDataRequestsPerWindow - 1),
+    dailyRequests: config.twelveDataDailyCredits,
+    reservedForPriorityDaily: config.twelveDataTraderReservedCredits,
   });
 }
 let twelveDataBudget = createTwelveDataBudget();
@@ -101,11 +104,11 @@ export function getCachedCandleFreshness(symbols: string[], timeframes: Timefram
       .sort((left, right) => right.fetchedAt - left.fetchedAt)[0];
     const checkedAt = new Date(now).toISOString();
     const newestClosed = cached && selectClosedCandles(cached.series.candles, timeframe, now).at(-1);
-    if (!newestClosed) return { symbol, timeframe, status: 'unverified' as const, reason: 'No cached closed candle is available.', checkedAt, newestClosedCandleAt: null, ageMs: null };
+    if (!newestClosed) return { symbol, timeframe, status: 'unverified' as const, reason: 'No cached closed candle is available.', checkedAt, newestClosedCandleAt: null, latestClosedPrice: null, ageMs: null };
     const candleTime = newestClosed.time * 1000;
     const ageMs = Math.max(0, now - candleTime - candleSeconds(timeframe, newestClosed.time) * 1000);
     const stale = ageMs > candleSeconds(timeframe, newestClosed.time) * 1000 * staleMultiplier;
-    return { symbol, timeframe, status: stale ? 'degraded' as const : 'ok' as const, reason: stale ? 'Cached candle exceeds the configured age threshold.' : 'Cached closed candle is within the configured age threshold.', checkedAt, newestClosedCandleAt: new Date(candleTime).toISOString(), ageMs };
+    return { symbol, timeframe, status: stale ? 'degraded' as const : 'ok' as const, reason: stale ? 'Cached candle exceeds the configured age threshold.' : 'Cached closed candle is within the configured age threshold.', checkedAt, newestClosedCandleAt: new Date(candleTime).toISOString(), latestClosedPrice: newestClosed.close, ageMs };
   }));
 }
 
@@ -119,16 +122,19 @@ export async function probeMarketData(canonicalSymbol: string, timeframe: Timefr
   sourceInstrument: string;
 }> {
   const instrument = getMarket(canonicalSymbol);
-  if (!instrument || instrument.marketType !== 'crypto' || !['massive', 'twelvedata'].includes(instrument.provider) || !instrument.sourceSymbol) {
+  if (!instrument || !['massive', 'twelvedata'].includes(instrument.provider)) {
     throw new Error('Market probe is not configured for this instrument.');
   }
-  const candles = await fetchFromProvider(instrument, timeframe, requestedLimit, false);
-  validateCandles(candles, instrument, timeframe);
+  const sourceSymbol = instrument.sourceSymbol ?? (instrument.provider === 'twelvedata' ? `${instrument.baseAsset}/${instrument.quoteAsset}` : undefined);
+  if (!sourceSymbol) throw new Error('Market probe source mapping is not configured.');
+  const probeInstrument = { ...instrument, canonicalSymbol: instrument.canonicalSymbol ?? canonicalSymbol, sourceSymbol };
+  const candles = await fetchFromProvider(probeInstrument, timeframe, requestedLimit, false);
+  validateCandles(candles, probeInstrument, timeframe);
   if (candles.length === 0) throw new Error('Provider returned no candles.');
   const now = Date.now();
   const closed = selectClosedCandles(candles, timeframe, now, traderConfig.CLOSE_GRACE_MS);
   const latest = closed.at(-1);
-  if (!latest) return { candleCount: candles.length, closedCandleCount: 0, latestClosedCandleAt: null, ageMs: null, stale: true, provider: instrument.provider, sourceInstrument: instrument.sourceSymbol };
+  if (!latest) return { candleCount: candles.length, closedCandleCount: 0, latestClosedCandleAt: null, ageMs: null, stale: true, provider: instrument.provider, sourceInstrument: sourceSymbol };
   const durationMs = candleSeconds(timeframe, latest.time) * 1000;
   const ageMs = Math.max(0, now - latest.time * 1000 - durationMs);
   return {
@@ -138,7 +144,7 @@ export async function probeMarketData(canonicalSymbol: string, timeframe: Timefr
     ageMs,
     stale: ageMs > durationMs * config.marketDataMaxStaleTtlMultiplier,
     provider: instrument.provider,
-    sourceInstrument: instrument.sourceSymbol,
+    sourceInstrument: sourceSymbol,
   };
 }
 
@@ -236,6 +242,9 @@ function evictOldestCacheEntries(): void {
 async function fetchMarketDataUncoalesced(canonicalSymbol: string, timeframe: Timeframe, limit: number, priority: boolean): Promise<MarketDataSeries> {
   const configuredInstrument = getMarket(canonicalSymbol);
   if (!configuredInstrument) throw new Error(`Unknown canonical instrument: ${canonicalSymbol}`);
+  if (!['massive', 'twelvedata'].includes(configuredInstrument.provider)) {
+    throw new Error(`No supported market-data adapter is configured for ${canonicalSymbol}.`);
+  }
   const sourceSymbol = configuredInstrument.sourceSymbol ?? (
     configuredInstrument.provider === 'twelvedata'
       ? `${configuredInstrument.baseAsset}/${configuredInstrument.quoteAsset}`

@@ -22,7 +22,7 @@ const NAV_ITEMS: { key: SidebarTab; label: string; icon: typeof Activity; adminO
   { key: 'alerts', label: 'Alerts', icon: Bell },
   { key: 'news', label: 'News', icon: Newspaper },
   { key: 'risk', label: 'Risk Management', icon: AlertTriangle },
-  { key: 'ai-learning', label: 'AI Learning', icon: Brain },
+  { key: 'ai-learning', label: 'AI Learning', icon: Brain, adminOnly: true },
   { key: 'admin', label: 'Admin Panel', icon: Shield, adminOnly: true },
   { key: 'cms', label: 'Knowledge Base', icon: BookOpen },
   { key: 'settings', label: 'Settings', icon: Settings },

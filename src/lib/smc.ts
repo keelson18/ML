@@ -1,4 +1,4 @@
-import type { Candle, Overlay } from './types';
+import type { Candle } from './types';
 import { findSwings } from './indicators';
 
 // === Smart Money Concepts (SMC) Engine ===
@@ -242,38 +242,3 @@ export function detectLiquiditySweeps(candles: Candle[]): LiquidityZone[] {
 
   return sweepZones;
 }
-
-// ---- Generate overlay visuals for SMC concepts ----
-
-export function orderBlockOverlays(blocks: OrderBlock[]): Overlay[] {
-  return blocks.slice(-5).map((b) => ({
-    type: 'zone' as const,
-    id: `ob-${b.time}`,
-    from: b.low,
-    to: b.high,
-    color: b.type === 'bullish' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
-    label: b.type === 'bullish' ? 'Bullish OB' : 'Bearish OB',
-  }));
-}
-
-export function fvgOverlays(fvgs: FVG[]): Overlay[] {
-  return fvgs.slice(-3).map((f) => ({
-    type: 'zone' as const,
-    id: `fvg-${f.time}`,
-    from: f.bottom,
-    to: f.top,
-    color: f.type === 'bullish' ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
-    label: f.filled ? 'FVG (filled)' : 'FVG',
-  }));
-}
-
-export function liquidityOverlays(zones: LiquidityZone[]): Overlay[] {
-  return zones.filter((z) => !z.swept).slice(-10).map((z) => ({
-    type: 'hline' as const,
-    id: `liq-${z.time}`,
-    price: z.price,
-    color: z.type === 'above_highs' ? 'rgba(239,68,68,0.5)' : 'rgba(34,197,94,0.5)',
-    label: z.type === 'above_highs' ? 'Liq (H)' : 'Liq (L)',
-  }));
-}
-

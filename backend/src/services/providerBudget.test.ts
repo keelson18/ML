@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ProviderBudget, ProviderBudgetExhaustedError } from './providerBudget';
 
-function clockBudget(options: { requestsPerWindow: number; windowMs?: number; maxWaitMs?: number; maxQueue?: number; reservedForPriority?: number }) {
+function clockBudget(options: { requestsPerWindow: number; windowMs?: number; maxWaitMs?: number; maxQueue?: number; reservedForPriority?: number; dailyRequests?: number; reservedForPriorityDaily?: number }) {
   let now = 0;
   const budget = new ProviderBudget({
     requestsPerWindow: options.requestsPerWindow,
@@ -9,6 +9,8 @@ function clockBudget(options: { requestsPerWindow: number; windowMs?: number; ma
     maxWaitMs: options.maxWaitMs ?? 1_000,
     maxQueue: options.maxQueue ?? 10,
     reservedForPriority: options.reservedForPriority,
+    dailyRequests: options.dailyRequests,
+    reservedForPriorityDaily: options.reservedForPriorityDaily,
     now: () => now,
     sleep: async (ms) => { now += ms; },
   });
@@ -75,5 +77,15 @@ describe('ProviderBudget', () => {
 
   it('rejects a reservation that leaves no standard capacity', () => {
     expect(() => new ProviderBudget({ requestsPerWindow: 2, windowMs: 1_000, maxWaitMs: 1_000, maxQueue: 1, reservedForPriority: 2 })).toThrow();
+  });
+
+  it('keeps the configured daily reserve for priority management requests', async () => {
+    const { budget, time } = clockBudget({ requestsPerWindow: 8, reservedForPriority: 2, dailyRequests: 3, reservedForPriorityDaily: 1, maxWaitMs: 1_000 });
+    await budget.acquire();
+    await budget.acquire();
+    await expect(budget.acquire()).rejects.toBeInstanceOf(ProviderBudgetExhaustedError);
+    await budget.acquire(true);
+    expect(budget.snapshot()).toMatchObject({ usedToday: 3, dailyRequests: 3, standardRemaining: 3 });
+    expect(time()).toBe(0);
   });
 });

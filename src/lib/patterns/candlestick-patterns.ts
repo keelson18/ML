@@ -376,17 +376,6 @@ export function detectCandlestickPatterns(candles: Candle[]): Signal[] {
         side: result.side,
         confidence: result.confidence,
         reason: result.reason,
-        overlays: [{
-          type: 'markers' as const,
-          id: result.name.replace(/\s+/g, '-'),
-          markers: [{
-            time: candles[i].time,
-            position: 'aboveBar' as const,
-            color: result.side === 'buy' ? '#22c55e' : result.side === 'sell' ? '#ef4444' : '#9ca3af',
-            shape: result.side === 'buy' ? 'arrowUp' : result.side === 'sell' ? 'arrowDown' : 'circle',
-            text: result.name.substring(0, 4),
-          }],
-        }],
       });
     }
   }
@@ -440,4 +429,3 @@ export function scorePattern(
     finalScore,
   };
 }
-

@@ -23,19 +23,6 @@ export interface Signal {
   side: Side;
   confidence: number; // 0..1
   reason: string;
-  overlays?: Overlay[];
-}
-
-export interface Overlay {
-  type: 'line' | 'hline' | 'markers' | 'zone';
-  id: string;
-  points?: { time: number; value: number }[];
-  price?: number;
-  from?: number;
-  to?: number;
-  color?: string;
-  label?: string;
-  markers?: { time: number; position: 'aboveBar' | 'belowBar' | 'inBar'; color: string; shape: 'circle' | 'square' | 'arrowUp' | 'arrowDown'; text?: string }[];
 }
 
 export interface StrategyResult {
@@ -152,8 +139,8 @@ export const TIMEFRAMES: { value: Timeframe; label: string }[] = [
 // Market categories for multi-market support
 export const MARKET_TYPES: { value: MarketType; label: string; icon: string }[] = [
   { value: 'crypto', label: 'Cryptocurrencies', icon: '₿' },
-  { value: 'forex', label: 'Forex', icon: '💱' },
+  { value: 'forex', label: 'Forex', icon: '⇄' },
   { value: 'commodity', label: 'Commodities', icon: '🛢️' },
-  { value: 'index', label: 'Indices', icon: '📊' },
-  { value: 'stock', label: 'Stocks', icon: '📈' },
+  { value: 'index', label: 'Indices', icon: '▥' },
+  { value: 'stock', label: 'Stocks', icon: '▤' },
 ];

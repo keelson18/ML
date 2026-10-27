@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import BacktestingCenter from './BacktestingCenter';
 
 describe('BacktestingCenter', () => {
-  it('presents the registered server-side holdout workflow without browser simulation results', () => {
+  it('shows the requested exploratory backtest controls and paper-only caveat', () => {
     const markup = renderToStaticMarkup(<BacktestingCenter
       candles={[]}
       timeframe="1h"
@@ -14,11 +14,27 @@ describe('BacktestingCenter', () => {
       onRetryMarketData={() => undefined}
     />);
 
-    expect(markup).toContain('canonical paper planner');
-    expect(markup).toContain('Falsifiable hypothesis');
-    expect(markup).toContain('Register and start collection');
-    expect(markup).toContain('90 forward days and 100 trades');
-    expect(markup).not.toContain('Run backtest');
-    expect(markup).not.toContain('Equity Curve');
+    expect(markup).toContain('Backtesting Center');
+    expect(markup).toContain('Strategy');
+    expect(markup).toContain('BTCUSD');
+    expect(markup).toContain('Initial Capital');
+    expect(markup).toContain('Exploratory results only');
+    expect(markup).toContain('Equity Curve');
+    expect(markup).toContain('Trade History');
+  });
+
+  it('shows an explicit feed error and retry action when historical market data is unavailable', () => {
+    const markup = renderToStaticMarkup(<BacktestingCenter
+      candles={[]}
+      timeframe="1h"
+      symbol="BTCUSD"
+      theme="dark"
+      marketLoading={false}
+      marketError="Provider availability is unverified."
+      onRetryMarketData={() => undefined}
+    />);
+
+    expect(markup).toContain('Market data unavailable: Provider availability is unverified.');
+    expect(markup).toContain('Retry feed');
   });
 });

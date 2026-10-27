@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Activity, AlertTriangle, ShieldCheck, Target, TrendingDown, TrendingUp } from 'lucide-react';
-import PriceChart from './PriceChart';
 import TradingTerminal from './TradingTerminal';
 import type { AutonomyStatus, BackendDecision } from '../lib/backend-api';
 import { fetchAutonomyStatus } from '../lib/backend-api';
@@ -10,11 +9,8 @@ import { formatMarketPrice } from '../lib/markets';
 interface Props {
   symbol: string;
   timeframe: Timeframe;
-  marketType: string;
-  wsStatus: string;
   candles: Candle[];
   candlesStale: boolean;
-  overlays: Parameters<typeof PriceChart>[0]['overlays'];
   recommendation: Recommendation | null;
   serverDecision: BackendDecision | null;
   serverDecisionError: string | null;
@@ -28,7 +24,7 @@ interface Props {
 
 const initialStatus: AutonomyStatus = { state: 'OFFLINE', processedDecisions: 0, executedOrders: 0, skippedRuns: 0, consecutiveFailures: 0 };
 
-export default function AutonomousCommandCenter({ symbol, timeframe, marketType, wsStatus, candles, candlesStale, overlays, recommendation, serverDecision, serverDecisionError, signals, markets, onSymbolChange, theme, livePrice, loading }: Props) {
+export default function AutonomousCommandCenter({ symbol, timeframe, candles, candlesStale, recommendation, serverDecision, serverDecisionError, signals, markets, onSymbolChange, theme, livePrice, loading }: Props) {
   const [status, setStatus] = useState<AutonomyStatus>(initialStatus);
   const [statusError, setStatusError] = useState(false);
 
@@ -76,7 +72,7 @@ export default function AutonomousCommandCenter({ symbol, timeframe, marketType,
 
         <div className="command-chart">
           <div className="chart-caption"><span>EXECUTION CHART</span><span className="flex items-center gap-2">{candlesStale && <span role="status" className="rounded border border-warning/30 px-1.5 py-0.5 text-warning">STALE</span>}{formatMarketPrice(symbol, livePrice)}</span></div>
-          <div className="command-chart-canvas">{candles.length > 0 ? <TradingTerminal symbol={symbol} marketType={marketType} candles={candles} overlays={overlays} timeframe={timeframe} theme={theme} wsStatus={wsStatus} /> : <div className="command-empty">{loading ? 'Loading market data' : 'No market data available'}</div>}</div>
+          <div className="command-chart-canvas">{candles.length > 0 ? <TradingTerminal candles={candles} theme={theme} /> : <div className="command-empty">{loading ? 'Loading market data' : 'No market data available'}</div>}</div>
         </div>
 
         <aside className="command-panel evidence-panel">
@@ -84,6 +80,15 @@ export default function AutonomousCommandCenter({ symbol, timeframe, marketType,
           <Meter label={serverDecision ? 'Uncalibrated engine score' : 'Uncalibrated bias score'} value={confidence} />
           {(serverDecision?.supportingEvidence ?? evidence.map((signal) => ({ source: signal.strategy, score: signal.confidence, explanation: signal.reason }))).map((item) => <Meter key={item.source} label={item.source} value={Math.round((item.score ?? 0) * 100)} detail={item.explanation} />)}
           {!evidence.length && <div className="command-empty compact">Evidence will appear after analysis.</div>}
+          {serverDecision?.researchContext && <div className="mt-3 border-t border-border/60 pt-3" aria-label="AI Learning research context">
+            <p className="text-[11px] font-semibold text-primary">AI Learning · supplementary, non-authoritative</p>
+            <p className="mt-1 text-[11px] text-muted">{serverDecision.researchContext.status.replaceAll('_', ' ')} · {serverDecision.researchContext.note}</p>
+            {serverDecision.researchContext.items.map((item) => <article key={item.id} className="mt-2 rounded-lg border border-border/50 bg-bg/50 p-2">
+              <p className="text-[11px] font-medium">{item.title} · v{item.version}</p>
+              <p className="mt-1 text-[11px] text-muted">{item.content}</p>
+            </article>)}
+          </div>}
+          {serverDecision?.journalStatus === 'failed' && <p role="status" className="mt-2 text-[11px] text-warning">Analysis completed, but its AI Learning journal event could not be saved.</p>}
         </aside>
       </div>
 

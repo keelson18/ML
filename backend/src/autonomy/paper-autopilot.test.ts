@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { accountEntriesAllowed, entryCandleIsFresh, PaperAutopilotScheduler, prioritizeSeriesRequests, providerRequestSpacingMs, replayCandlesAfter, replaySequentialCandles, uniqueSeriesRequests, verifiedAutopilotSymbols } from './paper-autopilot';
 import { hasFreshClosedCandleData } from '../trader/market-data-quality';
 import { config } from '../config';
+import { setMarketCoverageOverrides } from '../../../src/lib/market-coverage';
 
 vi.mock('../db', () => ({
   getSupabaseClient: () => ({
@@ -11,7 +12,7 @@ vi.mock('../db', () => ({
 vi.mock('../services/marketAvailability', () => ({
   getMarketAvailability: () => [
     { symbol: 'BTCUSD', status: 'unverified', checkedAt: null },
-    { symbol: 'ETHUSD', status: 'available', checkedAt: 1 },
+    { symbol: 'ETHUSD', status: 'verified', checkedAt: 1 },
   ],
 }));
 import { closePaperPosition, simulatePaperOrder, type PaperAccountState } from '../engines/paper-execution';
@@ -20,6 +21,15 @@ import { traderConfig } from '../trader/config';
 describe('paper autopilot scheduling helpers', () => {
   it('keeps unverified markets out of planner and entry scheduling', () => {
     expect(verifiedAutopilotSymbols(['BTCUSD', 'ETHUSD', 'BTCUSD'])).toEqual(['ETHUSD']);
+  });
+
+  it('keeps blocked coverage symbols out of per-user autopilot enrollment', () => {
+    setMarketCoverageOverrides([{ symbol: 'ETHUSD', tier: 'blocked', reason: 'owner block', providerMappingVerified: true, sessionCalendarVerified: true }]);
+    try {
+      expect(verifiedAutopilotSymbols(['BTCUSD', 'ETHUSD'])).toEqual([]);
+    } finally {
+      setMarketCoverageOverrides([]);
+    }
   });
 
   it('blocks on-demand scheduler cycles when the global autonomy switch is disabled', async () => {

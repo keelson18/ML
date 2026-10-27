@@ -6,7 +6,7 @@ import type { ResearchContext } from '../../../backend/src/engines/research-engi
 
 export async function persistLearningEvent(context: LearningContext, userId: string, correlationId = createCorrelationId()): Promise<string> {
   try {
-    const result = await api.post<{ id: string }>('/api/v1/learning/events', {
+    const result = await api.post<{ id: string }>('/api/v1/admin/ai/events', {
       sourceType: context.observation.source,
       sourceId: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(context.observation.id)
         ? context.observation.id : null,

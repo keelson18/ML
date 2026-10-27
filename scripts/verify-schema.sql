@@ -11,16 +11,20 @@ select required.object_type, required.object_name,
                       and c.relname=case
                         when required.object_name='research_holdout_no_overlap' then 'research_holdout_claims'
                         when required.object_name='research_experiment_holdout_registration' then 'research_experiments'
+                        when required.object_name='paper_autopilot_coverage_tier_guard' then 'paper_autopilot'
                         else 'research_collection_candles'
                       end
                       and t.tgname=required.object_name and not t.tgisinternal) end as present
 from (values
   ('table','paper_sim_accounts'), ('table','decision_ledger'), ('table','paper_fills'),
+  ('table','models'), ('table','model_versions'), ('table','model_evaluations'), ('table','model_deployments'),
+  ('table','learning_events'), ('table','learning_experiments'), ('table','learning_outcomes'),
   ('table','shadow_trades'), ('table','paper_autopilot'), ('table','autopilot_settings'),
   ('table','paper_ledger_verification_checkpoints'), ('table','research_experiments'),
   ('table','research_runs'), ('table','research_results'), ('table','research_approvals'),
   ('table','research_holdout_claims'), ('table','strategy_promotions'),
   ('table','research_collection_state'), ('table','research_collection_candles'), ('table','paper_autopilot_leases'),
+  ('table','market_coverage_overrides'),
   ('rpc','record_paper_account_update'), ('rpc','set_paper_autopilot'),
   ('rpc','list_enabled_paper_autopilots'), ('rpc','pause_paper_autopilot'),
   ('rpc','resume_paper_autopilot'), ('rpc','touch_paper_autopilot_run'), ('rpc','get_paper_autopilot_limits'),
@@ -29,8 +33,21 @@ from (values
   ('rpc','record_research_run'), ('rpc','approve_research_strategy'),
   ('rpc','reject_overlapping_research_holdout'), ('rpc','validate_research_holdout_registration'),
   ('rpc','append_research_collection_batch'), ('rpc','claim_paper_autopilot_lease'),
+  ('rpc','admin_create_learning_event'),
+  ('rpc','admin_set_market_coverage_tier'),
   ('rpc','renew_paper_autopilot_lease'), ('rpc','release_paper_autopilot_lease'),
   ('trigger','research_holdout_no_overlap'), ('trigger','research_experiment_holdout_registration'),
-  ('trigger','research_collection_candles_immutable'), ('trigger','research_collection_candles_no_truncate')
+  ('trigger','research_collection_candles_immutable'), ('trigger','research_collection_candles_no_truncate'),
+  ('trigger','paper_autopilot_coverage_tier_guard')
 ) as required(object_type, object_name)
 order by object_type, object_name;
+
+-- Review effective grants. RLS policies further restrict authenticated SELECT to admins
+-- on model tables and to each owner's rows plus admins on learning and research rows.
+select table_name, grantee, privilege_type
+from information_schema.role_table_grants
+where table_schema = 'public'
+  and table_name in ('models','model_versions','model_evaluations','model_deployments',
+    'learning_events','learning_experiments','learning_outcomes','research_experiments','market_coverage_overrides')
+  and grantee in ('anon','authenticated','service_role')
+order by table_name, grantee, privilege_type;

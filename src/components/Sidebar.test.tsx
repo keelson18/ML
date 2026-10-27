@@ -15,11 +15,13 @@ describe('Sidebar', () => {
     expect(markup).toContain('Sign out');
     expect(markup).toContain('sidebar-sign-out');
     expect(markup).not.toContain('Admin Panel');
+    expect(markup).not.toContain('AI Learning');
   });
 
   it('renders Admin only for admins and keeps the active page announced', () => {
     const markup = renderSidebar(true);
     expect(markup).toContain('Admin Panel');
+    expect(markup).toContain('AI Learning');
     expect(markup).toContain('aria-current="page"');
   });
 });

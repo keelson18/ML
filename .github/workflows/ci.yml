@@ -10,6 +10,15 @@ permissions:
   contents: read
 
 jobs:
+  database-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+      - run: supabase start
+      - run: supabase test db
+
   verify:
     runs-on: ubuntu-latest
     steps:

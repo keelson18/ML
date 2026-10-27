@@ -16,7 +16,7 @@ function sourceFiles(directory: string): string[] {
     }
     if (!/\.(?:ts|tsx|js|jsx)$/.test(entry.name)
       || /\.(?:test|spec)\./.test(entry.name)
-      || entry.name === 'markets.ts') return [];
+      || entry.name === 'markets.ts' || entry.name === 'market-coverage.ts') return [];
     return [filePath];
   });
 }

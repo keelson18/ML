@@ -5,9 +5,9 @@ describe('verified planner market selection', () => {
   it('allows only selected active supported USD crypto markets with verified availability', () => {
     const markets = selectVerifiedPlannerMarkets(['BTCUSD', 'ETHUSD', 'ADAUSD', 'DOGEUSD'], [
       { symbol: 'BTCUSD', provider: 'twelvedata', sourceInstrument: 'BTC/USD', status: 'unverified', checkedAt: null },
-      { symbol: 'ETHUSD', provider: 'massive', sourceInstrument: 'X:ETHUSD', status: 'available', checkedAt: 1 },
+      { symbol: 'ETHUSD', provider: 'massive', sourceInstrument: 'X:ETHUSD', status: 'verified', checkedAt: 1 },
       { symbol: 'ADAUSD', provider: 'massive', sourceInstrument: 'X:ADAUSD', status: 'unavailable', checkedAt: 1 },
-      { symbol: 'DOGEUSD', provider: 'massive', sourceInstrument: 'X:DOGEUSD', status: 'available', checkedAt: 1 },
+      { symbol: 'DOGEUSD', provider: 'massive', sourceInstrument: 'X:DOGEUSD', status: 'verified', checkedAt: 1 },
     ]);
 
     expect(markets.map((market) => market.symbol)).toEqual(['ETHUSD', 'DOGEUSD']);
@@ -15,7 +15,7 @@ describe('verified planner market selection', () => {
 
   it('accepts a configured Twelve Data USD crypto market after timeframe verification', () => {
     const markets = selectVerifiedPlannerMarkets(['BTCUSD'], [
-      { symbol: 'BTCUSD', provider: 'twelvedata', sourceInstrument: 'BTC/USD', status: 'available', checkedAt: 1 },
+      { symbol: 'BTCUSD', provider: 'twelvedata', sourceInstrument: 'BTC/USD', status: 'verified', checkedAt: 1 },
     ]);
     expect(markets.map((market) => market.symbol)).toEqual(['BTCUSD']);
   });
@@ -26,8 +26,8 @@ describe('verified planner market selection', () => {
 
   it('does not allow a verified market outside the account selection', () => {
     expect(selectVerifiedPlannerMarkets(['BTCUSD'], [
-      { symbol: 'BTCUSD', provider: 'twelvedata', sourceInstrument: 'BTC/USD', status: 'available', checkedAt: 1 },
-      { symbol: 'ETHUSD', provider: 'massive', sourceInstrument: 'X:ETHUSD', status: 'available', checkedAt: 1 },
+      { symbol: 'BTCUSD', provider: 'twelvedata', sourceInstrument: 'BTC/USD', status: 'verified', checkedAt: 1 },
+      { symbol: 'ETHUSD', provider: 'massive', sourceInstrument: 'X:ETHUSD', status: 'verified', checkedAt: 1 },
     ]).map((market) => market.symbol)).toEqual(['BTCUSD']);
   });
 });

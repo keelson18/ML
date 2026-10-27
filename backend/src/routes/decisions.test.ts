@@ -4,7 +4,7 @@ import { AutonomousPipeline } from '../autonomy/pipeline';
 import { config } from '../config';
 import { decisionRoutes } from './decisions';
 
-const mocks = vi.hoisted(() => ({ fetchMarketData: vi.fn(), analyze: vi.fn(), availabilityStatus: 'available' as 'available' | 'unavailable' | 'unverified' }));
+const mocks = vi.hoisted(() => ({ fetchMarketData: vi.fn(), analyze: vi.fn(), availabilityStatus: 'verified' as 'verified' | 'unavailable' | 'unverified' }));
 
 vi.mock('../services/marketDataService', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../services/marketDataService')>()),
@@ -63,7 +63,7 @@ function analyzeRequest(app: Awaited<ReturnType<typeof createApp>>, token: strin
 describe('server-side decision analysis', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.availabilityStatus = 'available';
+    mocks.availabilityStatus = 'verified';
     lastClosedTime = Math.floor(Date.now() / 3_600_000) * 3_600 - 3_600;
     mocks.fetchMarketData.mockImplementation(async () => series());
     mocks.analyze.mockImplementation(async () => ({ decision: { result: { decision: 'NO_TRADE' } } }));
@@ -86,11 +86,20 @@ describe('server-side decision analysis', () => {
     await app.close();
   });
 
-  it('rejects markets outside the verification registry', async () => {
+  it('rejects markets outside the supported instrument scope', async () => {
     const app = await createApp();
     const response = await analyzeRequest(app, 'user-unconfigured', { symbol: 'AAPL', timeframe: '1h' });
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({ error: 'Market is not configured for verification.' });
+    expect(response.json()).toEqual({ error: 'This market type is outside the supported crypto and commodities scope.' });
+    expect(mocks.fetchMarketData).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('does not analyze forex instruments even when they exist in the internal catalog', async () => {
+    const app = await createApp();
+    const response = await analyzeRequest(app, 'user-forex', { symbol: 'EURUSD', timeframe: '1h' });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: 'This market type is outside the supported crypto and commodities scope.' });
     expect(mocks.fetchMarketData).not.toHaveBeenCalled();
     await app.close();
   });

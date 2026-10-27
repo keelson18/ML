@@ -13,7 +13,7 @@ const advanceStoredTradePlans: typeof advanceVerifiedTradePlans = (input) => adv
   entriesAllowed: input.entriesAllowed ?? true,
 });
 
-let availabilityStatus = 'available';
+let availabilityStatus = 'verified';
 vi.mock('./marketAvailability', () => ({ getMarketAvailability: () => [{ symbol: 'BTCUSD', status: availabilityStatus, checkedAt: 1 }, { symbol: 'ETHUSD', status: availabilityStatus, checkedAt: 1 }] }));
 vi.mock('./marketDataService', () => ({ fetchMarketData: vi.fn() }));
 vi.mock('../db', () => ({ getSupabaseClient: vi.fn() }));
@@ -71,11 +71,15 @@ describe('paper account entry integrity gate', () => {
 });
 
 describe('backend paper position lifecycle', () => {
-  it('blocks an unavailable market through the stored-plan executor', async () => {
-    const accountId = `unsupported-${Date.now()}`;
+  it.each([
+    { status: 'unavailable', reason: /unavailable/ },
+    { status: 'stale', reason: /stale/ },
+    { status: 'error', reason: /failed/ },
+  ])('blocks a $status market through the stored-plan executor', async ({ status, reason }) => {
+    const accountId = `availability-${status}-${Date.now()}`;
     const oldPromotions = traderConfig.PROMOTED_SETUP_TYPES;
     traderConfig.PROMOTED_SETUP_TYPES = ['trend-pullback'];
-    availabilityStatus = 'unavailable';
+    availabilityStatus = status;
     const time = Math.floor(Date.parse('2026-01-03T00:00:00Z') / 1000 / 900) * 900;
     const plan: TradePlan = {
       id: `plan-${accountId}`, accountId, symbol: 'BTCUSD', side: 'long', setupType: 'trend-pullback', htfBias: 'bull',
@@ -90,10 +94,10 @@ describe('backend paper position lifecycle', () => {
       const result = await advanceStoredTradePlans({ accountId, symbol: plan.symbol, timeframe: '15m', candle, candles: [candle], shadowMode: false });
       expect(result.filled).toBe(0);
       expect(result.orders.filter((order) => order.status === 'pending')).toHaveLength(0);
-      expect((await getAccount(accountId)).tradePlans?.[0]?.lastReason).toMatch(/unavailable/);
+      expect((await getAccount(accountId)).tradePlans?.[0]?.lastReason).toMatch(reason);
       expect((await getAccount(accountId)).positions).toHaveLength(0);
     } finally {
-      availabilityStatus = 'available';
+      availabilityStatus = 'verified';
       traderConfig.PROMOTED_SETUP_TYPES = oldPromotions;
     }
   });

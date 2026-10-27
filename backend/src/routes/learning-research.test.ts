@@ -60,6 +60,7 @@ async function createApp() {
   app.decorate('requireAdmin', async (request: FastifyRequest, reply: FastifyReply) => {
     const token = request.headers.authorization?.slice('Bearer '.length);
     if (!token) return reply.code(401).send({ error: 'Authentication required.' });
+    if (token === 'user-token') return reply.code(403).send({ error: 'Admin access required.' });
     request.authenticatedUserId = 'admin-user';
     request.accessToken = token;
   });
@@ -83,29 +84,56 @@ describe('learning and research persistence routes', () => {
       eq: vi.fn().mockReturnThis(),
       maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
       single: vi.fn().mockResolvedValue({ data: { id: TEST_ID }, error: null }),
+      order: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue({ data: [], error: null }),
     };
-    dbMocks.getSupabaseClientWithToken.mockReturnValue({ from: vi.fn().mockReturnValue(query) });
+    dbMocks.getSupabaseClientWithToken.mockReturnValue({ from: vi.fn().mockReturnValue(query), rpc: vi.fn().mockResolvedValue({ data: TEST_ID, error: null }) });
     dbMocks.getSupabaseClient.mockReturnValue({ rpc: vi.fn().mockResolvedValue({ data: TEST_ID, error: null }) });
     marketMocks.fetchMarketData.mockReset();
   });
 
-  it('stores an authenticated owner learning event as hypothesis without client status escalation', async () => {
+  it('stores an admin learning event through the audited database function', async () => {
     const app = await createApp();
     const response = await app.inject({
-      method: 'POST', url: '/api/v1/learning/events', headers: { authorization: 'Bearer session-token' },
+      method: 'POST', url: '/api/v1/admin/ai/events', headers: { authorization: 'Bearer admin-token' },
       payload: { sourceType: 'paper_trade', observation: { result: 'loss' }, hypothesis: 'Review the setup after a loss.' },
     });
     expect(response.statusCode).toBe(201);
     expect(response.json()).toEqual({ id: TEST_ID });
-    expect(dbMocks.getSupabaseClientWithToken).toHaveBeenCalledWith('session-token');
-    expect(insert).toHaveBeenCalledWith(expect.objectContaining({ user_id: 'authenticated-user', status: 'hypothesis' }));
+    expect(dbMocks.getSupabaseClientWithToken).toHaveBeenCalledWith('admin-token');
+    expect(dbMocks.getSupabaseClientWithToken.mock.results[0]?.value.rpc).toHaveBeenCalledWith('admin_create_learning_event', expect.objectContaining({ p_source_type: 'paper_trade', p_hypothesis: 'Review the setup after a loss.' }));
+    expect(insert).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('requires admin access for the AI review overview and learning event write', async () => {
+    const app = await createApp();
+    for (const method of ['GET', 'POST'] as const) {
+      const url = method === 'GET' ? '/api/v1/admin/ai/overview' : '/api/v1/admin/ai/events';
+      const payload = method === 'POST' ? { sourceType: 'research', observation: {}, hypothesis: 'Review evidence.' } : undefined;
+      expect((await app.inject({ method, url, payload })).statusCode).toBe(401);
+      expect((await app.inject({ method, url, headers: { authorization: 'Bearer user-token' }, payload })).statusCode).toBe(403);
+      expect((await app.inject({ method, url, headers: { authorization: 'Bearer admin-token' }, payload })).statusCode).toBe(method === 'GET' ? 200 : 201);
+    }
+    await app.close();
+  });
+
+  it('returns bounded knowledge, run, journal, and collection sections from persisted sources', async () => {
+    const app = await createApp();
+    const response = await app.inject({ url: '/api/v1/admin/ai/overview', headers: { authorization: `Bearer ${'overview-test-token'}` } });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      versions: [], strategyVersions: [], events: [], experiments: [], knowledge: [],
+      runs: [], results: [], journal: [], collections: [],
+    });
+    expect(response.json().refreshedAt).toEqual(expect.any(String));
     await app.close();
   });
 
   it('rejects client supplied status and user ownership fields', async () => {
     const app = await createApp();
     const response = await app.inject({
-      method: 'POST', url: '/api/v1/learning/events', headers: { authorization: 'Bearer session-token' },
+      method: 'POST', url: '/api/v1/admin/ai/events', headers: { authorization: 'Bearer admin-token' },
       payload: { userId: 'other-user', sourceType: 'research', observation: {}, hypothesis: 'Test', status: 'approved' },
     });
     expect(response.statusCode).toBe(400);
@@ -180,7 +208,7 @@ describe('learning and research persistence routes', () => {
     expect(serviceRpc).toHaveBeenCalledWith('append_research_collection_batch', expect.objectContaining({
       p_experiment_id: TEST_ID, p_user_id: 'authenticated-user', p_symbol: 'BTCUSD', p_continuous: true,
     }));
-    expect(serviceRpc).toHaveBeenCalledTimes(1);
+    expect(serviceRpc.mock.calls.filter(([name]) => name === 'append_research_collection_batch')).toHaveLength(1);
     await app.close();
   });
 
@@ -240,7 +268,7 @@ describe('learning and research persistence routes', () => {
       expect(response.json()).toMatchObject({ state: 'collecting', initialized: true, requiredDays: traderConfig.MIN_FORWARD_DAYS });
       expect(response.json().collectedDays).toBeLessThan(traderConfig.MIN_FORWARD_DAYS);
       expect(response.json()).not.toHaveProperty('metrics');
-      expect(serviceRpc).toHaveBeenCalledTimes(1);
+      expect(serviceRpc.mock.calls.filter(([name]) => name === 'append_research_collection_batch')).toHaveLength(1);
       expect(serviceRpc.mock.calls[0]?.[0]).toBe('append_research_collection_batch');
     } finally {
       if (oldRevision === undefined) delete process.env.APP_REVISION;
@@ -269,6 +297,7 @@ describe('learning and research persistence routes', () => {
     dbMocks.getSupabaseClientWithToken.mockReturnValue({ from: vi.fn().mockReturnValue(query) });
     const serviceRpc = vi.fn()
       .mockResolvedValueOnce({ data: { newCandles: 0, initialized: true }, error: null })
+      .mockResolvedValueOnce({ data: TEST_ID, error: null })
       .mockResolvedValueOnce({ data: TEST_ID, error: null });
     dbMocks.getSupabaseClient.mockReturnValue({ rpc: serviceRpc, ...mockCollectionReader(rows) });
     marketMocks.fetchMarketData.mockImplementation(fetcher);
@@ -286,7 +315,7 @@ describe('learning and research persistence routes', () => {
       });
       expect(response.statusCode).toBe(201);
       expect(marketMocks.fetchMarketData).toHaveBeenCalledTimes(4);
-      expect(serviceRpc.mock.calls.map(([name]) => name)).toEqual(['append_research_collection_batch', 'record_research_run']);
+      expect(serviceRpc.mock.calls.map(([name]) => name)).toEqual(['append_research_collection_batch', 'record_research_run', 'append_ai_learning_journal_event']);
       expect(serviceRpc).toHaveBeenCalledWith('record_research_run', expect.objectContaining({
         p_experiment_id: TEST_ID, p_user_id: 'authenticated-user', p_artifacts: expect.objectContaining({
           codeRevision: 'test-revision', strategyVersion: 'trend-pullback-v1',

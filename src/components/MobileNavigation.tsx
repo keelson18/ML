@@ -2,11 +2,11 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Activity, AlertTriangle, BarChart3, Bell, BookOpen, Brain, Briefcase, Check, ClipboardList, History, Newspaper, Settings, Shield, Star, TrendingUp, X, Zap, LogOut } from 'lucide-react';
 import type { SidebarTab } from '../lib/routes';
 
-const PRIMARY: { tab: SidebarTab; label: string; icon: typeof Activity }[] = [
+const PRIMARY: { tab: SidebarTab; label: string; icon: typeof Activity; adminOnly?: boolean }[] = [
   { tab: 'dashboard', label: 'Chart', icon: Activity },
   { tab: 'trader-desk', label: 'Trader', icon: ClipboardList },
   { tab: 'portfolio', label: 'Portfolio', icon: Briefcase },
-  { tab: 'ai-learning', label: 'Research', icon: Brain },
+  { tab: 'ai-learning', label: 'AI Learning', icon: Brain, adminOnly: true },
 ];
 
 const MORE: { tab: SidebarTab; label: string; icon: typeof Activity; adminOnly?: boolean }[] = [
@@ -19,6 +19,7 @@ const MORE: { tab: SidebarTab; label: string; icon: typeof Activity; adminOnly?:
   { tab: 'alerts', label: 'Alerts', icon: Bell },
   { tab: 'news', label: 'News & Research', icon: Newspaper },
   { tab: 'risk', label: 'Risk Management', icon: AlertTriangle },
+  { tab: 'ai-learning', label: 'AI Learning', icon: Brain, adminOnly: true },
   { tab: 'cms', label: 'Knowledge Base', icon: BookOpen },
   { tab: 'settings', label: 'Settings', icon: Settings },
   { tab: 'admin', label: 'Admin', icon: Shield, adminOnly: true },
@@ -57,7 +58,7 @@ export default function MobileNavigation({ activeTab, isAdmin, onNavigate, onSig
   const navigate = (tab: SidebarTab) => { setMoreOpen(false); onNavigate(tab); };
   return <>
     <nav className="mobile-tab-bar" aria-label="Primary navigation">
-      {PRIMARY.map(({ tab, label, icon: Icon }) => <button key={tab} type="button" onClick={() => navigate(tab)} aria-current={activeTab === tab ? 'page' : undefined} className={activeTab === tab ? 'mobile-tab is-active' : 'mobile-tab'}>
+      {PRIMARY.filter((item) => !item.adminOnly || isAdmin).map(({ tab, label, icon: Icon }) => <button key={tab} type="button" onClick={() => navigate(tab)} aria-current={activeTab === tab ? 'page' : undefined} className={activeTab === tab ? 'mobile-tab is-active' : 'mobile-tab'}>
         <Icon aria-hidden="true" /><span>{label}</span>{activeTab === tab && <span className="sr-only">Current page</span>}
       </button>)}
       <button ref={moreButtonRef} type="button" onClick={() => setMoreOpen(true)} aria-expanded={moreOpen} aria-haspopup="dialog" aria-current={moreActive ? 'page' : undefined} className={moreActive ? 'mobile-tab is-active' : 'mobile-tab'}>

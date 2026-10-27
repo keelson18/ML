@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:web": "node scripts/dev.mjs",
-    "vite:only": "vite",
+    "vite:only": "node scripts/dev.mjs",
     "backend:dev": "tsx watch backend/src/server.ts",
     "backend:typecheck": "tsc --noEmit -p backend/tsconfig.json",
     "typecheck:scripts": "tsc --noEmit --target ES2022 --module ESNext --moduleResolution bundler --types node scripts/probe-configured-markets.ts",

@@ -1,4 +1,4 @@
-import type { Candle, Signal, Overlay } from '../types';
+import type { Candle, Signal } from '../types';
 import { findSwings } from '../indicators';
 
 // ---- Extended Chart Pattern Detection ----
@@ -8,7 +8,6 @@ interface PatternMatch {
   side: 'buy' | 'sell' | 'neutral';
   confidence: number;
   reason: string;
-  overlays: Overlay[];
 }
 
 // Triple Top: three swing highs at similar level, breakdown below most recent trough
@@ -31,7 +30,6 @@ function detectTripleTop(candles: Candle[]): PatternMatch | null {
       side: 'sell',
       confidence: 0.65,
       reason: 'Triple top confirmed — breakdown below neckline',
-      overlays: [markerOverlay(last3, 'arrowDown', '3T')],
     };
   }
   return null;
@@ -57,7 +55,6 @@ function detectTripleBottom(candles: Candle[]): PatternMatch | null {
       side: 'buy',
       confidence: 0.65,
       reason: 'Triple bottom confirmed — breakout above neckline',
-      overlays: [markerOverlay(last3, 'arrowUp', '3B')],
     };
   }
   return null;
@@ -89,10 +86,6 @@ function detectPennant(candles: Candle[]): PatternMatch | null {
     side: 'neutral',
     confidence: 0.5,
     reason: 'Pennant formation — converging trendlines after sharp move',
-    overlays: [
-      lineOverlay([recentHighs[0], recentHighs[2]], '#f59e0b', 'resist'),
-      lineOverlay([recentLows[0], recentLows[2]], '#f59e0b', 'support'),
-    ],
   };
 }
 
@@ -119,10 +112,6 @@ function detectRectangle(candles: Candle[]): PatternMatch | null {
     reason: side !== 'neutral'
       ? 'Rectangle breakout direction'
       : 'Rectangle consolidation — awaiting breakout',
-    overlays: [
-      { type: 'hline' as const, id: 'rect-resist', price: hAvg, color: '#ef4444', label: 'R' },
-      { type: 'hline' as const, id: 'rect-support', price: lAvg, color: '#22c55e', label: 'S' },
-    ],
   };
 }
 
@@ -149,9 +138,6 @@ function detectCupAndHandle(candles: Candle[]): PatternMatch | null {
       side: 'buy',
       confidence: 0.6,
       reason: 'Cup & Handle breakout — bullish continuation',
-      overlays: [
-        { type: 'hline' as const, id: 'cup-rim', price: cupHigh, color: '#22c55e', label: 'Rim' },
-      ],
     };
   }
   return null;
@@ -181,10 +167,6 @@ function detectWedge(candles: Candle[]): PatternMatch | null {
       side: 'sell',
       confidence: 0.55,
       reason: 'Rising wedge breakdown — bearish reversal',
-      overlays: [
-        lineOverlay([recentHighs[0], recentHighs[2]], '#ef4444', 'wedge-h'),
-        lineOverlay([recentLows[0], recentLows[2]], '#ef4444', 'wedge-l'),
-      ],
     };
   }
   if (falling && last > recentHighs[0].value) {
@@ -193,10 +175,6 @@ function detectWedge(candles: Candle[]): PatternMatch | null {
       side: 'buy',
       confidence: 0.55,
       reason: 'Falling wedge breakout — bullish reversal',
-      overlays: [
-        lineOverlay([recentHighs[0], recentHighs[2]], '#22c55e', 'wedge-h'),
-        lineOverlay([recentLows[0], recentLows[2]], '#22c55e', 'wedge-l'),
-      ],
     };
   }
   return null;
@@ -221,44 +199,6 @@ function detectChannel(candles: Candle[]): PatternMatch | null {
     side: bullish ? 'buy' : 'sell',
     confidence: 0.5,
     reason: `${bullish ? 'Ascending' : 'Descending'} channel detected`,
-    overlays: [
-      lineOverlay([recentHighs[0], recentHighs[2]], '#06b6d4', 'upper'),
-      lineOverlay([recentLows[0], recentLows[2]], '#06b6d4', 'lower'),
-    ],
-  };
-}
-
-// ---- Helpers ----
-
-function markerOverlay(
-  swings: { time: number; value: number }[],
-  shape: 'arrowUp' | 'arrowDown',
-  label: string
-): Overlay {
-  return {
-    type: 'markers' as const,
-    id: label,
-    markers: swings.map((s) => ({
-      time: s.time,
-      position: 'belowBar' as const,
-      color: shape === 'arrowUp' ? '#22c55e' : '#ef4444',
-      shape,
-      text: label,
-    })),
-  };
-}
-
-function lineOverlay(
-  points: { time: number; value: number }[],
-  color: string,
-  label: string
-): Overlay {
-  return {
-    type: 'line' as const,
-    id: label,
-    points,
-    color,
-    label,
   };
 }
 
@@ -282,7 +222,5 @@ export function detectExtendedChartPatterns(candles: Candle[]): Signal[] {
       side: p.side,
       confidence: p.confidence,
       reason: p.reason,
-      overlays: p.overlays,
     }));
 }
-

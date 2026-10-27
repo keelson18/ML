@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
@@ -67,6 +68,9 @@ for (const { name, pattern } of historicalPatterns) {
 }
 
 for (const file of files) {
+  // `git ls-files --cached` includes tracked files deleted in the worktree;
+  // deleted paths have no current contents to inspect (history is scanned above).
+  if (!existsSync(resolve(root, file))) continue;
   const basename = file.split(/[\\/]/).at(-1);
   if (file === '.env.example') continue;
   if (basename === '.env' || (basename?.startsWith('.env.') && basename !== '.env.example')) {

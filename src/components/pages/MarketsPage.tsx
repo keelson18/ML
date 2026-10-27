@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BarChart3, RefreshCw } from 'lucide-react';
 import type { MarketType } from '../../lib/types';
 import { MARKET_TYPES } from '../../lib/types';
-import { getDataProvider } from '../../lib/providers';
 import { getMarketsByType, getMarketAvailabilityRevision } from '../../lib/markets';
+import { fetchCanonicalMarketData, fetchMarketCoverage, type MarketCoverageRecord } from '../../lib/backend-api';
+import MarketCoverageBadge from '../MarketCoverageBadge';
 
 type Quote = { price: number; change: number };
 
@@ -13,6 +14,9 @@ export default function MarketsPage() {
   const [quotes, setQuotes] = useState<Record<string, Quote>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [coverage, setCoverage] = useState<Record<string, MarketCoverageRecord>>({});
+  const [coverageLoaded, setCoverageLoaded] = useState(false);
+  const [coverageFailed, setCoverageFailed] = useState(false);
   const quoteRequestId = useRef(0);
   const availabilityRevision = getMarketAvailabilityRevision();
   const markets = useMemo(() => {
@@ -23,14 +27,34 @@ export default function MarketsPage() {
   const pageCount = Math.max(1, Math.ceil(markets.length / pageSize));
   const visibleMarkets = useMemo(() => markets.slice(page * pageSize, (page + 1) * pageSize), [markets, page]);
   const marketTypeMeta = MARKET_TYPES.find((mt) => mt.value === selectedType);
+
+  useEffect(() => {
+    let active = true;
+    void fetchMarketCoverage().then((rows) => {
+      if (active) {
+        setCoverage(Object.fromEntries(rows.map((row) => [row.symbol, row])));
+        setCoverageLoaded(true);
+      }
+    }).catch(() => {
+      if (active) {
+        setCoverageFailed(true);
+        setCoverageLoaded(true);
+        setError('Instrument coverage could not be verified from the backend.');
+      }
+    });
+    return () => { active = false; };
+  }, []);
   const loadQuotes = useCallback(() => {
+    if (!coverageLoaded || coverageFailed) return;
     const requestId = ++quoteRequestId.current;
     setLoading(true);
     setQuotes({});
     setError(null);
     Promise.all(visibleMarkets.map(async (market) => {
       try {
-        const candles = await getDataProvider(market.symbol).fetchKlines(market.symbol, '1d', 2);
+        if (!['A', 'B'].includes(coverage[market.symbol]?.tier ?? 'blocked')) return { symbol: market.symbol, quote: null };
+        const response = await fetchCanonicalMarketData(market.symbol, '1d', 2);
+        const candles = response.candles;
         if (candles.length < 1) return { symbol: market.symbol, quote: null };
         const latest = candles[candles.length - 1];
         const previous = candles[candles.length - 2];
@@ -46,7 +70,7 @@ export default function MarketsPage() {
         if (failures) setError(`${failures} of ${results.length} displayed quotes are unavailable from their configured providers. Check provider access or rate limits.`);
       }
     }).finally(() => { if (quoteRequestId.current === requestId) setLoading(false); });
-  }, [visibleMarkets]);
+  }, [visibleMarkets, coverage, coverageLoaded, coverageFailed]);
 
   useEffect(() => {
     void loadQuotes();
@@ -70,7 +94,7 @@ export default function MarketsPage() {
         <Stat label="Page Top Loser" value={topLoser ? `${topLoser[0]} ${topLoser[1].change.toFixed(2)}%` : loading ? 'Loading' : 'Unavailable'} tone={topLoser ? 'text-danger' : 'text-muted'} />
       </div>
 
-      <div className="bg-surface border border-border rounded-xl overflow-hidden"><div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3 text-xs text-muted"><span>Showing {markets.length ? page * pageSize + 1 : 0}–{Math.min((page + 1) * pageSize, markets.length)} of {markets.length}</span><div className="flex items-center gap-2"><button type="button" onClick={() => setPage((current) => Math.max(0, current - 1))} disabled={page === 0 || loading} className="rounded border border-border px-2 py-1 disabled:opacity-40">Previous</button><span>Page {page + 1} of {pageCount}</span><button type="button" onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))} disabled={page >= pageCount - 1 || loading} className="rounded border border-border px-2 py-1 disabled:opacity-40">Next</button></div></div><div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr className="border-b border-border text-muted"><th className="text-left px-4 py-3 font-medium">Symbol</th><th className="text-left px-4 py-3 font-medium">Name</th><th className="text-right px-4 py-3 font-medium">Last Price</th><th className="text-right px-4 py-3 font-medium">1D</th><th className="text-left px-4 py-3 font-medium">Exchange</th><th className="text-left px-4 py-3 font-medium">Feed</th></tr></thead><tbody>{visibleMarkets.map((market) => { const quote = quotes[market.symbol]; return <tr key={market.symbol} className="border-b border-border/50 hover:bg-bg/50 transition-colors"><td className="px-4 py-3 font-medium">{market.symbol}</td><td className="px-4 py-3 text-muted">{market.label}</td><td className="px-4 py-3 text-right tabular-nums">{quote ? quote.price.toLocaleString(undefined, { maximumFractionDigits: 4 }) : '--'}</td><td className={`px-4 py-3 text-right tabular-nums ${quote ? quote.change >= 0 ? 'text-success' : 'text-danger' : 'text-muted'}`}>{quote ? `${quote.change >= 0 ? '+' : ''}${quote.change.toFixed(2)}%` : '--'}</td><td className="px-4 py-3 text-muted">{market.exchange}</td><td className="px-4 py-3"><span className={`px-1.5 py-0.5 rounded text-xs ${quote ? 'bg-success/10 text-success' : 'bg-bg text-muted'}`}>{quote ? 'Quoted' : 'No quote'}</span></td></tr>; })}{markets.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-muted">No supported markets found.</td></tr>}</tbody></table></div></div>
+      <div className="bg-surface border border-border rounded-xl overflow-hidden"><div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3 text-xs text-muted"><span>Showing {markets.length ? page * pageSize + 1 : 0}–{Math.min((page + 1) * pageSize, markets.length)} of {markets.length}</span><div className="flex items-center gap-2"><button type="button" onClick={() => setPage((current) => Math.max(0, current - 1))} disabled={page === 0 || loading} className="rounded border border-border px-2 py-1 disabled:opacity-40">Previous</button><span>Page {page + 1} of {pageCount}</span><button type="button" onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))} disabled={page >= pageCount - 1 || loading} className="rounded border border-border px-2 py-1 disabled:opacity-40">Next</button></div></div><div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr className="border-b border-border text-muted"><th className="text-left px-4 py-3 font-medium">Symbol</th><th className="text-left px-4 py-3 font-medium">Name</th><th className="text-left px-4 py-3 font-medium">Coverage</th><th className="text-right px-4 py-3 font-medium">Last Price</th><th className="text-right px-4 py-3 font-medium">1D</th><th className="text-left px-4 py-3 font-medium">Exchange</th><th className="text-left px-4 py-3 font-medium">Feed</th></tr></thead><tbody>{visibleMarkets.map((market) => { const quote = quotes[market.symbol]; return <tr key={market.symbol} className="border-b border-border/50 hover:bg-bg/50 transition-colors"><td className="px-4 py-3 font-medium">{market.symbol}</td><td className="px-4 py-3 text-muted">{market.label}</td><td className="px-4 py-3"><MarketCoverageBadge symbol={market.symbol} compact coverage={coverage[market.symbol]} verified={!coverageFailed} /></td><td className="px-4 py-3 text-right tabular-nums">{quote ? quote.price.toLocaleString(undefined, { maximumFractionDigits: 4 }) : '--'}</td><td className={`px-4 py-3 text-right tabular-nums ${quote ? quote.change >= 0 ? 'text-success' : 'text-danger' : 'text-muted'}`}>{quote ? `${quote.change >= 0 ? '+' : ''}${quote.change.toFixed(2)}%` : '--'}</td><td className="px-4 py-3 text-muted">{market.exchange}</td><td className="px-4 py-3"><span className={`px-1.5 py-0.5 rounded text-xs ${quote ? 'bg-success/10 text-success' : 'bg-bg text-muted'}`}>{quote ? 'Quoted' : 'No quote'}</span></td></tr>; })}{markets.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-muted">No supported markets found.</td></tr>}</tbody></table></div></div>
     </div>
   );
 }

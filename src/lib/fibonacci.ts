@@ -1,4 +1,4 @@
-import type { Candle, Overlay } from './types';
+import type { Candle } from './types';
 import { findSwings } from './indicators';
 
 // === Fibonacci Engine ===
@@ -155,36 +155,5 @@ export function analyzeConfluence(
     structureAlignment: false,
     contributingFactors: factors,
   };
-}
-
-// Get overlays for chart rendering
-export function fibOverlays(fib: FibAnalysis): Overlay[] {
-  const overlays: Overlay[] = [];
-
-  // Retracement levels
-  for (const level of fib.retracements) {
-    overlays.push({
-      type: 'hline' as const,
-      id: `fib-${level.label}`,
-      price: level.price,
-      color: level.isGolden ? '#10a37f' : '#9ca3af',
-      label: level.label,
-    });
-  }
-
-  // Extension levels (only golden for clarity)
-  for (const level of fib.extensions) {
-    if (level.isGolden) {
-      overlays.push({
-        type: 'hline' as const,
-        id: `fib-ext-${level.label}`,
-        price: level.price,
-        color: '#f59e0b',
-        label: `Ext ${level.label}`,
-      });
-    }
-  }
-
-  return overlays;
 }
 

@@ -28,10 +28,10 @@ for (const path of files) {
 }
 
 const chart = readFileSync(join(sourceRoot, 'components', 'PriceChart.tsx'), 'utf8');
-if (!/strokeWidth="2"/.test(chart) || !/strokeWidth="1\.5"/.test(chart)) problems.push('PriceChart.tsx: drawing lines must be at least 1.5px thick');
-if (!/fontSize="14"/.test(chart)) problems.push('PriceChart.tsx: chart drawing labels must be at least 14px for mobile');
-if (!/\['structure', 'Structure'\]/.test(chart) || !/\['zones', 'Zones'\]/.test(chart) || !/\['tradeLevels', 'Trade levels'\]/.test(chart)
-  || !/\['signals', 'Signals'\]/.test(chart) || !/\['trades', 'Trades'\]/.test(chart)) problems.push('PriceChart.tsx: all five independently toggleable drawing layers are required');
+if (!/addCandlestickSeries/.test(chart)) problems.push('PriceChart.tsx: candlestick rendering is required');
+for (const label of ['Structure', 'Zones', 'Trade levels', 'Signals', 'Trades']) {
+  if (chart.includes(label)) problems.push(`PriceChart.tsx: removed chart layer "${label}" must not be rendered`);
+}
 
 if (problems.length) {
   console.error(problems.join('\n'));

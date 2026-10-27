@@ -52,6 +52,8 @@ export const adminOverviewSchema = z.object({
   scheduler: healthTileSchema.extend({
     state: workerStateSchema,
     enabled: z.boolean(), entriesEnabled: z.boolean(), running: z.boolean(), cycleInProgress: z.boolean(), lastCycleAt: z.string().nullable(), lastBoundaries: z.record(z.string(), z.number()),
+    activeLeaseCount: z.number().int().nonnegative(), leaseContentionCount: z.number().int().nonnegative(),
+    leaseClaimFailureCount: z.number().int().nonnegative(), leaseRenewalFailureCount: z.number().int().nonnegative(),
     nextScheduledAt: z.string().nullable(), lastError: z.string().nullable(),
   }).strict(),
   providers: z.array(z.object({

@@ -8,10 +8,16 @@ export async function authenticatedBackendRequest<T>(path: string, init: Request
   const headers = new Headers(init.headers);
   if (init.body !== undefined) headers.set('Content-Type', 'application/json');
   headers.set('Authorization', `Bearer ${session.access_token}`);
-  const response = await fetch(path, { ...init, headers });
-  const { raw, payload } = await readJsonSafe<T & { error?: string }>(response);
+  let response: Response;
+  try {
+    response = await fetch(path, { ...init, headers });
+  } catch {
+    throw new Error('The trading backend is unreachable. Run `npm run dev` to start the API and web app, then retry.');
+  }
+  const { raw, payload } = await readJsonSafe<T & { error?: string; reason?: string }>(response);
   if (!response.ok) {
-    if (payload?.error) throw new Error(payload.error);
+    if (payload?.error) throw new Error(payload.error === 'Market coverage is blocked.' && payload.reason
+      ? `${payload.error} ${payload.reason.slice(0, 300)}` : payload.error);
     if (response.status !== 401 && (!raw || [502, 503, 504].includes(response.status))) {
       throw new Error('The trading backend is unreachable. Check that it is running, then retry.');
     }
@@ -40,6 +46,13 @@ export interface BackendDecision {
   reasoning: string;
   explanation: string;
   timestamp: string;
+  researchContext?: {
+    status: 'used' | 'not_applicable' | 'unavailable';
+    authoritative: false;
+    note: string;
+    items: Array<{ id: string; version: string; title: string; content: string; tags: string[]; confidence: number }>;
+  };
+  journalStatus?: 'recorded' | 'failed';
 }
 
 export interface AutonomyStatus {
@@ -57,11 +70,20 @@ export async function fetchAutonomyStatus(): Promise<AutonomyStatus> {
 }
 
 export async function requestBackendDecision(symbol: string, timeframe: Timeframe): Promise<BackendDecision | null> {
-  const payload = await authenticatedBackendRequest<{ decision?: { result?: BackendDecision } }>('/api/v1/decisions/analyze', {
+  const payload = await authenticatedBackendRequest<{
+    decision?: { result?: BackendDecision };
+    researchContext?: BackendDecision['researchContext'];
+    journalStatus?: BackendDecision['journalStatus'];
+  }>('/api/v1/decisions/analyze', {
     method: 'POST',
     body: JSON.stringify({ symbol, timeframe }),
   });
-  return payload.decision?.result ?? null;
+  const decision = payload.decision?.result;
+  return decision ? {
+    ...decision,
+    ...(payload.researchContext ? { researchContext: payload.researchContext } : {}),
+    ...(payload.journalStatus ? { journalStatus: payload.journalStatus } : {}),
+  } : null;
 }
 
 export async function requestMLPrediction(pair: string, timeframe: Timeframe): Promise<MLPrediction> {
@@ -111,28 +133,6 @@ export interface PaperTrade {
   engineVersions?: Record<string, string>;
 }
 
-export interface ChartPaperPosition {
-  id: string;
-  orderId?: string;
-  symbol: string;
-  side: 'buy' | 'sell';
-  quantity: number;
-  entryPrice: number;
-  requestedEntryPrice?: number;
-  confidenceAtEntry?: number;
-  entryFee: number;
-  entrySlippage?: number;
-  stopLoss?: number;
-  takeProfit?: number;
-  initialRisk?: number;
-  targets?: Array<{ price: number; fractionOfPosition: number }>;
-  engineVersions?: Record<string, string>;
-  planId?: string;
-  status: 'open' | 'closed';
-  openedAt: string;
-  closedAt?: string;
-}
-
 export interface ChartPaperTrade extends PaperTrade {
   positionId: string;
   orderId?: string;
@@ -147,18 +147,6 @@ export interface ChartPaperTrade extends PaperTrade {
   realizedPnl: number;
   exitReason?: string;
   executionVersion: string;
-}
-
-export interface ChartTradeHistory {
-  symbol: string;
-  trades: ChartPaperTrade[];
-  positions: ChartPaperPosition[];
-  plans: Array<{ id: string; confidence?: number; contextSnapshot?: Record<string, unknown> }>;
-  journal: Array<{ id: string; planId?: string; metrics: Record<string, number | string | boolean | null>; engineVersions: Record<string, string> }>;
-}
-
-export async function fetchChartTradeHistory(symbol: string): Promise<ChartTradeHistory> {
-  return authenticatedBackendRequest<ChartTradeHistory>(`/api/v1/trader/trades?symbol=${encodeURIComponent(symbol)}`);
 }
 
 export interface PaperAccount {
@@ -255,7 +243,7 @@ export interface AdminOverview {
     hashChain: AdminHealthTile & { checkedAccounts: number; brokenAccounts: number; checkedRows: number };
     accounting: AdminHealthTile & { checkedAccounts: number; brokenAccounts: number };
   };
-  scheduler: AdminHealthTile & { state: 'stopped' | 'starting' | 'running' | 'paused' | 'degraded' | 'blocked' | 'failed'; enabled: boolean; entriesEnabled: boolean; running: boolean; cycleInProgress: boolean; lastCycleAt: string | null; lastBoundaries: Record<string, number>; nextScheduledAt: string | null; lastError: string | null };
+  scheduler: AdminHealthTile & { state: 'stopped' | 'starting' | 'running' | 'paused' | 'degraded' | 'blocked' | 'failed'; enabled: boolean; entriesEnabled: boolean; running: boolean; cycleInProgress: boolean; lastCycleAt: string | null; activeLeaseCount: number; leaseContentionCount: number; leaseClaimFailureCount: number; leaseRenewalFailureCount: number; lastBoundaries: Record<string, number>; nextScheduledAt: string | null; lastError: string | null };
   providers: Array<AdminHealthTile & { provider: 'Massive' | 'Twelve Data'; quota: number; windowMs: number; usedInWindow: number; queued: number; backoffUntil: string | null; last429At: string | null }>;
   feeds: Array<AdminHealthTile & { feed: 'Coinbase' | 'Twelve Data'; subscribedSymbols: number; connectedClients: number; droppedUpdates: number; reconnects: number; gaps: number; lastTickAgeMs: number | null }>;
   freshness: Array<{ symbol: string; timeframe: string; status: AdminHealthTile['status']; reason: string; checkedAt: string; newestClosedCandleAt: string | null; ageMs: number | null }>;
@@ -282,17 +270,22 @@ export async function cancelEventBlackout(id: string): Promise<void> {
 
 export interface MarketAvailabilityRecord {
   symbol: string;
-  provider: MarketDataProvider;
+  provider: MarketDataProvider | 'unsupported';
   sourceInstrument: string;
-  status: 'available' | 'unavailable' | 'unverified';
+  status: 'verified' | 'partially_verified' | 'unverified' | 'unavailable' | 'stale' | 'error';
   checkedAt: number | null;
+  reason?: string;
   timeframes?: Array<{
     timeframe: Timeframe;
-    status: 'available' | 'unavailable' | 'unverified';
+    status: 'verified' | 'partially_verified' | 'unverified' | 'unavailable' | 'stale' | 'error';
+    testType?: 'provider_probe' | 'chart_request';
+    environment?: 'test' | 'production';
+    checkedAt?: number;
     candleCount?: number;
     closedCandleCount?: number;
     latestClosedCandleAt?: string | null;
     ageMs?: number | null;
+    errorCategory?: string;
     reason?: string;
   }>;
 }
@@ -303,8 +296,48 @@ export async function fetchMarketAvailability(admin = false): Promise<MarketAvai
   return payload.markets;
 }
 
-export async function probeMarkets(): Promise<MarketAvailabilityRecord[]> {
-  const payload = await authenticatedBackendRequest<{ markets: MarketAvailabilityRecord[] }>('/api/v1/admin/markets/probe', { method: 'POST' });
+export interface ProviderBudgetStatus {
+  requestsPerWindow: number;
+  windowMs: number;
+  reservedForPriority: number;
+  usedInWindow: number;
+  queued: number;
+  backoffUntil: string | null;
+  last429At: string | null;
+  usedToday: number | null;
+  dailyRequests: number | null;
+  reservedForPriorityDaily: number;
+  standardRemaining: number;
+  standardDailyRemaining: number | null;
+}
+
+export async function fetchMarketBudgets(): Promise<{ massive: ProviderBudgetStatus; twelveData: ProviderBudgetStatus }> {
+  return authenticatedBackendRequest('/api/v1/admin/markets/budget');
+}
+
+export interface MarketCoverageRecord {
+  symbol: string;
+  tier: 'A' | 'B' | 'C' | 'blocked';
+  label: 'Autopilot' | 'Scanning' | 'On-demand' | 'Blocked';
+  reason: string;
+  lastScannedAt: number | null;
+}
+
+export async function fetchMarketCoverage(): Promise<MarketCoverageRecord[]> {
+  const payload = await authenticatedBackendRequest<{ instruments: MarketCoverageRecord[] }>('/api/v1/market/coverage');
+  return payload.instruments;
+}
+
+export async function fetchAdminMarketCoverage(): Promise<{ instruments: MarketCoverageRecord[]; budgets: { massive: ProviderBudgetStatus; twelveData: ProviderBudgetStatus } }> {
+  return authenticatedBackendRequest('/api/v1/admin/markets/coverage');
+}
+
+export async function updateAdminMarketCoverage(input: { symbol: string; tier: MarketCoverageRecord['tier']; reason: string; providerMappingVerified: boolean; providerAvailable: boolean; sessionCalendarVerified: boolean }): Promise<void> {
+  await authenticatedBackendRequest('/api/v1/admin/markets/coverage', { method: 'PUT', body: JSON.stringify(input) });
+}
+
+export async function probeMarkets(symbol: string): Promise<MarketAvailabilityRecord[]> {
+  const payload = await authenticatedBackendRequest<{ markets: MarketAvailabilityRecord[] }>('/api/v1/admin/markets/probe', { method: 'POST', body: JSON.stringify({ symbol }) });
   return payload.markets;
 }
 
@@ -356,6 +389,23 @@ export async function fetchTraderOverview(): Promise<TraderOverview> {
 
 export async function refreshTraderPlans(): Promise<{ plans: TraderPlan[]; watchlist: Array<{ bias: string; regime: string; keyLevels: number[]; qualityScore: number; reason: string }>; count: number }> {
   return authenticatedBackendRequest('/api/v1/trader/plans/refresh', { method: 'POST' });
+}
+
+export interface ResearchExperimentRegistration {
+  name: string;
+  hypothesis: string;
+  datasetId: string;
+  parameters: { setupType: string; testStartTime: number; transactionCostRate: number; slippageRate: number };
+}
+
+export async function registerResearchExperiment(input: ResearchExperimentRegistration): Promise<{ id: string; status: string }> {
+  return authenticatedBackendRequest('/api/v1/research/experiments', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export async function runResearchExperiment(id: string, symbol: string): Promise<Record<string, unknown>> {
+  return authenticatedBackendRequest(`/api/v1/research/experiments/${encodeURIComponent(id)}/run`, {
+    method: 'POST', body: JSON.stringify({ symbol, timeframe: '15m', historyLimit: 1000 }),
+  });
 }
 
 export interface TraderAutopilotSettings {

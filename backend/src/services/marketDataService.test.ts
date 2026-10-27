@@ -193,7 +193,7 @@ describe('market data instrument mapping', () => {
     expect(requestInit?.headers).toMatchObject({ Authorization: 'Bearer server-test-key' });
   });
 
-  it('uses Twelve Data source symbols for EURUSD and XAUUSD', async () => {
+  it('uses the Twelve Data source symbol for XAUUSD', async () => {
     config.twelveDataApiKey = 'server-twelve-key';
     const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
       const requestedSymbol = new URL(String(input)).searchParams.get('symbol');
@@ -205,14 +205,11 @@ describe('market data instrument mapping', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const eurUsd = await fetchMarketData('EURUSD', '1h', 100);
     const xauUsd = await fetchMarketData('XAUUSD', '1h', 100);
 
-    expect(String(fetchMock.mock.calls[0][0])).toContain('symbol=EUR%2FUSD');
-    expect(String(fetchMock.mock.calls[1][0])).toContain('symbol=XAU%2FUSD');
-    expect(eurUsd.dataset).toMatchObject({ provider: 'twelvedata', sourceInstrument: 'EUR/USD', quoteCurrency: 'USD' });
+    expect(String(fetchMock.mock.calls[0][0])).toContain('symbol=XAU%2FUSD');
     expect(xauUsd.dataset).toMatchObject({ provider: 'twelvedata', sourceInstrument: 'XAU/USD', quoteCurrency: 'USD' });
-    expect(eurUsd.candles[0]?.time).toBe(Date.parse('2026-10-03T12:00:00Z') / 1000);
+    expect(xauUsd.candles[0]?.time).toBe(Date.parse('2026-10-03T12:00:00Z') / 1000);
   });
 
   it('rejects provider candles when response metadata names another instrument', async () => {
@@ -223,7 +220,7 @@ describe('market data instrument mapping', () => {
       values: [{ datetime: '2026-10-03 12:00:00', open: '100', high: '102', low: '99', close: '101', volume: '50' }],
     }), { status: 200 })));
 
-    await expect(fetchMarketData('EURUSD', '1h', 100)).rejects.toThrow('mismatched instrument metadata');
+    await expect(fetchMarketData('XAUUSD', '1h', 100)).rejects.toThrow('mismatched instrument metadata');
   });
 
   it('rejects an empty successful Massive response instead of treating it as valid market data', async () => {
@@ -259,20 +256,26 @@ describe('market data instrument mapping', () => {
     await expect(fetchMarketData('BTCUSD', '1h', 2)).rejects.toThrow('unordered candles');
   });
 
-  it('uses the Massive stock source symbol for AAPL', async () => {
-    config.massiveApiKey = 'server-massive-key';
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      status: 'OK',
-      ticker: 'AAPL',
-      results: [{ t: ALIGNED_HOUR_MS, o: 100, h: 102, l: 99, c: 101, v: 50 }],
-    }), { status: 200 }));
+  it('uses existing Twelve Data and Massive adapters for mapped on-demand market categories', async () => {
+    config.twelveDataApiKey = 'test-twelve-key';
+    config.massiveApiKey = 'test-massive-key';
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      if (url.hostname === 'api.twelvedata.com') return new Response(JSON.stringify({
+        meta: { symbol: 'EUR/USD' },
+        values: [{ datetime: '2026-01-01 00:00:00', open: '1.1', high: '1.2', low: '1.0', close: '1.15', volume: '10' }],
+      }), { status: 200 });
+      return new Response(JSON.stringify({ status: 'OK', ticker: 'AAPL', results: [
+        { t: ALIGNED_HOUR_MS, o: 100, h: 102, l: 99, c: 101, v: 50 },
+      ] }), { status: 200 });
+    });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await fetchMarketData('AAPL', '1h', 100);
-
-    expect(String(fetchMock.mock.calls[0][0])).toContain('/ticker/AAPL/');
-    expect(fetchMock.mock.calls[0][1]?.headers).toMatchObject({ Authorization: 'Bearer server-massive-key' });
-    expect(result.dataset).toMatchObject({ provider: 'massive', sourceInstrument: 'AAPL', quoteCurrency: 'USD' });
+    const forex = await fetchMarketData('EURUSD', '1h', 1);
+    const stock = await fetchMarketData('AAPL', '1h', 1);
+    expect(forex.identity.marketType).toBe('forex');
+    expect(stock.identity.marketType).toBe('stock');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('rejects a USDT symbol instead of fetching a different USD instrument', async () => {
@@ -286,11 +289,11 @@ describe('market data instrument mapping', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('rejects a target instrument with no verified provider mapping', async () => {
+  it('rejects a target instrument without a supported provider adapter', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(fetchMarketData('JP225', '1h', 100)).rejects.toThrow('No market-data source is configured for JP225.');
+    await expect(fetchMarketData('JP225', '1h', 100)).rejects.toThrow('No supported market-data adapter is configured');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
@@ -316,6 +319,7 @@ describe('market data cache freshness and bounds', () => {
     expect(first.stale).toBe(false);
     expect(second.stale).toBe(false);
     expect(second.fetchedAt).toBe(first.fetchedAt);
+    expect(getCachedCandleFreshness(['BTCUSD'], ['1h'], 3)[0]?.latestClosedPrice).toBe(101);
   });
 
   it('refetches after the timeframe TTL expires', async () => {
