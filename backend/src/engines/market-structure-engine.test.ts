@@ -154,6 +154,7 @@ describe('marketStructureEngine', () => {
       });
       const result = masterDecisionEngine.analyze(context);
       expect(result.result.decision).toBe('NO_TRADE');
+      expect(result.result.marketBias).toBe('buy');
       expect(result.result.explanation).toContain(`selected strategy ${selected.name}`);
     } finally {
       STRATEGY_REGISTRY.forEach((strategy, index) => { strategy.detect = originalDetectors[index]; });
@@ -174,6 +175,9 @@ describe('marketStructureEngine', () => {
       expect(result.result.stages.setupDetection.status).toBe('not_evaluated');
       expect(result.result.stages.entryConfirmation.status).toBe('not_confirmed');
       expect(result.result.stages.finalDecision.action).toBe('NO_TRADE');
+      expect(result.result.confidenceBreakdown?.factors).toHaveLength(8);
+      expect(result.result.confidenceBreakdown?.factors.reduce((sum, factor) => sum + factor.weight, 0)).toBeCloseTo(1);
+      expect(result.result.confidenceBreakdown?.riskBlocked).toBe(false);
       expect(result.result.entry).toBeUndefined();
       expect(result.result.invalidation).toBeUndefined();
       expect(result.result.targets).toBeUndefined();

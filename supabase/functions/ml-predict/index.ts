@@ -114,8 +114,12 @@ async function ensureModel(supabase: SupabaseClient, pair: string, timeframe: st
 // ---- Feature engineering ----
 // Computes the same feature set as the Python spec: multi-window returns, RSI, MACD,
 // MAs (20/50/200), Bollinger width, volume change, ATR.
-function computeFeatures(candles: Candle[]): { features: number[][]; labels: Array<number | null>; sampleIndices: number[]; forwardReturns: number[]; valid: boolean } {
-  return computeMlFeatures(candles as MlCandle[], { predictionHorizon: PRED_HORIZON, minimumMoveAtr: labelAtrMultiple() });
+function computeFeatures(candles: Candle[], includeUnlabeledTail = false): { features: number[][]; labels: Array<number | null>; sampleIndices: number[]; forwardReturns: number[]; valid: boolean } {
+  return computeMlFeatures(candles as MlCandle[], {
+    predictionHorizon: PRED_HORIZON,
+    minimumMoveAtr: labelAtrMultiple(),
+    includeUnlabeledTail,
+  });
 }
 
 interface ModelMetrics {
@@ -381,7 +385,7 @@ Deno.serve(async (req: Request) => {
       const token = authHeader.slice('Bearer '.length);
       const modelState = await ensureModel(supabase, pair, timeframe, token);
       const { candles, provider, quoteCurrency } = await fetchCandles(pair, timeframe, 1000, token);
-      const { features, valid } = computeFeatures(candles);
+      const { features, valid } = computeFeatures(candles, true);
       if (!valid || features.length === 0) return jsonResponse({ error: 'Insufficient data' }, 422, headers);
       const last = features[features.length - 1];
       const probUp = predictProba(modelState, last);

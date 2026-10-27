@@ -37,6 +37,12 @@ export interface BackendDecision {
     finalDecision: { action: 'NO_TRADE'; reason: string };
   };
   confidence: number;
+  confidenceBreakdown?: {
+    factors: Array<{ factor: string; score: number; weight: number; explanation: string }>;
+    contradictionPenalty: number;
+    riskBlocked: boolean;
+    dataQualityBlocked: boolean;
+  };
   entry?: number;
   invalidation?: number;
   targets?: { price: number }[];

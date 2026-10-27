@@ -29,6 +29,7 @@ export interface ConfidenceFactor {
 export interface ConfidenceAnalysis {
   overall: number; // 0..1
   factors: ConfidenceFactor[];
+  contradictionPenalty: number;
   riskBlocked: boolean;
   dataQualityBlocked: boolean;
   decisionDirection: 'buy' | 'sell' | 'neutral';
@@ -190,16 +191,17 @@ export const confidenceEngine: IntelligenceEngine<ConfidenceAnalysis> & {
     const finalConfidence = context.dataQualityBlocked || riskBlocked ? 0 : overall;
 
     // Contradictions reduce confidence proportionally to severity.
-    const contradictionPenalty = context.contradictions.reduce((sum, c) => {
+    const contradictionPenalty = Math.min(1, context.contradictions.reduce((sum, c) => {
       if (c.severity === 'high') return sum + 0.4;
       if (c.severity === 'medium') return sum + 0.2;
       return sum + 0.1;
-    }, 0);
+    }, 0));
     const reduced = Math.max(0, finalConfidence * (1 - contradictionPenalty));
 
     const result: ConfidenceAnalysis = {
       overall: reduced,
       factors,
+      contradictionPenalty,
       riskBlocked,
       dataQualityBlocked: context.dataQualityBlocked,
       decisionDirection: context.decisionDirection,

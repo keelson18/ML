@@ -3,7 +3,7 @@ import { aiReasoningEngine } from './ai-reasoning-engine';
 import type { EngineContext, EngineEvidence, EngineResult, IntelligenceEngine } from './contracts';
 import { analyzeMarketIntelligence } from './orchestrator';
 import { contradictionEngine } from './contradiction-engine';
-import { confidenceEngine } from './confidence-engine';
+import { confidenceEngine, type ConfidenceFactor } from './confidence-engine';
 import { historicalSimilarityEngine, type HistoricalCase } from './historical-similarity-engine';
 import { knowledgeIntelligenceEngine, type KnowledgeNode } from './knowledge-engine';
 import { mlIntelligenceEngine, type MLPredictionAnalysis } from './ml-engine';
@@ -49,6 +49,12 @@ export interface TradeDecision {
     finalDecision: { action: 'NO_TRADE'; reason: string };
   };
   confidence: number;
+  confidenceBreakdown?: {
+    factors: ConfidenceFactor[];
+    contradictionPenalty: number;
+    riskBlocked: boolean;
+    dataQualityBlocked: boolean;
+  };
   entry?: number;
   entryZone?: { low: number; high: number };
   invalidation?: number;
@@ -111,7 +117,8 @@ export const masterDecisionEngine: IntelligenceEngine<TradeDecision> & {
     const signals = market.strategy.result.signals;
     const selectedStrategy = market.strategy.result.selectedStrategy;
     const selectedSignals = signals.filter((signal) => signal.strategyId === selectedStrategy.id);
-    const scores = signalScore(selectedSignals);
+    const selectedScores = signalScore(selectedSignals);
+    const biasScores = signalScore(signals);
     const evidence = directionalEvidence(signals);
     const dataQualityBlocked = market.dataQuality.status !== 'ok'
       || market.dataQuality.result.freshnessStatus !== 'fresh'
@@ -120,9 +127,9 @@ export const masterDecisionEngine: IntelligenceEngine<TradeDecision> & {
       || !market.dataQuality.result.source;
     const strategyExecutionBlocked = market.strategy.result.executionFailures.length > 0;
 
-    const deterministicDirection = scores.buy > scores.sell && scores.buy > 0
+    const deterministicDirection = biasScores.buy > biasScores.sell && biasScores.buy > 0
       ? 'buy' as const
-      : scores.sell > scores.buy && scores.sell > 0
+      : biasScores.sell > biasScores.buy && biasScores.sell > 0
         ? 'sell' as const
         : 'neutral' as const;
     const mlDirection = ml?.result.prediction
@@ -155,7 +162,7 @@ export const masterDecisionEngine: IntelligenceEngine<TradeDecision> & {
       ...(strategyExecutionBlocked ? market.strategy.result.executionFailures.map((failure) => `${failure.strategy} (${failure.strategyId}) failed: ${failure.message}`) : []),
     ])];
 
-    const hasDirectionalEvidence = scores.buy > 0 || scores.sell > 0;
+    const hasDirectionalEvidence = selectedScores.buy > 0 || selectedScores.sell > 0;
     const hasHighContradiction = contradictionResult.result.blocksDecision;
     // A strategy signal establishes directional bias only. TradePlan detection and a
     // closed-candle trigger are separate planner/executor responsibilities; this API
@@ -234,6 +241,12 @@ export const masterDecisionEngine: IntelligenceEngine<TradeDecision> & {
         finalDecision: { action: 'NO_TRADE', reason: finalReason },
       },
       confidence,
+      confidenceBreakdown: {
+        factors: confidenceResult.result.factors,
+        contradictionPenalty: confidenceResult.result.contradictionPenalty,
+        riskBlocked: confidenceResult.result.riskBlocked,
+        dataQualityBlocked: confidenceResult.result.dataQualityBlocked,
+      },
       entry: undefined,
       entryZone: undefined,
       invalidation: undefined,

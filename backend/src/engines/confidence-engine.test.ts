@@ -17,6 +17,24 @@ describe('confidence engine calibration handling', () => {
       decisionDirection: 'neutral', modelProbability: 0.99, modelCalibrated: false,
     });
     expect(result.result.factors.find((factor) => factor.factor === 'model-calibration')?.score).toBe(0.5);
+    expect(result.result.factors).toHaveLength(8);
+    expect(result.result.factors.reduce((sum, factor) => sum + factor.weight, 0)).toBeCloseTo(1);
+  });
+
+  it('reports the bounded contradiction penalty used to reduce the aggregate score', () => {
+    const market = analyzeMarketIntelligence({ inputContextId: 'contradiction-penalty', symbol: 'BTCUSD', timeframe: '1h', candles });
+    const result = confidenceEngine.analyze({
+      inputContextId: 'contradiction-penalty', symbol: 'BTCUSD', timeframe: '1h', candles, market,
+      evidence: [], contradictions: [
+        { severity: 'high', detail: 'Strong opposing evidence.' },
+        { severity: 'high', detail: 'Second opposing signal.' },
+        { severity: 'medium', detail: 'Mixed evidence.' },
+      ],
+      riskApproved: true, portfolioApproved: true, dataQualityBlocked: false, decisionDirection: 'buy',
+    });
+
+    expect(result.result.contradictionPenalty).toBe(1);
+    expect(result.result.overall).toBe(0);
   });
 
   it('keeps confidence at zero when hard risk gates reject regardless of probability', () => {

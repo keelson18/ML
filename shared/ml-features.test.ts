@@ -35,6 +35,21 @@ describe('ML feature engineering', () => {
     expect(strict.labels.filter((label) => label !== null).length).toBeLessThan(permissive.labels.filter((label) => label !== null).length);
   });
 
+  it('can include the current candle for inference without inventing a forward label', () => {
+    const candles = flatCandles(320).map((candle, index) => {
+      const close = 100 + index * 0.1;
+      return { ...candle, open: close, close, high: close + 0.01, low: close - 0.01 };
+    });
+    const latest = candles.at(-1)!;
+    const previous = candles.at(-2)!;
+    const inference = computeMlFeatures(candles, { includeUnlabeledTail: true });
+
+    expect(inference.sampleIndices.at(-1)).toBe(candles.length - 1);
+    expect(inference.features.at(-1)?.[0]).toBeCloseTo(latest.close / previous.close - 1);
+    expect(inference.labels.at(-1)).toBeNull();
+    expect(Number.isNaN(inference.forwardReturns.at(-1))).toBe(true);
+  });
+
   it('rejects invalid label thresholds', () => {
     expect(() => computeMlFeatures(flatCandles(220), { minimumMoveAtr: Number.NaN })).toThrow('Minimum ATR move');
   });

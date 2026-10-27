@@ -249,6 +249,15 @@ small { font-size: var(--fs-xs); }
 .meter-track { height: 4px; overflow: hidden; border-radius: 99px; background: rgb(var(--border)); }
 .meter-track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, rgb(var(--primary) / 0.6), rgb(var(--primary))); }
 .evidence-meter small { display: block; margin-top: 6px; color: rgb(var(--muted)); font-size: var(--fs-xs); line-height: 1.4; }
+.confidence-breakdown { padding: 10px 0; border-bottom: 1px solid rgb(var(--border) / 0.65); }
+.confidence-breakdown summary { color: rgb(var(--primary)); font-size: var(--fs-xs); font-weight: 650; cursor: pointer; }
+.confidence-factor-list { display: grid; gap: 12px; padding-top: 12px; }
+.confidence-factor { display: grid; gap: 5px; }
+.confidence-factor-heading { display: flex; justify-content: space-between; gap: 8px; color: rgb(var(--text)); font-size: var(--fs-xs); text-transform: capitalize; }
+.confidence-factor-heading > strong { flex: 0 0 auto; color: rgb(var(--text)); font-variant-numeric: tabular-nums; }
+.confidence-factor-heading small { color: rgb(var(--muted)); font-size: var(--fs-2xs); font-weight: 500; text-transform: none; }
+.confidence-factor > small { color: rgb(var(--muted)); font-size: var(--fs-xs); line-height: 1.45; }
+.confidence-penalty { margin: 0; color: rgb(var(--warning)); font-size: var(--fs-xs); line-height: 1.45; }
 .command-empty.compact { min-height: 80px; font-size: var(--fs-xs); }
 .command-decision-bar { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 16px; min-height: 72px; padding: 12px 15px; border: 1px solid rgb(var(--border)); border-radius: 12px; background: rgb(var(--surface)); box-shadow: 0 4px 20px rgb(0 0 0 / 0.025); }
 .command-decision { display: flex; flex-direction: column; gap: 3px; min-width: 100px; }

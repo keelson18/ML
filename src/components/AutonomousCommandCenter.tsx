@@ -77,7 +77,34 @@ export default function AutonomousCommandCenter({ symbol, timeframe, candles, ca
 
         <aside className="command-panel evidence-panel">
           <PanelTitle label="EVIDENCE" icon={<ShieldCheck className="w-3.5 h-3.5" />} />
-          <Meter label={serverDecision ? 'Uncalibrated engine score' : 'Uncalibrated bias score'} value={confidence} />
+          <Meter
+            label={serverDecision ? 'Heuristic confidence · not calibrated' : 'Local bias strength · not calibrated'}
+            value={confidence}
+            detail={serverDecision ? 'Diagnostic score from evidence, data quality, regime, and risk factors; not a probability of success.' : 'Local indicator strength is context only and is not a calibrated probability.'}
+          />
+          {serverDecision?.confidenceBreakdown && <details className="confidence-breakdown">
+            <summary>How this score is calculated</summary>
+            <div className="confidence-factor-list">
+              {serverDecision.confidenceBreakdown.factors.map((factor) => (
+                <div key={factor.factor} className="confidence-factor">
+                  <div className="confidence-factor-heading">
+                    <span>{factor.factor.replaceAll('-', ' ')}</span>
+                    <strong>{Math.round(factor.score * 100)}% <small>· {Math.round(factor.weight * 100)}% weight</small></strong>
+                  </div>
+                  <div className="meter-track" role="meter" aria-label={`${factor.factor.replaceAll('-', ' ')} factor`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(factor.score * 100)}>
+                    <i style={{ width: `${Math.min(100, Math.max(0, factor.score * 100))}%` }} />
+                  </div>
+                  <small>{factor.explanation}</small>
+                </div>
+              ))}
+              {serverDecision.confidenceBreakdown.contradictionPenalty > 0 && <p className="confidence-penalty">
+                Contradictions reduced the aggregate by {Math.round(serverDecision.confidenceBreakdown.contradictionPenalty * 100)}%.
+              </p>}
+              {(serverDecision.confidenceBreakdown.riskBlocked || serverDecision.confidenceBreakdown.dataQualityBlocked) && <p className="confidence-penalty">
+                {serverDecision.confidenceBreakdown.riskBlocked ? 'A risk or portfolio gate is blocking confidence.' : 'Data quality is blocking confidence.'}
+              </p>}
+            </div>
+          </details>}
           {(serverDecision?.supportingEvidence ?? evidence.map((signal) => ({ source: signal.strategy, score: signal.confidence, explanation: signal.reason }))).map((item) => <Meter key={item.source} label={item.source} value={Math.round((item.score ?? 0) * 100)} detail={item.explanation} />)}
           {!evidence.length && <div className="command-empty compact">Evidence will appear after analysis.</div>}
           {serverDecision?.researchContext && <div className="mt-3 border-t border-border/60 pt-3" aria-label="AI Learning research context">
