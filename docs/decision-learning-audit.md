@@ -1,4 +1,4 @@
-﻿# Decision and Learning Fix Work Order
+# Decision and Learning Fix Work Order
 
 Implementation started 2026-10-13 after reading the attached master prompt in full. Branch `main`; initial HEAD `73e0e2d56bb197750859f7f81610b07e70460566`. The initial working tree was already dirty, including Admin health, auth, provider-budget, market-data, live-feed, schema-verification, and UI changes. Those changes were preserved; this report describes this work order's additions/edits, not the pre-existing owner changes.
 

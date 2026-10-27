@@ -1,4 +1,4 @@
-﻿begin;
+begin;
 select plan(16);
 select set_config('request.jwt.claim.role', 'service_role', true);
 select set_config('test.empty_account', 'test-empty-ledger:' || txid_current()::text, true);
