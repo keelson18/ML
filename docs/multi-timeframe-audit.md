@@ -1,4 +1,4 @@
-﻿# Multi-timeframe trading audit
+# Multi-timeframe trading audit
 
 **Audit date:** 2026-10-13  
 **Starting revision:** `68442132464aff2c74c5656f76243f7f904cdfab` on `main`  
