@@ -5,15 +5,24 @@ import {
   CrosshairMode,
   type ISeriesApi,
   type Time,
+  LineStyle,
 } from 'lightweight-charts';
 import type { Candle } from '../lib/types';
 import { normalizeCandles } from '../lib/chart-data';
 import { applyCandleUpdate } from '../lib/chart-feed';
 import { recordTiming } from '../lib/perf';
 
+interface OverlayLine {
+  type: 'line';
+  data: Array<{ time: number; value: number }>;
+  color?: string;
+  width?: number;
+}
+
 interface Props {
   candles: Candle[];
   theme: 'light' | 'dark';
+  overlays?: OverlayLine[];
 }
 
 const ANNOUNCE_INTERVAL_MS = 1000;
@@ -28,7 +37,21 @@ function toCandleBar(candle: Candle) {
   };
 }
 
-export default function PriceChart({ candles, theme }: Props) {
+function resolveThemeColors(theme: 'light' | 'dark') {
+  const root = typeof document !== 'undefined' ? getComputedStyle(document.documentElement) : null;
+  const palette = {
+    bg: root?.getPropertyValue('--bg').trim() || (theme === 'dark' ? '#14141a' : '#ffffff'),
+    text: root?.getPropertyValue('--text').trim() || (theme === 'dark' ? '#f3f4f6' : '#111827'),
+    muted: root?.getPropertyValue('--muted').trim() || (theme === 'dark' ? '#9696a5' : '#787887'),
+    border: root?.getPropertyValue('--border').trim() || (theme === 'dark' ? '#1e1e26' : '#f0f0f4'),
+    primary: root?.getPropertyValue('--primary').trim() || '#3b82f6',
+    success: root?.getPropertyValue('--success').trim() || '#22c55e',
+    danger: root?.getPropertyValue('--danger').trim() || '#ef4444',
+  };
+  return palette;
+}
+
+export default function PriceChart({ candles, theme, overlays = [] }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const appliedCandlesRef = useRef<Candle[]>([]);
@@ -43,32 +66,45 @@ export default function PriceChart({ candles, theme }: Props) {
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+    const colors = resolveThemeColors(theme);
     const chart = createChart(container, {
       width: Math.max(container.clientWidth, 1),
       height: Math.max(container.clientHeight, 1),
       layout: {
-        background: { type: ColorType.Solid, color: theme === 'dark' ? '#14141a' : '#ffffff' },
-        textColor: theme === 'dark' ? '#9696a5' : '#787887',
+        background: { type: ColorType.Solid, color: colors.bg },
+        textColor: colors.muted,
         fontFamily: '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif',
         fontSize: container.clientWidth < 1024 ? 14 : 12,
       },
       grid: {
-        vertLines: { color: theme === 'dark' ? '#1e1e26' : '#f0f0f4', style: 1 },
-        horzLines: { color: theme === 'dark' ? '#1e1e26' : '#f0f0f4', style: 1 },
+        vertLines: { color: colors.border, style: 1 },
+        horzLines: { color: colors.border, style: 1 },
       },
       crosshair: { mode: CrosshairMode.Normal },
-      rightPriceScale: { borderColor: theme === 'dark' ? '#2a2a34' : '#eaeaef' },
-      timeScale: { borderColor: theme === 'dark' ? '#2a2a34' : '#eaeaef', timeVisible: true },
+      rightPriceScale: { borderColor: colors.border },
+      timeScale: { borderColor: colors.border, timeVisible: true },
     });
     const candleSeries = chart.addCandlestickSeries({
-      upColor: '#22c55e',
-      downColor: '#ef4444',
+      upColor: colors.success,
+      downColor: colors.danger,
       borderVisible: false,
-      wickUpColor: '#22c55e',
-      wickDownColor: '#ef4444',
+      wickUpColor: colors.success,
+      wickDownColor: colors.danger,
     });
     candleSeriesRef.current = candleSeries;
     appliedCandlesRef.current = [];
+
+    for (const overlay of overlays) {
+      if (overlay.type !== 'line') continue;
+      const series = chart.addLineSeries({
+        color: overlay.color ?? colors.primary,
+        lineWidth: overlay.width ?? 2,
+        lineStyle: LineStyle.Solid,
+        lastValueVisible: true,
+        priceLineVisible: false,
+      });
+      series.setData(overlay.data.map((point) => ({ time: point.time as Time, value: point.value })));
+    }
 
     const updateSize = () => {
       if (!containerRef.current) return;
@@ -87,7 +123,7 @@ export default function PriceChart({ candles, theme }: Props) {
       chart.remove();
       candleSeriesRef.current = null;
     };
-  }, [theme]);
+  }, [theme, overlays]);
 
   useEffect(() => {
     const candleSeries = candleSeriesRef.current;
