@@ -1,4 +1,4 @@
-﻿import { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { History, Play, RefreshCw } from 'lucide-react';
 import type { Candle, Timeframe } from '../../lib/types';
 import PriceChart from '../PriceChart';
