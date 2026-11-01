@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react';
 import { History, Play, RefreshCw } from 'lucide-react';
 import type { Candle, Timeframe } from '../../lib/types';
-import PriceChart from '../PriceChart';
 import { runBacktest, type BacktestResult } from '../../lib/backtest/engine';
 import { getStrategy, getStrategyAvailability, STRATEGY_CATEGORIES, STRATEGY_REGISTRY, runStrategy } from '../../lib/strategies/index';
+
+// Deprecated: this exploratory page is intentionally not imported by the app shell.
+// The live backtesting experience is the canonical BacktestingCenter route in Dashboard.tsx.
 
 interface Props {
   candles: Candle[];
@@ -64,20 +66,18 @@ export default function ExploratoryBacktesting({ candles, timeframe, symbol, the
     }, 0);
   };
 
-  const equityCandles = useMemo(() => {
-    if (!result || !testCandles.length) return [];
-    const candles = result.equity.map((value, index) => {
-      const time = index === 0 ? testCandles[0].time : result.trades[index - 1]?.exitTime ?? testCandles[Math.min(index, testCandles.length - 1)].time;
-      const open = index === 0 ? value : result.equity[index - 1];
-      return { time, open, high: Math.max(open, value), low: Math.min(open, value), close: value, volume: 0 };
+  const equityPoints = useMemo(() => {
+    if (!result || !result.equity.length) return [];
+    const values = result.equity;
+    const minValue = Math.min(...values);
+    const maxValue = Math.max(...values);
+    const range = Math.max(maxValue - minValue, 1);
+    return values.map((value, index) => {
+      const x = values.length === 1 ? 50 : (index / (values.length - 1)) * 100;
+      const y = 100 - ((value - minValue) / range) * 100;
+      return `${x},${y}`;
     });
-    const finalTime = testCandles[testCandles.length - 1].time;
-    const finalEquity = result.equity[result.equity.length - 1];
-    if (finalTime > candles[candles.length - 1].time) {
-      candles.push({ time: finalTime, open: finalEquity, high: finalEquity, low: finalEquity, close: finalEquity, volume: 0 });
-    }
-    return candles;
-  }, [result, testCandles]);
+  }, [result]);
 
   const metrics = result && lastRun ? [
     { label: 'Win Rate', value: `${(result.metrics.winRate * 100).toFixed(1)}%`, color: 'text-success' },
@@ -102,7 +102,7 @@ export default function ExploratoryBacktesting({ candles, timeframe, symbol, the
           <p>Backtest one versioned strategy against the selected historical {symbol} candles using next-bar entries and a fixed holding period.</p>
         </div>
       </div>
-      <div role="note" className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-warning">Exploratory results only: this browser backtest does not model fees, spread, slippage, stop-based sizing, or a market benchmark. Risk-adjusted statistics are omitted until returns can be calculated at a validated time cadence.</div>
+      <div role="note" className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-warning">Exploratory results only: this browser backtest does not model fees, spread, slippage, or live execution; use the server-backed Backtesting Center for authoritative results.</div>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
         <Field id="backtest-strategy" label="Strategy">
@@ -124,20 +124,26 @@ export default function ExploratoryBacktesting({ candles, timeframe, symbol, the
         <Field id="backtest-capital" label="Initial Capital"><input id="backtest-capital" type="number" min="1" step="100" value={capitalInput} onChange={(event) => { setCapitalInput(event.target.value); setRunError(null); }} className="control-input" /></Field>
       </div>
 
-      {marketError && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning"><span>Market data unavailable: {marketError}</span><button type="button" onClick={onRetryMarketData} className="rounded border border-warning/40 px-2 py-1 font-medium hover:bg-warning/10">Retry feed</button></div>}
+      {marketError && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning"><span>Market data unavailable. {marketError}</span><button type="button" onClick={onRetryMarketData} className="rounded bg-warning/20 px-2 py-1 font-medium text-warning">Retry</button></div>}
       {marketLoading && <div role="status" className="text-xs text-muted">Loading historical candles for {symbol}…</div>}
 
       <div className="flex flex-wrap items-center gap-3">
-        <button onClick={runSelectedBacktest} disabled={running || !canRun} className="px-4 py-2 rounded-lg bg-primary text-black text-xs font-semibold disabled:opacity-50 flex items-center gap-2"><Play className="w-3.5 h-3.5" />{running ? 'Running...' : marketLoading ? 'Loading market data…' : marketError ? 'Market data unavailable' : canRun ? 'Run backtest' : selectedAvailability?.reason ?? `Need ${minimumTestCandles} candles`}</button>
+        <button onClick={runSelectedBacktest} disabled={running || !canRun} className="px-4 py-2 rounded-lg bg-primary text-black text-xs font-semibold disabled:opacity-50 flex items-center gap-2"><Play className="w-3.5 h-3.5" />{running ? 'Running…' : 'Run backtest'}</button>
         <span className="text-xs text-muted">Warmup: 60 bars · Holding period: 5 bars · No fees or slippage modeled</span>
       </div>
       {runError && <div role="alert" className="text-xs text-danger bg-danger/10 border border-danger/20 rounded-lg p-3">{runError}</div>}
 
-      <div className="grid grid-cols-3 lg:grid-cols-6 gap-3">{metrics.map((metric) => <div key={metric.label} className="bg-surface border border-border rounded-xl p-3"><div className="text-xs text-muted mb-1">{metric.label}</div><div className={`text-lg font-semibold tabular-nums ${metric.color}`}>{metric.value}</div></div>)}</div>
+      <div className="grid grid-cols-3 lg:grid-cols-6 gap-3">{metrics.map((metric) => <div key={metric.label} className="bg-surface border border-border rounded-xl p-3"><div className="text-xs text-muted">{metric.label}</div><div className={`mt-2 text-base font-semibold ${metric.color}`}>{metric.value}</div></div>)}</div>
 
       <section className="bg-surface border border-border rounded-xl p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-3"><h2 className="text-xs font-medium text-muted">Equity Curve</h2>{lastRun && <span className="text-xs text-muted">{getStrategy(lastRun.strategyId)?.name} · {lastRun.candleCount} candles · ${lastRun.capital.toLocaleString()}</span>}</div>
-        <div className="h-64 border border-border rounded-lg overflow-hidden">{running ? <div className="h-full flex items-center justify-center text-xs text-muted"><RefreshCw className="w-4 h-4 animate-spin mr-2" />Running simulation</div> : equityCandles.length ? <PriceChart candles={equityCandles} theme={theme} /> : <div className="h-full flex items-center justify-center text-xs text-muted">Run a backtest to render the equity curve.</div>}</div>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-3"><h2 className="text-xs font-medium text-muted">Equity Curve</h2>{lastRun && <span className="text-xs text-muted">{lastRun.strategyId} · {lastRun.capital} capital · {lastRun.candleCount} candles</span>}</div>
+        <div className="h-64 border border-border rounded-lg overflow-hidden bg-bg/70">
+          {running ? <div className="h-full flex items-center justify-center text-xs text-muted"><RefreshCw className="w-4 h-4 animate-spin mr-2" />Running simulation</div> : equityPoints.length ? (
+            <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full" aria-label="Equity curve line chart">
+              <path d={`M ${equityPoints.join(' L ')}`} fill="none" stroke="currentColor" strokeWidth="1.5" className="text-primary" />
+            </svg>
+          ) : <div className="h-full flex items-center justify-center text-xs text-muted">Run a backtest to render the equity curve.</div>}
+        </div>
       </section>
 
       <section className="bg-surface border border-border rounded-xl p-4">
