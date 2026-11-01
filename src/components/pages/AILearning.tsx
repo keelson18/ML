@@ -284,7 +284,7 @@ function JournalCard({ event }: { event: { id: string; title: string; detail: st
     {event.correlationId && <p className="mt-2 break-all text-[11px] text-muted">Correlation {event.correlationId}</p>}
     {(Object.keys(event.related).length > 0 || Object.keys(event.evidence).length > 0) && <details className="mt-2 text-xs">
       <summary className="cursor-pointer text-primary">Evidence and related records</summary>
-      <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-bg p-2 text-[10px] text-muted">{recordText({ related: event.related, evidence: event.evidence })}</pre>
+      <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-bg p-2 text-xs text-muted">{recordText({ related: event.related, evidence: event.evidence })}</pre>
     </details>}
   </article>;
 }

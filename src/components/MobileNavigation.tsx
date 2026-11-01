@@ -6,13 +6,12 @@ const PRIMARY: { tab: SidebarTab; label: string; icon: typeof Activity; adminOnl
   { tab: 'dashboard', label: 'Chart', icon: Activity },
   { tab: 'trader-desk', label: 'Trader', icon: ClipboardList },
   { tab: 'portfolio', label: 'Portfolio', icon: Briefcase },
-  { tab: 'ai-learning', label: 'AI Learning', icon: Brain, adminOnly: true },
+  { tab: 'ai-analysis', label: 'Research', icon: Brain },
 ];
 
 const MORE: { tab: SidebarTab; label: string; icon: typeof Activity; adminOnly?: boolean }[] = [
   { tab: 'terminal', label: 'Trading Terminal', icon: TrendingUp },
   { tab: 'markets', label: 'Markets', icon: BarChart3 },
-  { tab: 'ai-analysis', label: 'AI Analysis', icon: Brain },
   { tab: 'strategies', label: 'Strategies', icon: Zap },
   { tab: 'backtesting', label: 'Backtesting', icon: History },
   { tab: 'watchlists', label: 'Watchlists', icon: Star },

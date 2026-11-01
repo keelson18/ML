@@ -107,7 +107,7 @@ function MarketAvailabilityPanel() {
   const [markets, setMarkets] = useState<MarketAvailabilityRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [probing, setProbing] = useState(false);
-  const [probeSymbol, setProbeSymbol] = useState('BTCUSD');
+  const [probeSymbol, setProbeSymbol] = useState<string>(DEFAULT_TIER_A_SYMBOLS[0]);
   const [error, setError] = useState('');
   const [budgets, setBudgets] = useState<{ massive: ProviderBudgetStatus; twelveData: ProviderBudgetStatus } | null>(null);
   const [coverage, setCoverage] = useState<MarketCoverageRecord[]>([]);
