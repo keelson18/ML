@@ -4,6 +4,7 @@ import {
   ColorType,
   CrosshairMode,
   type ISeriesApi,
+  type LineWidth,
   type Time,
   LineStyle,
 } from 'lightweight-charts';
@@ -26,6 +27,16 @@ interface Props {
 }
 
 const ANNOUNCE_INTERVAL_MS = 1000;
+
+const LINE_WIDTHS: readonly LineWidth[] = [1, 2, 3, 4];
+
+/** Lightweight Charts only accepts 1–4; clamp arbitrary overlay widths to the nearest valid value. */
+function toLineWidth(width: number | undefined): LineWidth {
+  if (width === undefined || !Number.isFinite(width)) return 2;
+  return LINE_WIDTHS.reduce((best, candidate) => (
+    Math.abs(candidate - width) < Math.abs(best - width) ? candidate : best
+  ), 2);
+}
 
 function toCandleBar(candle: Candle) {
   return {
@@ -98,7 +109,7 @@ export default function PriceChart({ candles, theme, overlays = [] }: Props) {
       if (overlay.type !== 'line') continue;
       const series = chart.addLineSeries({
         color: overlay.color ?? colors.primary,
-        lineWidth: overlay.width ?? 2,
+        lineWidth: toLineWidth(overlay.width),
         lineStyle: LineStyle.Solid,
         lastValueVisible: true,
         priceLineVisible: false,

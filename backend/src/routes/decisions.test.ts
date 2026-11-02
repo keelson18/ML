@@ -4,7 +4,7 @@ import { AutonomousPipeline } from '../autonomy/pipeline';
 import { config } from '../config';
 import { decisionRoutes } from './decisions';
 
-const mocks = vi.hoisted(() => ({ fetchMarketData: vi.fn(), analyze: vi.fn(), availabilityStatus: 'verified' as 'verified' | 'unavailable' | 'unverified' }));
+const mocks = vi.hoisted(() => ({ fetchMarketData: vi.fn(), analyze: vi.fn(), appendAiLearningJournalEvent: vi.fn(), availabilityStatus: 'verified' as 'verified' | 'unavailable' | 'unverified' }));
 
 vi.mock('../services/marketDataService', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../services/marketDataService')>()),
@@ -13,6 +13,26 @@ vi.mock('../services/marketDataService', async (importOriginal) => ({
 vi.mock('../services/decisionService', () => ({ analyze: mocks.analyze }));
 vi.mock('../services/marketAvailability', () => ({
   getMarketAvailability: () => [{ symbol: 'BTCUSD', status: mocks.availabilityStatus, checkedAt: 1 }],
+}));
+// Deterministic tests: never reach Supabase. The research-context lookup and the
+// AI Learning journal write are network I/O; leaving them unmocked made this suite
+// flaky (5s timeout) when run under parallel load.
+vi.mock('../services/aiLearningJournal', () => ({
+  appendAiLearningJournalEvent: mocks.appendAiLearningJournalEvent,
+}));
+vi.mock('../db', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../db')>()),
+  getSupabaseClientWithToken: () => ({
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          eq: () => ({
+            in: () => ({ order: () => ({ limit: async () => ({ data: [], error: null }) }) }),
+          }),
+        }),
+      }),
+    }),
+  }),
 }));
 
 let lastClosedTime = 0;
@@ -67,6 +87,7 @@ describe('server-side decision analysis', () => {
     lastClosedTime = Math.floor(Date.now() / 3_600_000) * 3_600 - 3_600;
     mocks.fetchMarketData.mockImplementation(async () => series());
     mocks.analyze.mockImplementation(async () => ({ decision: { result: { decision: 'NO_TRADE' } } }));
+    mocks.appendAiLearningJournalEvent.mockResolvedValue('journal-event-id');
   });
 
   it('rejects candles sent from the browser', async () => {

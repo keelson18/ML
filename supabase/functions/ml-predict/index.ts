@@ -113,7 +113,7 @@ async function ensureModel(supabase: SupabaseClient, pair: string, timeframe: st
 
 // ---- Feature engineering ----
 // Computes the same feature set as the Python spec: multi-window returns, RSI, MACD,
-// MAs (20/50/200), Bollinger width, volume change, ATR.
+// MAs (20/50/200), volatility width, volume change, ATR.
 function computeFeatures(candles: Candle[], includeUnlabeledTail = false): { features: number[][]; labels: Array<number | null>; sampleIndices: number[]; forwardReturns: number[]; valid: boolean } {
   return computeMlFeatures(candles as MlCandle[], {
     predictionHorizon: PRED_HORIZON,

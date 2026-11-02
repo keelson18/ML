@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, ClipboardList, Clock3, RefreshCw, ShieldCheck } from 'lucide-react';
+import { Activity, AlertTriangle, ClipboardList, RefreshCw, ShieldCheck } from 'lucide-react';
 import PageFrame from '../PageFrame';
 import { fetchActiveEventBlackouts, fetchAutonomyStatus, fetchBackendHealth, fetchTraderAutopilot, fetchTraderHistory, fetchTraderOverview, fetchTraderPlans, refreshTraderPlans, runTraderAutopilotNow, updateTraderAutopilot, type AutonomyStatus, type BackendHealth, type EventBlackout, type TraderAutopilotRunResult, type TraderAutopilotSettings, type TraderOverview, type TraderPlan } from '../../lib/backend-api';
 import { MARKET_UNIVERSE } from '../../lib/markets';
@@ -11,8 +11,6 @@ type Journal = { id?: string; symbol?: string; setup_type?: string; outcome_r?: 
 type BiasRow = { bias: string; regime: string; keyLevels: number[]; qualityScore: number; reason: string };
 
 function money(value: number) { return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(value); }
-function sign(value: number) { return value >= 0 ? '+' : ''; }
-
 export default function TraderDesk() {
   const [plans, setPlans] = useState<TraderPlan[]>([]);
   const [overview, setOverview] = useState<TraderOverview | null>(null);
@@ -128,7 +126,7 @@ export default function TraderDesk() {
       </section>
 
       {eventCalendarError && <div role="alert" className="mb-5 rounded-xl border border-danger/30 bg-danger/10 p-3 text-sm text-danger">Event calendar health could not be verified. New entries are paused until the market calendar is refreshed.</div>}
-      {!!eventBlackouts.length && <div role="status" className="mb-5 rounded-xl border border-warning/30 bg-warning/10 p-3 text-sm text-warning"><strong>Event blackout active.</strong> {eventBlackouts.map((event) => `${event.title} (${event.ticker ?? 'market'})`).join(', ')}</div>}
+      {!!eventBlackouts.length && <div role="status" className="mb-5 rounded-xl border border-warning/30 bg-warning/10 p-3 text-sm text-warning"><strong>Event blackout active.</strong> {eventBlackouts.map((event) => `${event.title} (${event.asset_classes.join(', ') || 'market'})`).join(', ')}</div>}
       {!!overview?.staleSymbols.length && <div role="status" className="mb-5 rounded-xl border border-warning/30 bg-warning/10 p-3 text-sm text-warning">Stale price data: {overview.staleSymbols.join(', ')}</div>}
       {overview && <div role="status" className={`mb-5 rounded-xl border p-3 text-sm ${overview.ledgerStatus === 'broken' || !overview.reconciliation.ok ? 'border-danger/30 bg-danger/10 text-danger' : 'border-success/30 bg-success/10 text-success'}`}><strong>{overview.ledgerStatus === 'broken' || !overview.reconciliation.ok ? 'Ledger reconciliation issue' : 'Ledger verified'}</strong> · Expected equity {money(overview.reconciliation.expectedEquity)} · Actual equity {money(overview.reconciliation.actualEquity)} · Difference {money(overview.reconciliation.difference)}</div>}
       <section className="mb-6 rounded-xl border border-border bg-surface p-4" aria-labelledby="autopilot-title">

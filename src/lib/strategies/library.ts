@@ -366,7 +366,6 @@ export const STRATEGY_LIBRARY: Strategy[] = [
     if (closes[i - 1] > bands.upper[i - 1] && closes[i] <= bands.upper[i]) return emit('Volatility Expansion/Reversion', 'sell', 'Close re-entered the upper Bollinger band after an outside close.');
     return [];
   }, { defaultParameters: { period: 20, standardDeviations: 2 } }),
-
   makeStrategy('bos-continuation', 'BOS Continuation', 'Market Structure', 'institutional', 'Signals on a close crossing above/below the latest confirmed swing high/low in the direction of the break.', 20, (candles) => {
     const current = candles.at(-1)!;
     const previous = candles.at(-2)!;
@@ -615,7 +614,6 @@ export const STRATEGY_LIBRARY: Strategy[] = [
     if (current.close < range.low) return emit('ATR Compression → Breakout', 'sell', 'Close broke below the prior range after ATR(14) reached a 50-bar compression low.');
     return [];
   }, { defaultParameters: { atrPeriod: 14, compressionLookback: 50, breakoutLookback: 20 } }),
-
   makeStrategy('volatility-regime-transition', 'Volatility Regime Transition', 'Volatility', 'volatility', 'Detects a 20-bar Bollinger-width compression followed by width expansion >25%; direction follows close versus the band midpoint.', 45, (candles) => {
     const closes = candles.map((candle) => candle.close);
     const bands = bollinger(closes, 20, 2);

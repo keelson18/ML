@@ -117,8 +117,8 @@ export function computeFeatures(candles: Candle[]): FeatureVector {
     features['bb_middle'] = bb.middle[i];
     features['bb_lower'] = bb.lower[i];
     features['bb_width'] = bb.width[i];
-    features['bb_pct'] = bb.upper[i] !== bb.lower[i] 
-      ? (closes[i] - bb.lower[i]) / (bb.upper[i] - bb.lower[i]) 
+    features['bb_pct'] = bb.upper[i] !== bb.lower[i]
+      ? (closes[i] - bb.lower[i]) / (bb.upper[i] - bb.lower[i])
       : 0.5;
   }
 
@@ -204,4 +204,3 @@ export function computeFeatures(candles: Candle[]): FeatureVector {
 function opens(index: number, candles: Candle[]): number {
   return candles[index].open;
 }
-

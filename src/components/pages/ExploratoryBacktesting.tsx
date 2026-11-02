@@ -19,7 +19,7 @@ interface Props {
 
 type Range = 100 | 500 | 'all';
 
-export default function ExploratoryBacktesting({ candles, timeframe, symbol, theme, marketLoading, marketError, onRetryMarketData }: Props) {
+export default function ExploratoryBacktesting({ candles, timeframe, symbol, theme: _theme, marketLoading, marketError, onRetryMarketData }: Props) {
   const [capitalInput, setCapitalInput] = useState('10000');
   const [range, setRange] = useState<Range>(100);
   const [selectedStrategy, setSelectedStrategy] = useState(STRATEGY_REGISTRY[0].id);

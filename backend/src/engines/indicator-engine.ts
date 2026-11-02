@@ -1,5 +1,6 @@
 import { adx } from '../../../src/lib/indicators/adx';
-import { atr, bollinger, ema, macd, rsi, sma } from '../../../src/lib/indicators';
+
+import { atr, ema, macd, rsi, sma } from '../../../src/lib/indicators';
 import type { EngineContext, EngineEvidence, EngineResult, IntelligenceEngine } from './contracts';
 
 export interface IndicatorAnalysis {
@@ -12,7 +13,6 @@ export interface IndicatorAnalysis {
     atr?: number;
     atrPct?: number;
     adx?: number;
-    bollingerWidth?: number;
   };
   momentumState: 'bullish' | 'bearish' | 'neutral' | 'unknown';
   volatilityState: 'high' | 'normal' | 'low' | 'unknown';
@@ -66,7 +66,6 @@ export const indicatorIntelligenceEngine: IntelligenceEngine<IndicatorAnalysis> 
     const macdValues = macd(closes);
     const atrValues = atr(context.candles, 14);
     const adxValues = adx(context.candles, 14);
-    const bands = bollinger(closes, 20, 2);
     const latestPrice = context.candles[latestIndex]?.close;
     const latestAtr = finiteOrUndefined(atrValues[latestIndex]);
     const atrPct = latestAtr !== undefined && latestPrice > 0 ? latestAtr / latestPrice : undefined;
@@ -93,7 +92,6 @@ export const indicatorIntelligenceEngine: IntelligenceEngine<IndicatorAnalysis> 
         atr: latestAtr,
         atrPct,
         adx: finiteOrUndefined(adxValues.adx[latestIndex]),
-        bollingerWidth: finiteOrUndefined(bands.width[latestIndex]),
       },
       momentumState,
       volatilityState,

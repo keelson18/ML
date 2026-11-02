@@ -1,4 +1,4 @@
-import type { Candle, Side, Signal, Timeframe } from '../types';
+import type { Candle, Signal, Timeframe } from '../types';
 import { rsi, bollinger } from '../indicators';
 import { STRATEGY_LIBRARY } from './library';
 import { detectCandlestickPatterns } from '../patterns/candlestick-patterns';
@@ -24,7 +24,12 @@ export interface Strategy {
   detect: (candles: Candle[], timeframe: Timeframe, parameters?: StrategyParameters) => Signal[];
 }
 
-const bollingerStrategy: Strategy = {
+export const STRATEGY_CATEGORIES: StrategyCategory[] = [
+  'Trend', 'Momentum', 'Breakout', 'Mean Reversion', 'Market Structure', 'Liquidity',
+  'Price Action', 'Volume', 'Divergence', 'Volatility', 'Multi-factor / Confluence', 'Additional',
+];
+
+export const bollingerStrategy: Strategy = {
   id: 'bollinger-volatility',
   version: '1.1.0',
   name: 'Bollinger Volatility',
@@ -43,15 +48,10 @@ const bollingerStrategy: Strategy = {
     const lookback = width.slice(Math.max(0, i - squeezeLookback), i).filter(Number.isFinite);
     if (!lookback.length || !Number.isFinite(width[i])) return [];
     const isSqueeze = width[i] <= Math.min(...lookback) * 1.2;
-    const side: Side = closes[i] > upper[i] ? 'sell' : closes[i] < lower[i] ? 'buy' : isSqueeze && closes[i] > middle[i] ? 'buy' : isSqueeze && closes[i] < middle[i] ? 'sell' : 'neutral';
+    const side = closes[i] > upper[i] ? 'sell' : closes[i] < lower[i] ? 'buy' : isSqueeze && closes[i] > middle[i] ? 'buy' : isSqueeze && closes[i] < middle[i] ? 'sell' : 'neutral';
     return [signal('Bollinger Volatility', side, isSqueeze ? 0.5 : 0.45, side === 'buy' ? 'Volatility setup favors upside expansion' : side === 'sell' ? 'Volatility setup favors downside expansion' : 'Bollinger bands stable')];
   },
 };
-
-export const STRATEGY_CATEGORIES: StrategyCategory[] = [
-  'Trend', 'Momentum', 'Breakout', 'Mean Reversion', 'Market Structure', 'Liquidity',
-  'Price Action', 'Volume', 'Divergence', 'Volatility', 'Multi-factor / Confluence', 'Additional',
-];
 
 export const STRATEGY_REGISTRY: Strategy[] = [...STRATEGY_LIBRARY, bollingerStrategy];
 export const LIVE_STRATEGY_IDS = new Set(['ma-crossover', 'rsi-divergence', 'bollinger-volatility', 'trend-following', 'mean-reversion', 'donchian-breakout', 'support-resistance']);
@@ -170,6 +170,6 @@ export function selectBestStrategy(candles: Candle[], timeframe: Timeframe): Str
   return fallback;
 }
 
-function signal(strategy: string, side: Side, confidence: number, reason: string): Signal {
+function signal(strategy: string, side: 'buy' | 'sell' | 'neutral', confidence: number, reason: string): Signal {
   return { strategy, side, confidence, reason };
 }

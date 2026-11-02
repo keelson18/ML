@@ -29,7 +29,7 @@ describe('versioned configurable live strategies', () => {
   });
 
   it('publishes timeframe and parameter contracts for the active library strategies', () => {
-    const ids = ['ma-crossover', 'rsi-divergence', 'bollinger-volatility', 'trend-following', 'mean-reversion', 'donchian-breakout', 'support-resistance'];
+    const ids = ['ma-crossover', 'rsi-divergence', 'trend-following', 'mean-reversion', 'donchian-breakout', 'support-resistance'];
     for (const id of ids) {
       const strategy = getStrategy(id);
       expect(strategy?.version).toBe('1.1.0');
@@ -37,4 +37,5 @@ describe('versioned configurable live strategies', () => {
       expect(Object.keys(strategy?.defaultParameters ?? {}).length).toBeGreaterThan(0);
     }
   });
+
 });

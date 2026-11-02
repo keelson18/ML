@@ -689,7 +689,7 @@ describe('marketStructureEngine', () => {
     expect(result.status).toBe('ok');
     expect(result.result.latest.rsi).toEqual(expect.any(Number));
     expect(result.result.latest.atr).toEqual(expect.any(Number));
-    expect(result.result.latest.bollingerWidth).toEqual(expect.any(Number));
+    expect(result.result.latest.adx).toEqual(expect.any(Number));
   });
 
   it('returns only sufficiently similar historical cases with sample quality', () => {
