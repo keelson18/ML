@@ -3,6 +3,7 @@ import type { MLPrediction, Timeframe } from '../lib/types';
 import { readJsonSafe } from '../../shared/http';
 
 export interface CoachMessage { role: 'user' | 'assistant'; content: string }
+export interface CoachDecisionContext { symbol: string; timeframe: Timeframe }
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
@@ -66,7 +67,7 @@ export const mlApi = {
 };
 
 export const coachApi = {
-  async ask(messages: CoachMessage[]): Promise<{ reply: string }> {
-    return callEdgeFunction('kinetic-coach', { messages });
+  async ask(messages: CoachMessage[], decision?: CoachDecisionContext): Promise<{ reply: string }> {
+    return callEdgeFunction('kinetic-coach', { messages, decision });
   },
 };

@@ -1,10 +1,9 @@
 import type { FastifyInstance } from 'fastify';
-import { getMarket } from '../../../src/lib/markets';
+import { getMarket, isSupportedProductMarket } from '../../../src/lib/markets';
 import { config } from '../config';
 import { fetchMarketData, isTimeframe, MarketDataProviderError } from '../services/marketDataService';
-import { getMarketAvailability, recordProviderTimeframeAvailability, recordProviderTimeframeError, recordProviderUnavailable } from '../services/marketAvailability';
-import { canFetchHistoricalMarketData, getMarketCoverage, hasMarketCoverageOverride, marketCoverageAllowsFetch } from '../../../src/lib/market-coverage';
-import { refreshMarketCoverageOverrides } from '../services/marketCoverage';
+import { recordProviderTimeframeAvailability, recordProviderTimeframeError, recordProviderUnavailable } from '../services/marketAvailability';
+import { isMarketAccessBlocked } from '../services/marketRestrictions';
 import { formatServerTiming } from '../utils/server-timing';
 import { candleSeconds, selectClosedCandles } from '../trader/candle-math';
 import { traderConfig } from '../trader/config';
@@ -21,20 +20,14 @@ export async function marketRoutes(app: FastifyInstance) {
 
     const market = getMarket(symbol);
     if (!market) return reply.code(400).send({ error: 'Unknown market symbol.' });
+    if (!isSupportedProductMarket(market)) {
+      return reply.code(400).send({ error: 'This market is outside the supported product scope.' });
+    }
     if (!isTimeframe(timeframe)) return reply.code(400).send({ error: 'Invalid timeframe.' });
     if (!Number.isInteger(limit) || limit < 1 || limit > 1000) {
       return reply.code(400).send({ error: 'Limit must be an integer between 1 and 1000.' });
     }
-    await refreshMarketCoverageOverrides();
-    const availability = getMarketAvailability().find((market) => market.symbol === symbol);
-    const coverage = getMarketCoverage(market, availability);
-    const explicitBlock = hasMarketCoverageOverride(symbol) && coverage.tier === 'blocked';
-    if (!marketCoverageAllowsFetch(coverage.tier) && !canFetchHistoricalMarketData(market, explicitBlock)) {
-      return reply.code(403).send({ error: 'Market coverage is blocked.', reason: coverage.reason, tier: coverage.tier });
-    }
-    if (availability?.status === 'unavailable') {
-      return reply.code(404).send({ error: 'Market not available.' });
-    }
+    if (await isMarketAccessBlocked(symbol)) return reply.code(403).send({ error: 'Market access is disabled by an administrator.' });
     try {
       const providerStarted = performance.now();
       const series = await fetchMarketData(symbol, timeframe, limit);

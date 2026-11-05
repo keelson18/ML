@@ -20,12 +20,17 @@ provider registry (`massive`, `twelvedata`), validates responses, attaches prove
   `src/lib/markets.ts` lists indices with `provider: 'oanda'` (JP225, HK50, AUS200). `fetchMarketData`
   throws `No supported market-data adapter is configured` for these. Execution path: any UI request for
   these symbols → 502/error. Root cause: registry advertises unsupported providers.
+  **RESOLVED 2026-11-05:** the three instruments now declare `provider: 'unsupported'` with an operator
+  note; they remain discoverable but are excluded from every provider-supported surface.
 - F-1.2 (High, VERIFIED) — **`getTrackedMarkets()` is crypto-only.**
   `src/lib/markets.ts`: `export function getTrackedMarkets() { return getMarketsByType('crypto'); }`
   Hardcoded restriction. Root cause: leftover single-market-type assumption.
+  **RESOLVED 2026-11-05:** returns every active provider-supported market across all five classes.
 - F-1.3 (High, VERIFIED) — **Decision scope rejects forex/index/stock.**
   `backend/src/routes/decisions.ts`: `if (market.marketType !== 'crypto' && market.marketType !== 'commodity') return '...outside the supported crypto and commodities scope.'`
   Test `decisions.test.ts` locks this (`AAPL`, `EURUSD` → 400). Intentional but must be a documented product decision.
+  **RESOLVED 2026-11-05:** scope now follows provider capability; only markets without an adapter are rejected.
+  See [FIVE_ASSET_RESTORATION_REPORT_2026-11-05.md](FIVE_ASSET_RESTORATION_REPORT_2026-11-05.md).
 - Provider health, rate-limit budgets, stale-cache fallback: present and well-modeled (`providerBudget.ts`, `returnStaleOrThrow`).
 
 ## AREA 2 — Candle integrity (Critical)
@@ -58,8 +63,10 @@ candles and blocks stale/too-old data.
 
 ## AREA 4 — Instrument management (Critical)
 
-See F-1.1, F-1.2, F-1.3. Also: `planner.ts` gates on `symbol.endsWith('USD')` and `bias === 'bull'`
-(long-only) — correct for spot paper but a hardcoded coupling worth documenting.
+See F-1.1, F-1.2, F-1.3 (all resolved 2026-11-05). Also: `planner.ts` gated on `symbol.endsWith('USD')`
+and `bias === 'bull'` (long-only) — **RESOLVED 2026-11-05:** replaced by provider/session/settlement
+capability checks; the long-only limitation is now declared per instrument (`supportsPlanSide`) instead of a
+symbol-string assumption.
 
 ## AREA 5 — AI architecture (High)
 

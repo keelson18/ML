@@ -10,7 +10,7 @@ Status means: **authoritative** is read or written by active application paths; 
 | `shadow_trades` | authoritative | Projection of shadow signals. |
 | `paper_autopilot` | authoritative | Per-user enrollment, symbols, safety pause and run timestamp. |
 | `autopilot_settings` | authoritative | Database-owned per-user and global symbol caps. |
-| `market_coverage_overrides` | authoritative | Admin/MFA audited tier overrides; authenticated and anonymous direct table access is revoked, backend service reads the table, and writes go through `admin_set_market_coverage_tier`. Code defaults cover the registry when no override exists. |
+| `market_access_restrictions` | authoritative | Explicit administrator/MFA audited chart-access restrictions; direct table access is revoked and writes go through `admin_set_market_access_restriction`. |
 | `market_universe`, `assets` | authoritative | Active-symbol registry consulted during SQL enrollment. |
 | `admin_audit_events` | authoritative | Records privileged actions, including admin AI learning-note creation. |
 | `models`, `model_versions`, `model_evaluations`, `model_deployments` | authoritative | Admin-only model registry and review metadata. Authenticated reads are restricted by `is_current_user_admin()`; registry writes are service-side. |

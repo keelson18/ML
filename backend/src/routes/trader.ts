@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import type { Timeframe } from '../../../src/lib/types';
 import { MARKET_UNIVERSE } from '../../../src/lib/markets';
+import { isProviderSupportedMarket, paperEligibilityReason, paperSettlementEligible } from '../../../src/lib/marketCapabilities';
 import type { Market } from '../../../src/lib/types';
 import { getSupabaseClientWithToken } from '../db';
 import { config } from '../config';
@@ -18,7 +19,7 @@ import { hasFreshClosedCandleData } from '../trader/market-data-quality';
 import { reconcilePaperAccount } from '../trader/decision-ledger';
 import { getSupabaseClient } from '../db';
 import { paperAutopilotScheduler, isAutopilotSymbol, type PaperAutopilotConfig } from '../autonomy/paper-autopilot';
-import { refreshMarketCoverageOverrides } from '../services/marketCoverage';
+import { getBlockedMarketSymbols } from '../services/marketRestrictions';
 
 const listQuery = z.object({ status: z.enum(['WATCHING', 'ARMED', 'PENDING_ORDER', 'OPEN', 'MANAGING', 'CLOSED']).optional() }).strict();
 const historyQuery = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) }).strict();
@@ -32,7 +33,7 @@ export function selectVerifiedPlannerMarkets(selectedSymbols: readonly string[],
   const selected = new Set(selectedSymbols);
   const verified = new Set(availability.filter((market) => market.status === 'verified').map((market) => market.symbol));
   return MARKET_UNIVERSE.filter((market) => selected.has(market.symbol) && verified.has(market.symbol)
-    && market.isActive && market.marketType === 'crypto' && ['massive', 'twelvedata'].includes(market.provider) && market.priceCurrency === 'USD');
+    && market.isActive && isProviderSupportedMarket(market) && paperSettlementEligible(market));
 }
 
 async function accountLedgerStatus(accountId: string): Promise<'verified' | 'broken' | 'unavailable'> {
@@ -58,12 +59,12 @@ export async function traderRoutes(app: FastifyInstance) {
     config: { rateLimit: { max: config.marketRateLimitMax, timeWindow: config.rateLimitWindowMs } },
   }, async (request, reply) => {
     if (!request.accessToken || !request.authenticatedUserId) return reply.code(401).send({ error: 'Authentication required.' });
-    await refreshMarketCoverageOverrides();
     const { data, error } = await getSupabaseClientWithToken(request.accessToken).from('paper_autopilot')
       .select('account_id,enabled,symbols,paused_reason,last_run_at').eq('account_id', request.authenticatedUserId).maybeSingle();
     if (error) return reply.code(503).send({ error: 'Autopilot settings are unavailable; apply the paper core migration.' });
     const { data: limits } = await getSupabaseClientWithToken(request.accessToken).rpc('get_paper_autopilot_limits');
-    const availableSymbols = MARKET_UNIVERSE.filter((market) => isAutopilotSymbol(market.symbol)).map((market) => market.symbol);
+    const blockedSymbols = await getBlockedMarketSymbols(MARKET_UNIVERSE.map((market) => market.symbol));
+    const availableSymbols = MARKET_UNIVERSE.filter((market) => isAutopilotSymbol(market.symbol) && !blockedSymbols.has(market.symbol)).map((market) => market.symbol);
     return { enabled: Boolean(data?.enabled), symbols: data?.symbols ?? defaultAutopilotSymbols.filter((symbol) => availableSymbols.includes(symbol)),
       pausedReason: data?.paused_reason ?? null, lastRunAt: data?.last_run_at ?? null,
       availableSymbols,
@@ -77,11 +78,21 @@ export async function traderRoutes(app: FastifyInstance) {
     const parsed = autopilotUpdate.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Choose one or more supported symbols.' });
     if (!request.accessToken || !request.authenticatedUserId) return reply.code(401).send({ error: 'Authentication required.' });
-    await refreshMarketCoverageOverrides();
     if (new Set(parsed.data.symbols).size !== parsed.data.symbols.length) return reply.code(400).send({ error: 'Symbols must be unique.' });
+    const blockedSymbols = await getBlockedMarketSymbols(parsed.data.symbols);
     const unavailable = parsed.data.symbols.filter((symbol) => !isAutopilotSymbol(symbol)
+      || blockedSymbols.has(symbol)
       || getMarketAvailability().find((candidate) => candidate.symbol === symbol)?.status !== 'verified');
-    if (parsed.data.enabled && unavailable.length) return reply.code(409).send({ error: `Autopilot requires active, verified configured USD crypto markets: ${unavailable.join(', ')}.` });
+    if (parsed.data.enabled && unavailable.length) {
+      const reasons = unavailable.map((symbol) => {
+        const market = MARKET_UNIVERSE.find((candidate) => candidate.symbol === symbol);
+        if (!market) return `${symbol}: unknown instrument`;
+        if (blockedSymbols.has(symbol)) return `${symbol}: blocked by an administrator`;
+        if (!isProviderSupportedMarket(market)) return `${symbol}: ${paperEligibilityReason(market)}`;
+        return `${symbol}: provider availability is not verified`;
+      });
+      return reply.code(409).send({ error: `Autopilot requires active, verified, USD-settled markets: ${reasons.join('; ')}.` });
+    }
     const { data, error } = await getSupabaseClientWithToken(request.accessToken).rpc('set_paper_autopilot', {
       p_enabled: parsed.data.enabled, p_symbols: parsed.data.symbols,
     });

@@ -1,7 +1,10 @@
 import { MARKET_UNIVERSE } from '../../../src/lib/markets';
+import { providerAdapterFor, resolveSourceSymbol } from '../../../src/lib/marketCapabilities';
 import type { Market } from '../../../src/lib/types';
 
 // Lives outside src/live so config validation can use it without pulling streaming code into trader/engines.
+// Mappings are derived from the registry's assigned provider; a market is never indexed for a
+// provider it is not configured to use.
 
 function coinbaseProductFor(market: Market): string | undefined {
   if (market.marketType !== 'crypto' || market.quoteAsset !== 'USD') return undefined;
@@ -9,11 +12,8 @@ function coinbaseProductFor(market: Market): string | undefined {
 }
 
 function twelveDataSymbolFor(market: Market): string | undefined {
-  if (market.marketType === 'stock') return market.baseAsset;
-  if (market.provider === 'twelvedata' && (market.marketType === 'forex' || market.marketType === 'commodity')) {
-    return market.sourceSymbol ?? `${market.baseAsset}/${market.quoteAsset}`;
-  }
-  return undefined;
+  if (providerAdapterFor(market.provider) !== 'twelvedata') return undefined;
+  return resolveSourceSymbol(market) ?? undefined;
 }
 
 interface SymbolIndex {

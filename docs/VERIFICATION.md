@@ -1,5 +1,26 @@
 # Verification record
 
+## Five-asset-class restoration — 2026-11-05
+
+- Added `src/lib/marketCapabilities.ts` as the single authority for provider support, source mapping, session model, settlement currency, precision, tick size, and side eligibility. Every provider, planner, risk, autonomy, and UI consumer now asks it instead of assuming crypto/USD.
+- Removed the crypto/commodity-only gates in `getTrackedMarkets`, `selectVerifiedPlannerMarkets`, `isAutopilotSymbol`, `validateDecisionRequest`, the v1 probe list, `learning-research` run scope, `planner.ts` (`endsWith('USD')`), and `paperTradingService` (`priceCurrency !== 'USD'`).
+- Replaced those gates with explicit capabilities: provider adapter + resolvable source symbol for chart/analysis; additionally USD settlement for paper trading; additionally a configured exchange calendar for exchange-traded entries and plans.
+- Corrected registry/provider defects: the three OANDA-assigned indices no longer advertise an adapter that does not exist; `LiveSymbolMap` no longer indexes stocks for Twelve Data; index tickers are never guessed.
+- Added a session gate to stored-plan paper execution and to plan creation so exchange-traded instruments cannot fill or plan outside a configured session.
+- Markets, Watchlists, Trader Desk, and Administration now surface all five asset classes from the shared registry.
+- `npm test` **PASS** (83 files / 522 tests); `npm run typecheck`, `npm run backend:typecheck`, `npm run lint`, `npm run build`, and `npm run check:migration-versions` (58 files) **PASS**.
+- **NOT-VERIFIED:** no live provider probe, hosted-database migration, or browser runtime check was performed. Per-instrument provider entitlement is unproven, non-crypto session calendars are empty by default (so those entries remain blocked), and short paper execution plus non-USD FX conversion are still unimplemented. See [FIVE_ASSET_RESTORATION_REPORT_2026-11-05.md](FIVE_ASSET_RESTORATION_REPORT_2026-11-05.md).
+
+## Instrument coverage tier removal — 2026-11-05
+
+- Removed the Tier A/B/C coverage architecture. The market registry and provider adapters are now the only sources of instrument discovery and chart access; no coverage percentage, enrollment default, tier label, or tier-based scan restriction remains in runtime code.
+- `src/lib/market-coverage.ts`, `src/components/MarketCoverageBadge.tsx`, `src/lib/market-coverage.test.ts`, and `backend/src/services/marketCoverage.ts` were deleted. Coverage endpoints (`/api/v1/market/coverage`, `GET/PUT /api/v1/admin/markets/coverage`) and the frontend coverage API contracts were removed after locating all callers.
+- `supabase/migrations/20261102000000_market_access_restrictions.sql` introduces `market_access_restrictions` with the MFA/AAL2-protected `admin_set_market_access_restriction` function and `admin_audit_events` writes. Only legacy `blocked` rows are migrated; non-blocked tiers are not converted into restrictions. The legacy coverage table is retained for a verified rollout window and is no longer read by application code.
+- The same migration drops the `paper_autopilot_coverage_tier_guard` trigger and its function so tiers no longer control autonomous paper-trading eligibility. Autopilot still independently requires active USD crypto registry symbols, verified provider availability, fresh closed candles, strategy validation, risk approval, and ledger reconciliation.
+- Administrator restriction controls are available at `GET/PUT /api/v1/admin/markets/restrictions` and in the Administration market panel; unrestricted explicit blocks are still enforced for chart access and for autonomous eligibility.
+- `npm test` **PASS** (82 files / 503 tests); `npm run typecheck`, `npm run backend:typecheck`, `npm run lint`, `npm run build`, and `npm run check:migration-versions` (58 files) **PASS** (existing large-chunk warning remains).
+- **NOT-VERIFIED:** the new migration and pgTAP test `supabase/tests/market_access_restrictions.test.sql` have not been executed against a hosted database, and no live provider probe was run. Until the migration is applied, the restriction reader fails open so chart access is not blocked; explicit restrictions then take effect immediately.
+
 ## Chart layer removal — 2026-10-27
 
 - Removed chart rendering and controls for Structure, Zones, Signals, Trade Levels, Trades, plans, positions, and history drawings. Charts now receive candles and theme only; timeframe selection and analysis/risk/paper-trade services remain outside the chart.
@@ -32,7 +53,7 @@
 | Admin-only model RLS and added review SELECT policies | NOT-VERIFIED (migration pending) | Source definitions in `supabase/migrations/20261024000002_admin_ai_review_access.sql`; owner must apply migration and inspect `scripts/verify-schema.sql` output. No remote SQL was run. |
 | Focused and full checks | PASS (local checks) | `npm ci` completed; `npm run typecheck`, `npm run backend:typecheck`, `npm run lint`, and `npm run build` passed. Final `npm test`: 78 files, 480 tests passed. Build emitted the existing large-chunk warning. |
 
-## Builder Brief #10 — Phase 2: instrument coverage and budgeted scan
+## Builder Brief #10 — Phase 2: instrument coverage and budgeted scan (superseded by the 2026-11-05 coverage removal)
 
 | Requirement | Status | Evidence / check |
 | --- | --- | --- |

@@ -20,6 +20,9 @@ Back up `paper_sim_accounts` before applying the paper core migration. Compare t
 16. `20261023000000_persist_ml_model_artifacts.sql`
 17. `20261023000001_fenced_paper_autopilot_leases.sql`
 18. `20261025000000_restore_research_collection_state.sql`
+19. `20261102000000_market_access_restrictions.sql`
+
+`20261102000000_market_access_restrictions.sql` replaces coverage tiers with explicit administrator restrictions. It copies only legacy `blocked` rows into `market_access_restrictions`, drops the obsolete paper-autopilot coverage trigger, and revokes the retired tier RPC. The legacy `market_coverage_overrides` table is intentionally retained; remove it only in a later migration after confirming no deployment still depends on it. Run `supabase/tests/market_access_restrictions.test.sql` (pgTAP) after applying.
 
 The paper core, admin checkpoint, health, research governance, overlap protection, registration-window, immutable candle-collection, open-position management, ML artifact, fenced lease, and research-collection repair migrations are `20261015000000_quantum_paper_core.sql`, `20261016000000_admin_health_checkpoints.sql`, `20261017000000_health_empty_and_uncheckpointed_ledger.sql`, `20261018000000_immutable_research_runs.sql`, `20261019000000_reject_overlapping_research_holdouts.sql`, `20261020000000_research_holdout_registration_window.sql`, `20261021000000_accumulate_research_holdout_candles.sql`, `20261022000000_paper_autopilot_manage_open_positions_when_disabled.sql`, `20261023000000_persist_ml_model_artifacts.sql`, `20261023000001_fenced_paper_autopilot_leases.sql`, and `20261025000000_restore_research_collection_state.sql`, in that order after `20261014000000_coach_daily_budget.sql`. The filenames must have unique numeric versions; CI enforces this with `npm run check:migration-versions`.
 

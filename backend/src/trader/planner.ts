@@ -8,6 +8,9 @@ import type { HtfBias } from './constants';
 import { traderConfig } from './config';
 import type { PlannerInput, TradePlan } from './types';
 import { candleIndex, candleSeconds } from './candle-math';
+import { getMarket } from '../../../src/lib/markets';
+import { providerSupport, supportsPlanSide } from '../../../src/lib/marketCapabilities';
+import { evaluateMarketSession } from './sessions';
 
 export interface PlannerResult {
   plan?: TradePlan;
@@ -54,6 +57,12 @@ function uniqueLevels(candles: Candle[], symbol: string, timeframe: Timeframe, i
 }
 
 export function createTradePlan(input: PlannerInput): PlannerResult {
+  const market = getMarket(input.symbol);
+  if (!market) return { bias: 'unclear', regime: 'uncertain', keyLevels: [], qualityScore: 0, reason: `No plan: ${input.symbol} is not in the instrument registry.` };
+  const providerInfo = providerSupport(market);
+  if (!providerInfo.supported) return { bias: 'unclear', regime: 'uncertain', keyLevels: [], qualityScore: 0, reason: `No plan: ${providerInfo.reason}` };
+  const session = evaluateMarketSession(market);
+  if (!session.allowed) return { bias: 'unclear', regime: 'uncertain', keyLevels: [], qualityScore: 0, reason: `No plan: ${session.reason}` };
   const daily = input.htfCandles['1d'] ?? [];
   const fourHour = input.htfCandles['4h'] ?? [];
   const setupCandles = input.setupCandles;
@@ -75,10 +84,18 @@ export function createTradePlan(input: PlannerInput): PlannerResult {
   const latest = fourHour.at(-1);
   const levels = uniqueLevels(fourHour, input.symbol, '4h', `${input.datasetId}:levels`);
   const current = latest?.close;
-  const supported = bias === 'bull' && input.symbol.endsWith('USD');
+  const longEligible = supportsPlanSide(market, 'long');
+  const shortEligible = supportsPlanSide(market, 'short');
+  const supported = (bias === 'bull' && longEligible) || (bias === 'bear' && shortEligible);
   const keyLevels = current === undefined ? [] : levels.filter((level) => level < current).slice(-5);
   if (!supported || !latest || !Number.isFinite(current) || keyLevels.length === 0) {
-    return { bias, regime: 'uncertain', keyLevels, qualityScore: 0, reason: bias === 'unclear' ? 'No plan: higher-timeframe bias is unclear or disagrees.' : 'No plan: no eligible trend-pullback support level.' };
+    const unsupportedSide = bias === 'bear' && !shortEligible;
+    return {
+      bias, regime: 'uncertain', keyLevels, qualityScore: 0,
+      reason: bias === 'unclear' ? 'No plan: higher-timeframe bias is unclear or disagrees.'
+        : unsupportedSide ? `No plan: ${market.symbol} is long-only for USD spot paper accounts and short entries are disabled.`
+          : 'No plan: no eligible trend-pullback support level.',
+    };
   }
   const currentPrice = current as number;
   const triggerTimeframe = input.triggerTimeframe ?? traderConfig.TRIGGER_TIMEFRAMES[0] as Timeframe;

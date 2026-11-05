@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { z } from 'zod';
 import { MARKET_UNIVERSE } from '../../src/lib/markets';
+import { paperSettlementEligible } from '../../src/lib/marketCapabilities';
 import { twelveDataSymbol } from './domain/LiveSymbolMap';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -34,7 +35,6 @@ const internalSettings = {
   twelveDataBudgetMaxQueue: 10,
   twelveDataDailyCredits: 800,
   twelveDataTraderReservedCredits: 450,
-  tierBScanIntervalMs: 60_000,
   researchCollectionStartLeadMs: 300_000,
   liveFeed: {
     enabled: false,
@@ -124,7 +124,7 @@ export const config = {
 
 // Validate default and configured autonomy symbols against the active market registry.
 const activeSymbols = new Set(MARKET_UNIVERSE.filter((market) => market.isActive).map((market) => market.symbol));
-const eligibleAutonomyMarkets = MARKET_UNIVERSE.filter((market) => market.isActive && (market.marketType === 'crypto' || market.marketType === 'commodity'));
+const eligibleAutonomyMarkets = MARKET_UNIVERSE.filter((market) => market.isActive && paperSettlementEligible(market));
 export const defaultSymbol = eligibleAutonomyMarkets[0]?.symbol;
 if (!defaultSymbol || !activeSymbols.has(defaultSymbol)) throw new Error('The market registry must contain an active autonomous market.');
 export const autonomySymbols = eligibleAutonomyMarkets.map((market) => market.symbol);

@@ -11,7 +11,6 @@ select required.object_type, required.object_name,
                       and c.relname=case
                         when required.object_name='research_holdout_no_overlap' then 'research_holdout_claims'
                         when required.object_name='research_experiment_holdout_registration' then 'research_experiments'
-                        when required.object_name='paper_autopilot_coverage_tier_guard' then 'paper_autopilot'
                         else 'research_collection_candles'
                       end
                       and t.tgname=required.object_name and not t.tgisinternal) end as present
@@ -24,7 +23,7 @@ from (values
   ('table','research_runs'), ('table','research_results'), ('table','research_approvals'),
   ('table','research_holdout_claims'), ('table','strategy_promotions'),
   ('table','research_collection_state'), ('table','research_collection_candles'), ('table','paper_autopilot_leases'),
-  ('table','market_coverage_overrides'),
+  ('table','market_access_restrictions'),
   ('rpc','record_paper_account_update'), ('rpc','set_paper_autopilot'),
   ('rpc','list_enabled_paper_autopilots'), ('rpc','pause_paper_autopilot'),
   ('rpc','resume_paper_autopilot'), ('rpc','touch_paper_autopilot_run'), ('rpc','get_paper_autopilot_limits'),
@@ -34,11 +33,10 @@ from (values
   ('rpc','reject_overlapping_research_holdout'), ('rpc','validate_research_holdout_registration'),
   ('rpc','append_research_collection_batch'), ('rpc','claim_paper_autopilot_lease'),
   ('rpc','admin_create_learning_event'),
-  ('rpc','admin_set_market_coverage_tier'),
+  ('rpc','admin_set_market_access_restriction'),
   ('rpc','renew_paper_autopilot_lease'), ('rpc','release_paper_autopilot_lease'),
   ('trigger','research_holdout_no_overlap'), ('trigger','research_experiment_holdout_registration'),
-  ('trigger','research_collection_candles_immutable'), ('trigger','research_collection_candles_no_truncate'),
-  ('trigger','paper_autopilot_coverage_tier_guard')
+  ('trigger','research_collection_candles_immutable'), ('trigger','research_collection_candles_no_truncate')
 ) as required(object_type, object_name)
 order by object_type, object_name;
 
@@ -48,6 +46,6 @@ select table_name, grantee, privilege_type
 from information_schema.role_table_grants
 where table_schema = 'public'
   and table_name in ('models','model_versions','model_evaluations','model_deployments',
-    'learning_events','learning_experiments','learning_outcomes','research_experiments','market_coverage_overrides')
+    'learning_events','learning_experiments','learning_outcomes','research_experiments','market_access_restrictions')
   and grantee in ('anon','authenticated','service_role')
 order by table_name, grantee, privilege_type;

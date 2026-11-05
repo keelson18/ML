@@ -1,4 +1,5 @@
 import type { Market, MarketType } from './types';
+import { isProviderSupportedMarket, marketTypeLabel, paperSettlementEligible, providerSupport, settlementCurrency } from './marketCapabilities';
 
 // Full market universe — single source of truth for all instruments
 export const MARKET_UNIVERSE: Market[] = [
@@ -64,9 +65,11 @@ export const MARKET_UNIVERSE: Market[] = [
   { symbol: 'UK100', canonicalSymbol: 'UK100', sourceSymbol: 'I:UKX', baseAsset: 'UK100', quoteAsset: 'GBP', marketType: 'index', exchange: 'Massive', label: 'FTSE 100', provider: 'massive', category: 'European Indices', isActive: true },
   { symbol: 'GER40', canonicalSymbol: 'GER40', sourceSymbol: 'I:DAX', baseAsset: 'GER40', quoteAsset: 'EUR', marketType: 'index', exchange: 'Massive', label: 'DAX 40', provider: 'massive', category: 'European Indices', isActive: true },
   { symbol: 'FRA40', canonicalSymbol: 'FRA40', sourceSymbol: 'I:PX1', baseAsset: 'FRA40', quoteAsset: 'EUR', marketType: 'index', exchange: 'Massive', label: 'CAC 40', provider: 'massive', category: 'European Indices', isActive: true },
-  { symbol: 'JP225', baseAsset: 'JP225', quoteAsset: 'JPY', marketType: 'index', exchange: 'OANDA', label: 'Nikkei 225', provider: 'oanda', category: 'Asian Indices', isActive: true },
-  { symbol: 'HK50', baseAsset: 'HK50', quoteAsset: 'HKD', marketType: 'index', exchange: 'OANDA', label: 'Hang Seng', provider: 'oanda', category: 'Asian Indices', isActive: true },
-  { symbol: 'AUS200', baseAsset: 'AUS200', quoteAsset: 'AUD', marketType: 'index', exchange: 'OANDA', label: 'ASX 200', provider: 'oanda', category: 'Pacific Indices', isActive: true },
+  // No shared candle adapter exists for these venues, so they stay discoverable but are reported
+  // as unsupported rather than advertising a provider the application cannot serve.
+  { symbol: 'JP225', baseAsset: 'JP225', quoteAsset: 'JPY', marketType: 'index', exchange: 'OANDA', label: 'Nikkei 225', provider: 'unsupported', providerNote: 'No market-data adapter is configured for OANDA instruments.', category: 'Asian Indices', isActive: true },
+  { symbol: 'HK50', baseAsset: 'HK50', quoteAsset: 'HKD', marketType: 'index', exchange: 'OANDA', label: 'Hang Seng', provider: 'unsupported', providerNote: 'No market-data adapter is configured for OANDA instruments.', category: 'Asian Indices', isActive: true },
+  { symbol: 'AUS200', baseAsset: 'AUS200', quoteAsset: 'AUD', marketType: 'index', exchange: 'OANDA', label: 'ASX 200', provider: 'unsupported', providerNote: 'No market-data adapter is configured for OANDA instruments.', category: 'Pacific Indices', isActive: true },
 
   // ---- Stocks ----
   { symbol: 'AAPL', baseAsset: 'AAPL', quoteAsset: 'USD', marketType: 'stock', exchange: 'NASDAQ', label: 'Apple Inc.', provider: 'massive', category: 'Technology', sector: 'Consumer Electronics', isActive: true },
@@ -113,12 +116,50 @@ export function getMarketAvailabilityRevision(): number {
   return marketAvailabilityRevision;
 }
 
+// All five asset classes are part of the product universe. An instrument is only actionable when
+// its provider adapter and symbol mapping exist; availability never removes it from discovery.
+export const ALL_MARKET_TYPES: readonly MarketType[] = ['crypto', 'commodity', 'forex', 'index', 'stock'];
+
+export const SUPPORTED_PRODUCT_MARKET_TYPES: readonly MarketType[] = ALL_MARKET_TYPES;
+
+export function isSupportedProductMarket(market: Market): boolean {
+  return market.isActive && isProviderSupportedMarket(market);
+}
+
+export function getSupportedProductMarkets(): Market[] {
+  return MARKET_UNIVERSE.filter(isSupportedProductMarket);
+}
+
+export function getProviderSupportedMarkets(): Market[] {
+  return getSupportedProductMarkets();
+}
+
+export function getPaperTradableMarkets(): Market[] {
+  return MARKET_UNIVERSE.filter((market) => market.isActive && paperSettlementEligible(market));
+}
+
+export function getDiscoverableMarkets(): Market[] {
+  return MARKET_UNIVERSE.filter((market) => market.isActive);
+}
+
+export function getMarketProviderSupport(symbol: string) {
+  const market = getMarket(symbol);
+  return market ? providerSupport(market) : { supported: false, provider: null, sourceSymbol: null, reason: `Unknown instrument ${symbol}.` };
+}
+
+export function getMarketSettlementCurrency(symbol: string): string | null {
+  const market = getMarket(symbol);
+  return market ? settlementCurrency(market) : null;
+}
+
 export function getDefaultMarketSymbol(): string {
   return MARKET_UNIVERSE.find((market) => market.isActive)?.symbol ?? '';
 }
 
+// Instruments the analysis and trading surfaces may operate on: active, provider-mapped markets
+// of any asset class. Availability is reported separately and is not an access gate.
 export function getTrackedMarkets(): Market[] {
-  return getMarketsByType('crypto');
+  return MARKET_UNIVERSE.filter((market) => market.isActive && isProviderSupportedMarket(market));
 }
 
 // Lookup helpers
@@ -136,6 +177,10 @@ export function formatMarketPrice(symbol: string, price: number | null | undefin
   const currency = getMarket(symbol)?.priceCurrency ?? getMarket(symbol)?.quoteAsset;
   const formattedPrice = price.toLocaleString(undefined, { maximumFractionDigits });
   return currency === 'USD' ? `$${formattedPrice}` : `${formattedPrice} ${currency ?? ''}`.trim();
+}
+
+export function getMarketTypeLabel(type: MarketType): string {
+  return marketTypeLabel(type);
 }
 
 export function getMarketsByProvider(provider: string): Market[] {

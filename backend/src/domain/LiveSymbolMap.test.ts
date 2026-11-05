@@ -20,15 +20,18 @@ describe('live symbol mapping', () => {
     expect(internalSymbolFromTwelveData('EUR/USD')).toBe('EURUSD');
   });
 
-  it('maps stocks to their plain ticker on Twelve Data', () => {
-    expect(twelveDataSymbol('AAPL')).toBe('AAPL');
-    expect(internalSymbolFromTwelveData('AAPL')).toBe('AAPL');
+  it('does not index stocks for a provider they are not assigned to', () => {
+    expect(twelveDataSymbol('AAPL')).toBeUndefined();
+    expect(internalSymbolFromTwelveData('AAPL')).toBeUndefined();
+    expect(twelveDataSymbol('EURUSD')).toBe('EUR/USD');
   });
 
   it('never maps a symbol to the wrong provider', () => {
     expect(coinbaseProductId('EURUSD')).toBeUndefined();
     expect(coinbaseProductId('XAUUSD')).toBeUndefined();
-    expect(twelveDataSymbol('BTCUSD')).toBeUndefined();
+    expect(coinbaseProductId('AAPL')).toBeUndefined();
+    expect(twelveDataSymbol('BTCUSD')).toBe('BTC/USD');
+    expect(twelveDataSymbol('SPX500')).toBeUndefined();
   });
 
   it('leaves unmapped, index, legacy and unknown symbols unmapped', () => {

@@ -1,5 +1,6 @@
 // Holds server-side provider-verification state for registry instruments with existing adapters.
 import { MARKET_UNIVERSE } from '../../../src/lib/markets';
+import { isProviderSupportedMarket, providerSupport } from '../../../src/lib/marketCapabilities';
 import type { MarketDataProvider, Timeframe } from '../../../src/lib/types';
 import { config } from '../config';
 import { traderConfig } from '../trader/config';
@@ -33,12 +34,9 @@ export function marketProbeSpacingMs(
   return Math.max(minimumIntervalMs, Math.ceil(windowMs / standardRequestSlots));
 }
 
-const supportedMarkets = MARKET_UNIVERSE.filter((market) => market.isActive
-  && (market.provider === 'massive' || market.provider === 'twelvedata'));
-const probeableMarkets = supportedMarkets.filter((market) => ['crypto', 'commodity'].includes(market.marketType)
-  && (market.provider === 'twelvedata'
-    ? Boolean(market.sourceSymbol || (market.baseAsset && market.quoteAsset))
-    : Boolean(market.sourceSymbol)));
+const supportedMarkets = MARKET_UNIVERSE.filter((market) => market.isActive && isProviderSupportedMarket(market));
+// Every asset class with a real adapter and mapping is probeable; diagnostics are not crypto-only.
+const probeableMarkets = supportedMarkets;
 export function getProbeableMarketSymbols(): string[] {
   return probeableMarkets.map((market) => market.symbol);
 }
@@ -52,36 +50,24 @@ const requiredTimeframes = [...new Set<Timeframe>([
   ...traderConfig.TRIGGER_TIMEFRAMES as Timeframe[],
   traderConfig.MGMT_TIMEFRAME as Timeframe,
 ])];
-const statuses = new Map<string, MarketAvailability>(MARKET_UNIVERSE.filter((market) => market.isActive).map((market) => [market.symbol, {
-  symbol: market.symbol,
-  provider: market.provider === 'massive' || market.provider === 'twelvedata' ? market.provider : 'unsupported',
-  sourceInstrument: market.sourceSymbol ?? (market.provider === 'twelvedata'
-    ? `${market.baseAsset}/${market.quoteAsset}` : market.symbol),
-  status: 'unverified',
-  checkedAt: null,
-  reason: market.provider === 'massive' || market.provider === 'twelvedata' ? 'No successful provider check has been recorded in this backend process.' : `No shared candle adapter is configured for ${market.provider}.`,
-}]));
+const statuses = new Map<string, MarketAvailability>(MARKET_UNIVERSE.filter((market) => market.isActive).map((market) => {
+  const support = providerSupport(market);
+  return [market.symbol, {
+    symbol: market.symbol,
+    provider: support.supported && support.provider ? support.provider : 'unsupported',
+    sourceInstrument: support.sourceSymbol ?? market.symbol,
+    status: 'unverified',
+    checkedAt: null,
+    reason: support.supported ? 'No successful provider check has been recorded in this backend process.' : support.reason,
+  }];
+}));
 let probeInProgress: Promise<MarketAvailability[]> | null = null;
-const lastTierBScans = new Map<string, number>();
 
 export class MarketProbeInProgressError extends Error {
   constructor() {
     super('Another market availability probe is already running.');
     this.name = 'MarketProbeInProgressError';
   }
-}
-
-export function recordTierBScan(symbol: string, timeframe: '1h' | '4h', checkedAt = Date.now()): void {
-  lastTierBScans.set(`${symbol}:${timeframe}`, checkedAt);
-}
-
-export function getTierBLastScannedAt(symbol: string): number | null {
-  return [...lastTierBScans.entries()].filter(([key]) => key.startsWith(`${symbol}:`))
-    .reduce<number | null>((latest, [, checkedAt]) => latest === null ? checkedAt : Math.max(latest, checkedAt), null);
-}
-
-export function getTierBTimeframeLastScannedAt(symbol: string, timeframe: '1h' | '4h'): number | null {
-  return lastTierBScans.get(`${symbol}:${timeframe}`) ?? null;
 }
 
 function providerProbeSpacingMs(provider: MarketDataProvider): number {
@@ -247,10 +233,11 @@ export async function probeAllMarkets(
         }
       }
       const status = aggregateAvailability(timeframes);
+      const support = providerSupport(market);
       statuses.set(market.symbol, {
         symbol: market.symbol,
-        provider: market.provider as MarketDataProvider,
-        sourceInstrument: market.sourceSymbol ?? `${market.baseAsset}/${market.quoteAsset}`,
+        provider: (support.provider ?? 'unsupported') as MarketDataProvider | 'unsupported',
+        sourceInstrument: support.sourceSymbol ?? market.symbol,
         status,
         checkedAt: Date.now(),
         reason: status === 'verified' ? undefined

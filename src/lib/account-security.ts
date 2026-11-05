@@ -35,6 +35,12 @@ export async function verifyTotp(factorId: string, code: string): Promise<void> 
   if (error) throw new Error('The authenticator code was not accepted.');
 }
 
+export async function verifyMfaChallenge(factorId: string, code: string): Promise<void> {
+  await verifyTotp(factorId, code);
+  const { error } = await supabase.auth.refreshSession();
+  if (error) throw new Error('MFA succeeded, but the session could not be refreshed. Retry the assurance check.');
+}
+
 export async function removeTotp(factorId: string, code: string): Promise<void> {
   await verifyTotp(factorId, code);
   const { data: assurance, error: assuranceError } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();

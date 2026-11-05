@@ -81,6 +81,22 @@ export interface Market {
   category?: string;
   sector?: string;
   isActive: boolean;
+  /** Instrument type within its asset class (e.g. spot crypto, index CFD, cash equity). */
+  instrumentType?: string;
+  /** Overrides the asset-class default when the venue has a distinct tick. */
+  tickSize?: number;
+  /** Decimal places used for display and risk rounding. */
+  pricePrecision?: number;
+  /** Units per contract for venues that trade contracts rather than units. */
+  contractSize?: number;
+  /** IANA timezone for the instrument's session calendar. */
+  sessionTimezone?: string;
+  /** Short selling is unavailable on the USD spot paper account unless declared. */
+  shortable?: boolean;
+  /** Timeframes the provider adapter can actually serve for this instrument. */
+  supportedTimeframes?: string[];
+  /** Operator-facing explanation when the provider mapping is missing or unsupported. */
+  providerNote?: string;
 }
 
 export interface MarketDataIdentity {

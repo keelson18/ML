@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Candle } from '../../../src/lib/types';
 import { createTradePlan, detectTrendPullbackSetup, rankPlannerResults, stablePlanId } from './planner';
+import { config } from '../config';
 
 const alignedBars = (count: number, step: number, lastTime: number): Candle[] => Array.from({ length: count }, (_, index) => ({
   time: lastTime - (count - index - 1) * step, open: 100, high: 102, low: 98, close: 101, volume: 1_000,
@@ -45,6 +46,33 @@ describe('Trader Desk planner', () => {
     });
     expect(result.plan).toBeUndefined();
     expect(result.reason).toContain('timeframe snapshots are incomplete');
+  });
+
+  it('refuses instruments without a provider adapter', () => {
+    const result = createTradePlan({
+      accountId: 'account-1', symbol: 'JP225',
+      htfCandles: { '1d': alignedBars(50, 86_400, 86_400), '4h': alignedBars(50, 14_400, 28_800) },
+      setupCandles: alignedBars(50, 3_600, 360_000), triggerCandles: alignedBars(50, 900, 360_000), datasetId: 'dataset-unsupported',
+    });
+    expect(result.plan).toBeUndefined();
+    expect(result.reason).toContain('No market-data adapter');
+  });
+
+  it('requires a configured exchange calendar before planning a non-continuous market', () => {
+    const original = config.marketSessionCalendar;
+    try {
+      for (const key of Object.keys(config.marketSessionCalendar)) delete config.marketSessionCalendar[key];
+      const result = createTradePlan({
+        accountId: 'account-1', symbol: 'AAPL',
+        htfCandles: { '1d': alignedBars(50, 86_400, 86_400), '4h': alignedBars(50, 14_400, 28_800) },
+        setupCandles: alignedBars(50, 3_600, 360_000), triggerCandles: alignedBars(50, 900, 360_000), datasetId: 'dataset-no-calendar',
+      });
+      expect(result.plan).toBeUndefined();
+      expect(result.reason).toContain('No plan:');
+      expect(result.reason.split('No plan:')[1]).toContain('calendar');
+    } finally {
+      Object.assign(config.marketSessionCalendar, original);
+    }
   });
 
   it('ranks watchlist candidates by quality before applying the configured cap', () => {

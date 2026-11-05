@@ -1,104 +1,69 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BarChart3, RefreshCw } from 'lucide-react';
+import { BarChart3, ExternalLink, RefreshCw } from 'lucide-react';
 import type { MarketType } from '../../lib/types';
-import { MARKET_TYPES } from '../../lib/types';
-import { getMarketsByType, getMarketAvailabilityRevision } from '../../lib/markets';
-import { fetchCanonicalMarketData, fetchMarketCoverage, type MarketCoverageRecord } from '../../lib/backend-api';
-import MarketCoverageBadge from '../MarketCoverageBadge';
+import { formatMarketPrice, getSupportedProductMarkets } from '../../lib/markets';
+import { fetchCanonicalMarketData } from '../../lib/backend-api';
 
-type Quote = { price: number; change: number };
+type Quote = { price: number; change: number; stale: boolean };
+const MARKET_TYPES: Array<{ value: MarketType; label: string }> = [
+  { value: 'crypto', label: 'Crypto' },
+  { value: 'commodity', label: 'Commodities' },
+  { value: 'forex', label: 'Forex' },
+  { value: 'index', label: 'Indices' },
+  { value: 'stock', label: 'Stocks' },
+];
 
 export default function MarketsPage() {
   const [selectedType, setSelectedType] = useState<MarketType>('crypto');
   const [page, setPage] = useState(0);
   const [quotes, setQuotes] = useState<Record<string, Quote>>({});
+  const [checkedSymbols, setCheckedSymbols] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [coverage, setCoverage] = useState<Record<string, MarketCoverageRecord>>({});
-  const [coverageLoaded, setCoverageLoaded] = useState(false);
-  const [coverageFailed, setCoverageFailed] = useState(false);
-  const quoteRequestId = useRef(0);
-  const availabilityRevision = getMarketAvailabilityRevision();
+  const [search, setSearch] = useState('');
+  const requestId = useRef(0);
   const markets = useMemo(() => {
-    void availabilityRevision;
-    return getMarketsByType(selectedType);
-  }, [selectedType, availabilityRevision]);
+    const query = search.trim().toLowerCase();
+    const instruments = getSupportedProductMarkets().filter((market) => market.marketType === selectedType);
+    return query ? instruments.filter((market) => market.symbol.toLowerCase().includes(query) || market.label.toLowerCase().includes(query)) : instruments;
+  }, [selectedType, search]);
   const pageSize = 12;
   const pageCount = Math.max(1, Math.ceil(markets.length / pageSize));
   const visibleMarkets = useMemo(() => markets.slice(page * pageSize, (page + 1) * pageSize), [markets, page]);
-  const marketTypeMeta = MARKET_TYPES.find((mt) => mt.value === selectedType);
 
-  useEffect(() => {
-    let active = true;
-    void fetchMarketCoverage().then((rows) => {
-      if (active) {
-        setCoverage(Object.fromEntries(rows.map((row) => [row.symbol, row])));
-        setCoverageLoaded(true);
-      }
-    }).catch(() => {
-      if (active) {
-        setCoverageFailed(true);
-        setCoverageLoaded(true);
-        setError('Instrument coverage could not be verified from the backend.');
-      }
-    });
-    return () => { active = false; };
-  }, []);
   const loadQuotes = useCallback(() => {
-    if (!coverageLoaded || coverageFailed) return;
-    const requestId = ++quoteRequestId.current;
+    const id = ++requestId.current;
     setLoading(true);
-    setQuotes({});
     setError(null);
     Promise.all(visibleMarkets.map(async (market) => {
       try {
-        if (!['A', 'B'].includes(coverage[market.symbol]?.tier ?? 'blocked')) return { symbol: market.symbol, quote: null };
         const response = await fetchCanonicalMarketData(market.symbol, '1d', 2);
-        const candles = response.candles;
-        if (candles.length < 1) return { symbol: market.symbol, quote: null };
-        const latest = candles[candles.length - 1];
-        const previous = candles[candles.length - 2];
-        return { symbol: market.symbol, quote: { price: latest.close, change: previous ? ((latest.close - previous.close) / previous.close) * 100 : 0 } };
+        const latest = response.candles.at(-1);
+        if (!latest) return { symbol: market.symbol, quote: null };
+        const previous = response.candles.at(-2);
+        return { symbol: market.symbol, quote: { price: latest.close, change: previous ? ((latest.close - previous.close) / previous.close) * 100 : 0, stale: response.stale } };
       } catch {
         return { symbol: market.symbol, quote: null };
       }
     })).then((results) => {
-      if (quoteRequestId.current === requestId) {
-        const usableEntries = results.filter((result): result is typeof result & { quote: Quote } => result.quote !== null);
-        setQuotes(Object.fromEntries(usableEntries.map(({ symbol, quote }) => [symbol, quote])));
-        const failures = results.length - usableEntries.length;
-        if (failures) setError(`${failures} of ${results.length} displayed quotes are unavailable from their configured providers. Check provider access or rate limits.`);
-      }
-    }).finally(() => { if (quoteRequestId.current === requestId) setLoading(false); });
-  }, [visibleMarkets, coverage, coverageLoaded, coverageFailed]);
+      if (requestId.current !== id) return;
+      const usable = results.filter((result): result is typeof result & { quote: Quote } => result.quote !== null);
+      setQuotes(Object.fromEntries(usable.map(({ symbol, quote }) => [symbol, quote])));
+      setCheckedSymbols(new Set(results.map(({ symbol }) => symbol)));
+      if (usable.length !== results.length) setError(`${results.length - usable.length} quote(s) are unavailable from configured providers.`);
+    }).finally(() => { if (requestId.current === id) setLoading(false); });
+  }, [visibleMarkets]);
 
-  useEffect(() => {
-    void loadQuotes();
-    return () => { quoteRequestId.current += 1; };
-  }, [loadQuotes]);
+  useEffect(() => { void loadQuotes(); return () => { requestId.current += 1; }; }, [loadQuotes]);
+  useEffect(() => { if (page >= pageCount) setPage(0); }, [page, pageCount]);
 
-  const quoteEntries = Object.entries(quotes);
-  const topGainer = quoteEntries.slice().sort((a, b) => b[1].change - a[1].change)[0];
-  const topLoser = quoteEntries.slice().sort((a, b) => a[1].change - b[1].change)[0];
-
-  return (
-    <div className="page-frame space-y-6">
-      <div className="page-heading"><div className="page-heading-copy"><div className="page-eyebrow"><BarChart3 className="w-3.5 h-3.5" /> Market overview</div><h1>Markets</h1><p>Browse supported instruments and the latest provider-backed daily quote where a data source is configured.</p></div><button type="button" onClick={() => void loadQuotes()} disabled={loading} className="p-2 rounded-lg hover:bg-surface text-muted disabled:opacity-50" title="Refresh quotes" aria-label="Refresh market quotes"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /></button></div>
-      <div className="flex gap-1 p-1 rounded-lg bg-surface border border-border w-fit max-w-full overflow-x-auto">{MARKET_TYPES.map((marketType) => <button key={marketType.value} onClick={() => { setSelectedType(marketType.value); setPage(0); }} className={`whitespace-nowrap px-3 py-1.5 rounded text-xs font-medium transition-colors ${selectedType === marketType.value ? 'bg-primary text-black' : 'text-muted hover:text-text'}`}>{marketType.icon} {marketType.label}</button>)}</div>
-      {error && <div role="alert" className="text-xs text-warning bg-warning/10 border border-warning/20 rounded-lg p-3">{error}</div>}
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Stat label="Supported Markets" value={String(markets.length)} />
-        <Stat label="Category" value={marketTypeMeta?.label ?? selectedType} />
-        <Stat label="Page Top Gainer" value={topGainer ? `${topGainer[0]} ${topGainer[1].change >= 0 ? '+' : ''}${topGainer[1].change.toFixed(2)}%` : loading ? 'Loading' : 'Unavailable'} tone={topGainer ? 'text-success' : 'text-muted'} />
-        <Stat label="Page Top Loser" value={topLoser ? `${topLoser[0]} ${topLoser[1].change.toFixed(2)}%` : loading ? 'Loading' : 'Unavailable'} tone={topLoser ? 'text-danger' : 'text-muted'} />
-      </div>
-
-      <div className="bg-surface border border-border rounded-xl overflow-hidden"><div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3 text-xs text-muted"><span>Showing {markets.length ? page * pageSize + 1 : 0}–{Math.min((page + 1) * pageSize, markets.length)} of {markets.length}</span><div className="flex items-center gap-2"><button type="button" onClick={() => setPage((current) => Math.max(0, current - 1))} disabled={page === 0 || loading} className="rounded border border-border px-2 py-1 disabled:opacity-40">Previous</button><span>Page {page + 1} of {pageCount}</span><button type="button" onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))} disabled={page >= pageCount - 1 || loading} className="rounded border border-border px-2 py-1 disabled:opacity-40">Next</button></div></div><div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr className="border-b border-border text-muted"><th className="text-left px-4 py-3 font-medium">Symbol</th><th className="text-left px-4 py-3 font-medium">Name</th><th className="text-left px-4 py-3 font-medium">Coverage</th><th className="text-right px-4 py-3 font-medium">Last Price</th><th className="text-right px-4 py-3 font-medium">1D</th><th className="text-left px-4 py-3 font-medium">Exchange</th><th className="text-left px-4 py-3 font-medium">Feed</th></tr></thead><tbody>{visibleMarkets.map((market) => { const quote = quotes[market.symbol]; return <tr key={market.symbol} className="border-b border-border/50 hover:bg-bg/50 transition-colors"><td className="px-4 py-3 font-medium">{market.symbol}</td><td className="px-4 py-3 text-muted">{market.label}</td><td className="px-4 py-3"><MarketCoverageBadge symbol={market.symbol} compact coverage={coverage[market.symbol]} verified={!coverageFailed} /></td><td className="px-4 py-3 text-right tabular-nums">{quote ? quote.price.toLocaleString(undefined, { maximumFractionDigits: 4 }) : '--'}</td><td className={`px-4 py-3 text-right tabular-nums ${quote ? quote.change >= 0 ? 'text-success' : 'text-danger' : 'text-muted'}`}>{quote ? `${quote.change >= 0 ? '+' : ''}${quote.change.toFixed(2)}%` : '--'}</td><td className="px-4 py-3 text-muted">{market.exchange}</td><td className="px-4 py-3"><span className={`px-1.5 py-0.5 rounded text-xs ${quote ? 'bg-success/10 text-success' : 'bg-bg text-muted'}`}>{quote ? 'Quoted' : 'No quote'}</span></td></tr>; })}{markets.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-muted">No supported markets found.</td></tr>}</tbody></table></div></div>
+  return <div className="page-frame space-y-6">
+    <div className="page-heading"><div className="page-heading-copy"><div className="page-eyebrow"><BarChart3 className="w-3.5 h-3.5" /> Market overview</div><h1>Markets</h1><p>Browse active cryptocurrency and commodity instruments with provider-backed data.</p></div><button type="button" onClick={() => void loadQuotes()} disabled={loading} className="rounded-lg p-2 text-muted hover:bg-surface disabled:opacity-50" aria-label="Refresh market quotes"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /></button></div>
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="flex gap-1 overflow-x-auto rounded-lg border border-border bg-surface p-1 w-fit">{MARKET_TYPES.map((type) => <button key={type.value} type="button" onClick={() => { setSelectedType(type.value); setPage(0); }} className={`whitespace-nowrap rounded px-3 py-1.5 text-xs font-medium ${selectedType === type.value ? 'bg-primary text-black' : 'text-muted hover:text-text'}`}>{type.label}</button>)}</div>
+      <label className="text-xs text-muted">Search<input type="search" value={search} onChange={(event) => { setSearch(event.target.value); setPage(0); }} placeholder="Symbol or name" className="ml-2 rounded-lg border border-border bg-bg px-2 py-1.5 text-xs text-text" /></label>
     </div>
-  );
-}
-
-function Stat({ label, value, tone = 'text-text' }: { label: string; value: string; tone?: string }) {
-  return <div className="bg-surface border border-border rounded-xl p-4"><div className="text-xs text-muted mb-1">{label}</div><div className={`text-sm font-semibold ${tone}`}>{value}</div></div>;
+    {error && <div role="alert" className="rounded-lg border border-warning/20 bg-warning/10 p-3 text-xs text-warning">{error}</div>}
+    <div className="overflow-hidden rounded-xl border border-border bg-surface"><div className="flex items-center justify-between border-b border-border px-4 py-3 text-xs text-muted"><span>{markets.length} supported instruments · Page {page + 1} of {pageCount}</span><div className="flex gap-2"><button type="button" onClick={() => setPage((value) => Math.max(0, value - 1))} disabled={page === 0} className="rounded border border-border px-2 py-1 disabled:opacity-40">Previous</button><button type="button" onClick={() => setPage((value) => Math.min(pageCount - 1, value + 1))} disabled={page >= pageCount - 1} className="rounded border border-border px-2 py-1 disabled:opacity-40">Next</button></div></div><div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr className="border-b border-border text-muted"><th className="px-4 py-3 text-left">Instrument</th><th className="px-4 py-3 text-right">Last price</th><th className="px-4 py-3 text-right">1D</th><th className="px-4 py-3 text-left">Data</th><th className="px-4 py-3 text-right">Chart</th></tr></thead><tbody>{visibleMarkets.map((market) => { const quote = quotes[market.symbol]; return <tr key={market.symbol} className="border-b border-border/50 hover:bg-bg/50"><td className="px-4 py-3"><strong>{market.symbol}</strong><div className="text-muted">{market.label} · {market.marketType}</div></td><td className="px-4 py-3 text-right tabular-nums">{quote ? formatMarketPrice(market.symbol, quote.price, 4) : '--'}</td><td className={`px-4 py-3 text-right tabular-nums ${quote ? quote.change >= 0 ? 'text-success' : 'text-danger' : 'text-muted'}`}>{quote ? `${quote.change >= 0 ? '+' : ''}${quote.change.toFixed(2)}%` : '--'}</td><td className="px-4 py-3">{quote ? <span className={quote.stale ? 'text-warning' : 'text-success'}>{quote.stale ? 'Stale' : 'Available'}</span> : <span className="text-muted">{!checkedSymbols.has(market.symbol) ? 'Checking…' : 'Unavailable'}</span>}<div className="text-[11px] text-muted">{market.provider}</div></td><td className="px-4 py-3 text-right"><button type="button" onClick={() => window.dispatchEvent(new CustomEvent('qi:navigate-market', { detail: { symbol: market.symbol } }))} aria-label={`Open ${market.symbol} chart`} className="rounded p-1 text-muted hover:text-primary"><ExternalLink className="h-4 w-4" /></button></td></tr>; })}</tbody></table></div></div>
+  </div>;
 }

@@ -293,7 +293,7 @@ describe('market data instrument mapping', () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(fetchMarketData('JP225', '1h', 100)).rejects.toThrow('No supported market-data adapter is configured');
+    await expect(fetchMarketData('JP225', '1h', 100)).rejects.toThrow('No supported market-data adapter is available for JP225');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

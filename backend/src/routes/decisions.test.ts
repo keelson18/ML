@@ -4,7 +4,13 @@ import { AutonomousPipeline } from '../autonomy/pipeline';
 import { config } from '../config';
 import { decisionRoutes } from './decisions';
 
-const mocks = vi.hoisted(() => ({ fetchMarketData: vi.fn(), analyze: vi.fn(), appendAiLearningJournalEvent: vi.fn(), availabilityStatus: 'verified' as 'verified' | 'unavailable' | 'unverified' }));
+const mocks = vi.hoisted(() => ({
+  fetchMarketData: vi.fn(),
+  analyze: vi.fn(),
+  appendAiLearningJournalEvent: vi.fn(),
+  availabilityStatus: 'verified' as 'verified' | 'unavailable' | 'unverified',
+  availabilitySymbols: ['BTCUSD'],
+}));
 
 vi.mock('../services/marketDataService', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../services/marketDataService')>()),
@@ -12,7 +18,7 @@ vi.mock('../services/marketDataService', async (importOriginal) => ({
 }));
 vi.mock('../services/decisionService', () => ({ analyze: mocks.analyze }));
 vi.mock('../services/marketAvailability', () => ({
-  getMarketAvailability: () => [{ symbol: 'BTCUSD', status: mocks.availabilityStatus, checkedAt: 1 }],
+  getMarketAvailability: () => mocks.availabilitySymbols.map((symbol) => ({ symbol, status: mocks.availabilityStatus, checkedAt: 1 })),
 }));
 // Deterministic tests: never reach Supabase. The research-context lookup and the
 // AI Learning journal write are network I/O; leaving them unmocked made this suite
@@ -84,6 +90,7 @@ describe('server-side decision analysis', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.availabilityStatus = 'verified';
+    mocks.availabilitySymbols = ['BTCUSD'];
     lastClosedTime = Math.floor(Date.now() / 3_600_000) * 3_600 - 3_600;
     mocks.fetchMarketData.mockImplementation(async () => series());
     mocks.analyze.mockImplementation(async () => ({ decision: { result: { decision: 'NO_TRADE' } } }));
@@ -107,21 +114,22 @@ describe('server-side decision analysis', () => {
     await app.close();
   });
 
-  it('rejects markets outside the supported instrument scope', async () => {
+  it('rejects markets whose registry provider has no adapter', async () => {
     const app = await createApp();
-    const response = await analyzeRequest(app, 'user-unconfigured', { symbol: 'AAPL', timeframe: '1h' });
+    const response = await analyzeRequest(app, 'user-unconfigured', { symbol: 'JP225', timeframe: '1h' });
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({ error: 'This market type is outside the supported crypto and commodities scope.' });
+    expect(String(response.json().error)).toContain('not supported by a configured provider adapter');
     expect(mocks.fetchMarketData).not.toHaveBeenCalled();
     await app.close();
   });
 
-  it('does not analyze forex instruments even when they exist in the internal catalog', async () => {
+  it('accepts every asset class that has a real provider adapter', async () => {
+    mocks.availabilitySymbols = ['AAPL', 'EURUSD', 'SPX500', 'XAUUSD'];
     const app = await createApp();
-    const response = await analyzeRequest(app, 'user-forex', { symbol: 'EURUSD', timeframe: '1h' });
-    expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({ error: 'This market type is outside the supported crypto and commodities scope.' });
-    expect(mocks.fetchMarketData).not.toHaveBeenCalled();
+    for (const [symbol, userId] of [['AAPL', 'user-stock'], ['EURUSD', 'user-forex'], ['SPX500', 'user-index'], ['XAUUSD', 'user-commodity']] as const) {
+      const response = await analyzeRequest(app, userId, { symbol, timeframe: '1h' });
+      expect({ symbol, status: response.statusCode }).toEqual({ symbol, status: 200 });
+    }
     await app.close();
   });
 

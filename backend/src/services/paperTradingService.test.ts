@@ -5,6 +5,7 @@ import { getSupabaseClient } from '../db';
 import type { TradePlan } from '../trader/types';
 import { traderConfig } from '../trader/config';
 import { calculatePositionSize } from '../trader/risk';
+import { config } from '../config';
 
 // Unit fixtures use historical synthetic candles; every normal fixture explicitly
 // represents an upstream freshness-approved candle unless the test overrides it.
@@ -14,7 +15,9 @@ const advanceStoredTradePlans: typeof advanceVerifiedTradePlans = (input) => adv
 });
 
 let availabilityStatus = 'verified';
-vi.mock('./marketAvailability', () => ({ getMarketAvailability: () => [{ symbol: 'BTCUSD', status: availabilityStatus, checkedAt: 1 }, { symbol: 'ETHUSD', status: availabilityStatus, checkedAt: 1 }] }));
+vi.mock('./marketAvailability', () => ({
+  getMarketAvailability: () => ['BTCUSD', 'ETHUSD', 'AAPL'].map((symbol) => ({ symbol, status: availabilityStatus, checkedAt: 1 })),
+}));
 vi.mock('./marketDataService', () => ({ fetchMarketData: vi.fn() }));
 vi.mock('../db', () => ({ getSupabaseClient: vi.fn() }));
 beforeEach(() => {
@@ -98,6 +101,43 @@ describe('backend paper position lifecycle', () => {
       expect((await getAccount(accountId)).positions).toHaveLength(0);
     } finally {
       availabilityStatus = 'verified';
+      traderConfig.PROMOTED_SETUP_TYPES = oldPromotions;
+    }
+  });
+
+  it('blocks exchange-traded entries outside a configured session and allows them inside it', async () => {
+    const accountId = `session-${Date.now()}`;
+    const oldPromotions = traderConfig.PROMOTED_SETUP_TYPES;
+    traderConfig.PROMOTED_SETUP_TYPES = ['trend-pullback'];
+    // 2026-01-07 is a Wednesday; 17:00 UTC is 12:00 in New York.
+    const time = Math.floor(Date.parse('2026-01-07T17:00:00Z') / 1000 / 900) * 900;
+    const plan: TradePlan = {
+      id: `plan-${accountId}`, accountId, symbol: 'AAPL', side: 'long', setupType: 'trend-pullback', htfBias: 'bull',
+      zone: { low: 98, high: 100 }, trigger: { kind: 'close_above_level', level: 100 }, invalidation: 95,
+      targets: [{ price: 120, fractionOfPosition: 1 }], minRR: 2, expiresAtBar: time / 900 + 20,
+      thesis: 'session test', falsification: 'close below stop', grade: 'A', status: 'WATCHING', contextSnapshot: {},
+      engineVersions: {}, datasetId: 'session-test', createdAt: new Date(time * 1000).toISOString(), updatedAt: new Date(time * 1000).toISOString(),
+    };
+    const candle = { time, open: 99, high: 101, low: 98, close: 101, volume: 100 };
+    const originalCalendar = { ...config.marketSessionCalendar };
+    try {
+      for (const key of Object.keys(config.marketSessionCalendar)) delete config.marketSessionCalendar[key];
+      await storeTradePlan(accountId, plan);
+      await advanceStoredTradePlans({ accountId, symbol: 'AAPL', timeframe: '15m', candle, candles: [candle], shadowMode: false });
+      expect((await getAccount(accountId)).tradePlans?.[0]?.lastReason).toMatch(/calendar/i);
+      expect((await getAccount(accountId)).positions).toHaveLength(0);
+
+      config.marketSessionCalendar.NASDAQ = {
+        timezone: 'America/New_York', open: '09:30', close: '16:00', weekdays: [1, 2, 3, 4, 5], holidays: [],
+        openAuctionBlackoutMinutes: 0, closeAuctionBlackoutMinutes: 0, scoreMultiplier: 1,
+      };
+      // A later closed candle is required: the first candle is already recorded as processed.
+      const next = { time: time + 900, open: 100, high: 105, low: 100, close: 104, volume: 100 };
+      const result = await advanceStoredTradePlans({ accountId, symbol: 'AAPL', timeframe: '15m', candle: next, candles: [candle, next], shadowMode: false });
+      expect(result.orders).toHaveLength(1);
+    } finally {
+      for (const key of Object.keys(config.marketSessionCalendar)) delete config.marketSessionCalendar[key];
+      Object.assign(config.marketSessionCalendar, originalCalendar);
       traderConfig.PROMOTED_SETUP_TYPES = oldPromotions;
     }
   });

@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { Activity, AlertTriangle, ClipboardList, RefreshCw, ShieldCheck } from 'lucide-react';
 import PageFrame from '../PageFrame';
 import { fetchActiveEventBlackouts, fetchAutonomyStatus, fetchBackendHealth, fetchTraderAutopilot, fetchTraderHistory, fetchTraderOverview, fetchTraderPlans, refreshTraderPlans, runTraderAutopilotNow, updateTraderAutopilot, type AutonomyStatus, type BackendHealth, type EventBlackout, type TraderAutopilotRunResult, type TraderAutopilotSettings, type TraderOverview, type TraderPlan } from '../../lib/backend-api';
-import { MARKET_UNIVERSE } from '../../lib/markets';
+import { getPaperTradableMarkets } from '../../lib/markets';
 
-const AUTOPILOT_MARKETS = MARKET_UNIVERSE.filter((market) => market.isActive && ['massive', 'twelvedata'].includes(market.provider) && market.marketType === 'crypto' && market.priceCurrency === 'USD');
+// Autopilot candidates come from the shared capability resolver: any asset class that settles in
+// USD with a real provider adapter. Availability is still verified server-side before enrollment.
+const AUTOPILOT_MARKETS = getPaperTradableMarkets();
 
 type Review = { review_date?: string; reviewDate?: string; metrics?: { sampleSize?: number; sampleWarning?: string; expectancyR?: number | null } };
 type Journal = { id?: string; symbol?: string; setup_type?: string; outcome_r?: number; r_multiple?: number; created_at?: string; status?: string; active_event_ids?: string[]; metrics?: { rMultiple?: number; maeR?: number | null; mfeR?: number | null; pnl?: number; exitReason?: string } };

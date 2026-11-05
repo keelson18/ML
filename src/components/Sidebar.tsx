@@ -56,7 +56,6 @@ export default function Sidebar({ activeTab, onTabChange, isAdmin, onSignOut }: 
       </nav>
 
       <div className="sidebar-footer">
-        <div className="sidebar-system"><span /> SYSTEM NOMINAL</div>
         <button type="button" onClick={onSignOut} className="sidebar-sign-out"><LogOut aria-hidden="true" /><span>Sign out</span></button>
         <p>Quantum Intelligence <b>v2.0</b></p>
       </div>

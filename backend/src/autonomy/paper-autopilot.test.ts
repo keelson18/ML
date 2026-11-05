@@ -1,18 +1,25 @@
 import { describe, expect, it, vi } from 'vitest';
-import { accountEntriesAllowed, entryCandleIsFresh, PaperAutopilotScheduler, prioritizeSeriesRequests, providerRequestSpacingMs, replayCandlesAfter, replaySequentialCandles, uniqueSeriesRequests, verifiedAutopilotSymbols } from './paper-autopilot';
+import { accountEntriesAllowed, eligibleAutopilotSymbols, entryCandleIsFresh, PaperAutopilotScheduler, prioritizeSeriesRequests, providerRequestSpacingMs, replayCandlesAfter, replaySequentialCandles, uniqueSeriesRequests, verifiedAutopilotSymbols } from './paper-autopilot';
 import { hasFreshClosedCandleData } from '../trader/market-data-quality';
 import { config } from '../config';
-import { setMarketCoverageOverrides } from '../../../src/lib/market-coverage';
+
+const restrictions = vi.hoisted(() => ({ blocked: [] as Array<{ symbol: string }> }));
 
 vi.mock('../db', () => ({
   getSupabaseClient: () => ({
-    from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { enabled: true, paused_reason: 'operator pause' }, error: null }) }) }) }),
+    from: (table: string) => table === 'market_access_restrictions'
+      ? { select: () => ({ in: () => ({ eq: async () => ({ data: restrictions.blocked, error: null }) }) }) }
+      : { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { enabled: true, paused_reason: 'operator pause' }, error: null }) }) }) },
   }),
 }));
 vi.mock('../services/marketAvailability', () => ({
   getMarketAvailability: () => [
     { symbol: 'BTCUSD', status: 'unverified', checkedAt: null },
     { symbol: 'ETHUSD', status: 'verified', checkedAt: 1 },
+    { symbol: 'AAPL', status: 'verified', checkedAt: 1 },
+    { symbol: 'SPX500', status: 'verified', checkedAt: 1 },
+    { symbol: 'XAUUSD', status: 'verified', checkedAt: 1 },
+    { symbol: 'USDJPY', status: 'verified', checkedAt: 1 },
   ],
 }));
 import { closePaperPosition, simulatePaperOrder, type PaperAccountState } from '../engines/paper-execution';
@@ -23,12 +30,19 @@ describe('paper autopilot scheduling helpers', () => {
     expect(verifiedAutopilotSymbols(['BTCUSD', 'ETHUSD', 'BTCUSD'])).toEqual(['ETHUSD']);
   });
 
-  it('keeps blocked coverage symbols out of per-user autopilot enrollment', () => {
-    setMarketCoverageOverrides([{ symbol: 'ETHUSD', tier: 'blocked', reason: 'owner block', providerMappingVerified: true, sessionCalendarVerified: true }]);
+  it('admits verified USD-settled instruments from every asset class but not non-USD settlement', () => {
+    expect(verifiedAutopilotSymbols(['ETHUSD', 'AAPL', 'SPX500', 'XAUUSD', 'USDJPY', 'JP225']))
+      .toEqual(['ETHUSD', 'AAPL', 'SPX500', 'XAUUSD']);
+  });
+
+  it('keeps explicitly administrator-restricted markets out of autonomous eligibility', async () => {
+    restrictions.blocked = [];
+    expect(await eligibleAutopilotSymbols(['BTCUSD', 'ETHUSD'])).toEqual(['ETHUSD']);
+    restrictions.blocked = [{ symbol: 'ETHUSD' }];
     try {
-      expect(verifiedAutopilotSymbols(['BTCUSD', 'ETHUSD'])).toEqual([]);
+      expect(await eligibleAutopilotSymbols(['BTCUSD', 'ETHUSD'])).toEqual([]);
     } finally {
-      setMarketCoverageOverrides([]);
+      restrictions.blocked = [];
     }
   });
 

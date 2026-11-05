@@ -3,18 +3,17 @@ import { randomUUID } from 'node:crypto';
 import { getMarket } from '../../../src/lib/markets';
 import { getSupabaseClient } from '../db';
 import { config } from '../config';
-import { fetchMarketData, getMassiveBudgetSnapshot, getTwelveDataBudgetSnapshot, MarketDataProviderError, type MarketDataSeries } from '../services/marketDataService';
+import { fetchMarketData, type MarketDataSeries } from '../services/marketDataService';
 import { advanceStoredTradePlans, getAccount, listStoredTradePlans, manageOpenPositions, storeTradePlan } from '../services/paperTradingService';
-import { getMarketAvailability, getTierBTimeframeLastScannedAt, recordProviderUnavailable, recordTierBScan } from '../services/marketAvailability';
+import { getMarketAvailability } from '../services/marketAvailability';
+import { getBlockedMarketSymbols } from '../services/marketRestrictions';
+import { paperSettlementEligible } from '../../../src/lib/marketCapabilities';
 import { createTradePlan } from '../trader/planner';
 import { traderConfig } from '../trader/config';
 import { candleSeconds, latestClosedCandleTime, selectClosedCandles } from '../trader/candle-math';
 import { hasFreshClosedCandleData } from '../trader/market-data-quality';
 import { nextScheduledRunAt } from './candle-clock';
 import { claimPaperAutopilotLease, releasePaperAutopilotLease, renewPaperAutopilotLease, type PaperAutopilotLease } from '../services/paperAutopilotLease';
-import { MARKET_UNIVERSE } from '../../../src/lib/markets';
-import { canTierBScanWithBudget, getMarketCoverage } from '../../../src/lib/market-coverage';
-import { refreshMarketCoverageOverrides } from '../services/marketCoverage';
 
 const AUTOPILOT_LEASE_MS = 90_000;
 const AUTOPILOT_LEASE_RENEW_MS = 20_000;
@@ -77,22 +76,29 @@ export function accountEntriesAllowed(input: { autonomousEnabled: boolean; accou
   return input.autonomousEnabled && input.accountEnabled && !input.pausedReason && !input.dataFailure;
 }
 
+// Autonomy keeps the long-only spot paper constraint but is no longer crypto-only: every asset
+// class with a real adapter and USD settlement is eligible once provider availability is verified.
 export function isAutopilotSymbol(symbol: string): boolean {
   const market = getMarket(symbol);
+  if (!market) return false;
   const availability = getMarketAvailability().find((item) => item.symbol === symbol)?.status;
-  return Boolean(market?.isActive && getMarketCoverage(market).tier === 'A' && ['massive', 'twelvedata'].includes(market.provider)
-    && market.marketType === 'crypto' && market.priceCurrency === 'USD' && availability === 'verified');
+  return paperSettlementEligible(market) && availability === 'verified';
 }
 
 export function verifiedAutopilotSymbols(symbols: readonly string[]): string[] {
   return [...new Set(symbols)].filter(isAutopilotSymbol);
 }
 
+// Chart access never implies trading eligibility: enrollment still requires a verified provider
+// series, and an explicit administrator restriction removes the instrument from autonomy.
+export async function eligibleAutopilotSymbols(symbols: readonly string[]): Promise<string[]> {
+  const verified = verifiedAutopilotSymbols(symbols);
+  const blocked = await getBlockedMarketSymbols(verified);
+  return verified.filter((symbol) => !blocked.has(symbol));
+}
+
 export class PaperAutopilotScheduler {
   private timer?: ReturnType<typeof setTimeout>;
-  private tierBTimer?: ReturnType<typeof setTimeout>;
-  private tierBRunning = false;
-  private tierBScanOffset = 0;
   private active = false;
   private running?: Promise<void>;
   private readonly lastBoundaries = new Map<Timeframe, number>();
@@ -126,55 +132,17 @@ export class PaperAutopilotScheduler {
     if (this.active) return;
     this.active = true;
     void this.runScheduledCycle();
-    void this.runTierBScan();
   }
 
   stop(): void {
     this.active = false;
     if (this.timer) clearTimeout(this.timer);
-    if (this.tierBTimer) clearTimeout(this.tierBTimer);
     this.timer = undefined;
-    this.tierBTimer = undefined;
     this.nextScheduledAt = null;
-  }
-
-  private async runTierBScan(): Promise<void> {
-    if (!this.active || this.tierBRunning) return;
-    this.tierBRunning = true;
-    try {
-      await refreshMarketCoverageOverrides();
-      const availability = new Map(getMarketAvailability().map((item) => [item.symbol, item]));
-      const candidates = MARKET_UNIVERSE.filter((market) => market.isActive)
-        .filter((market) => getMarketCoverage(market, availability.get(market.symbol)).tier === 'B')
-        .filter((market) => availability.get(market.symbol)?.status !== 'unavailable');
-      const now = Date.now();
-      const requests = candidates.flatMap((market) => (['4h', '1h'] as const)
-        .filter((timeframe) => now - (getTierBTimeframeLastScannedAt(market.symbol, timeframe) ?? 0) >= (timeframe === '4h' ? 4 * 3_600_000 : 3_600_000))
-        .map((timeframe) => ({ market, timeframe })));
-      if (requests.length) {
-        const { market, timeframe } = requests[this.tierBScanOffset % requests.length];
-        this.tierBScanOffset = (this.tierBScanOffset + 1) % requests.length;
-        const budget = market.provider === 'massive' ? getMassiveBudgetSnapshot() : getTwelveDataBudgetSnapshot();
-        if (canTierBScanWithBudget(budget)) {
-          try {
-            const series = await fetchMarketData(market.symbol, timeframe, 100, { priority: false });
-            if (!series.stale && hasFreshClosedCandleData(series.candles, timeframe, Date.now())) recordTierBScan(market.symbol, timeframe, series.fetchedAt);
-          } catch (error) {
-            if (error instanceof MarketDataProviderError && error.status === 404) recordProviderUnavailable(market.symbol, timeframe);
-          }
-        }
-      }
-    } catch {
-      // The scan is best-effort; it yields on provider budget, freshness, and transport failures.
-    } finally {
-      this.tierBRunning = false;
-      if (this.active) this.tierBTimer = setTimeout(() => { void this.runTierBScan(); }, config.tierBScanIntervalMs);
-    }
   }
 
   async queueAccountRun(accountId: string): Promise<{ queued: true }> {
     if (!config.autonomousTradingEnabled) throw new Error('AUTONOMOUS_TRADING is disabled; paper autopilot runs are blocked.');
-    await refreshMarketCoverageOverrides();
     const { data, error } = await getSupabaseClient().from('paper_autopilot').select('*').eq('account_id', accountId).maybeSingle();
     if (error) throw new Error('Autopilot settings are unavailable.');
     if (!data?.enabled) throw new Error('Enable paper autopilot before running it.');
@@ -203,7 +171,6 @@ export class PaperAutopilotScheduler {
     this.running = (async () => {
       try {
         const now = Date.now();
-        await refreshMarketCoverageOverrides();
         const due = new Set<Timeframe>();
         const boundaries = new Map<Timeframe, number>();
         for (const timeframe of AUTOPILOT_TIMEFRAMES) {
@@ -253,11 +220,13 @@ export class PaperAutopilotScheduler {
     const requestsBySymbol = new Map<string, Set<Timeframe>>();
     const requestsByAccount = new Map<string, Map<string, Set<Timeframe>>>();
     const managedSymbolsByAccount = new Map<string, Set<string>>();
+    const entrySymbolsByAccount = new Map<string, string[]>();
     for (const row of availableRows) {
       const account = snapshots.get(row.account_id)!;
       const activePlans = (account.tradePlans ?? []).filter((plan) => ['WATCHING', 'ARMED', 'PENDING_ORDER'].includes(plan.status));
       const openSymbols = new Set(account.positions.filter((position) => position.status === 'open').map((position) => position.symbol));
-      const entrySymbols = verifiedAutopilotSymbols(row.symbols);
+      const entrySymbols = await eligibleAutopilotSymbols(row.symbols);
+      entrySymbolsByAccount.set(row.account_id, entrySymbols);
       const managedSymbols = new Set([...entrySymbols, ...openSymbols]);
       const accountRequests = new Map<string, Set<Timeframe>>();
       managedSymbolsByAccount.set(row.account_id, managedSymbols);
@@ -355,7 +324,7 @@ export class PaperAutopilotScheduler {
             if (managerSeries) processed += await this.replayManagement(row.account_id, symbol, managerTimeframe, managerSeries, invalidationSeries, now, lease);
           }
         }
-        for (const symbol of verifiedAutopilotSymbols(row.symbols)) {
+        for (const symbol of entrySymbolsByAccount.get(row.account_id) ?? []) {
           const plannerDue = (traderConfig.HTF_TIMEFRAMES as Timeframe[]).some((timeframe) => due.has(timeframe))
             || due.has(traderConfig.SETUP_TIMEFRAME as Timeframe);
           if (plannerDue) {

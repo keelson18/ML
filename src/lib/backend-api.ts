@@ -16,8 +16,7 @@ export async function authenticatedBackendRequest<T>(path: string, init: Request
   }
   const { raw, payload } = await readJsonSafe<T & { error?: string; reason?: string }>(response);
   if (!response.ok) {
-    if (payload?.error) throw new Error(payload.error === 'Market coverage is blocked.' && payload.reason
-      ? `${payload.error} ${payload.reason.slice(0, 300)}` : payload.error);
+    if (payload?.error) throw new Error(payload.error);
     if (response.status !== 401 && (!raw || [502, 503, 504].includes(response.status))) {
       throw new Error('The trading backend is unreachable. Check that it is running, then retry.');
     }
@@ -321,30 +320,28 @@ export async function fetchMarketBudgets(): Promise<{ massive: ProviderBudgetSta
   return authenticatedBackendRequest('/api/v1/admin/markets/budget');
 }
 
-export interface MarketCoverageRecord {
-  symbol: string;
-  tier: 'A' | 'B' | 'C' | 'blocked';
-  label: 'Autopilot' | 'Scanning' | 'On-demand' | 'Blocked';
-  reason: string;
-  lastScannedAt: number | null;
-}
-
-export async function fetchMarketCoverage(): Promise<MarketCoverageRecord[]> {
-  const payload = await authenticatedBackendRequest<{ instruments: MarketCoverageRecord[] }>('/api/v1/market/coverage');
-  return payload.instruments;
-}
-
-export async function fetchAdminMarketCoverage(): Promise<{ instruments: MarketCoverageRecord[]; budgets: { massive: ProviderBudgetStatus; twelveData: ProviderBudgetStatus } }> {
-  return authenticatedBackendRequest('/api/v1/admin/markets/coverage');
-}
-
-export async function updateAdminMarketCoverage(input: { symbol: string; tier: MarketCoverageRecord['tier']; reason: string; providerMappingVerified: boolean; providerAvailable: boolean; sessionCalendarVerified: boolean }): Promise<void> {
-  await authenticatedBackendRequest('/api/v1/admin/markets/coverage', { method: 'PUT', body: JSON.stringify(input) });
-}
-
 export async function probeMarkets(symbol: string): Promise<MarketAvailabilityRecord[]> {
   const payload = await authenticatedBackendRequest<{ markets: MarketAvailabilityRecord[] }>('/api/v1/admin/markets/probe', { method: 'POST', body: JSON.stringify({ symbol }) });
   return payload.markets;
+}
+
+export interface MarketAccessRestriction {
+  symbol: string;
+  blocked: boolean;
+  reason: string;
+  updated_at: string;
+}
+
+export async function fetchMarketAccessRestrictions(): Promise<MarketAccessRestriction[]> {
+  const payload = await authenticatedBackendRequest<{ restrictions: MarketAccessRestriction[] }>('/api/v1/admin/markets/restrictions');
+  return payload.restrictions;
+}
+
+export async function updateMarketAccessRestriction(symbol: string, blocked: boolean, reason: string): Promise<void> {
+  await authenticatedBackendRequest('/api/v1/admin/markets/restrictions', {
+    method: 'PUT',
+    body: JSON.stringify({ symbol, blocked, reason }),
+  });
 }
 
 export async function fetchCanonicalMarketData(symbol: string, timeframe: Timeframe, limit = 1000): Promise<MarketDataResponse> {

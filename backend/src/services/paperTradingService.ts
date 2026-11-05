@@ -1,6 +1,7 @@
 import { closePaperPosition, reducePaperPosition, simulatePaperOrder, type PaperAccountState, type PaperTrade } from '../engines/paper-execution';
 import type { Candle } from '../../../src/lib/types';
 import { getMarket } from '../../../src/lib/markets';
+import { paperEligibilityReason, paperSettlementEligible, supportsPlanSide } from '../../../src/lib/marketCapabilities';
 import { atr } from '../../../src/lib/indicators';
 import { analyzeMarketStructure } from '../../../src/lib/market-structure';
 import { getSupabaseClient } from '../db';
@@ -15,6 +16,7 @@ import type { Timeframe } from '../../../src/lib/types';
 import { randomUUID, createHash } from 'node:crypto';
 import { computeResearchMetrics, createDailyReview, type JournalSample } from '../trader/research';
 import { getMarketAvailability } from './marketAvailability';
+import { evaluateMarketSession } from '../trader/sessions';
 import { evaluateEventEntryGate, getEventRiskStatus } from '../trader/event-risk';
 import { reconcilePaperAccount } from '../trader/decision-ledger';
 import { candleIndex, candleSeconds, isClosed, selectClosedCandles } from '../trader/candle-math';
@@ -176,7 +178,7 @@ export async function advanceStoredTradePlans(input: {
         if (!eventDecision.approved) return gateResult = { approved: false, quantity: 0, reason: eventDecision.reason, activeEventIds: eventDecision.activeEventIds };
         const market = getMarket(plan.symbol);
         const availability = getMarketAvailability().find((candidate) => candidate.symbol === plan.symbol)?.status;
-        if (!market?.isActive || market.priceCurrency !== 'USD' || availability !== 'verified') return gateResult = {
+        if (!market?.isActive || !paperSettlementEligible(market) || availability !== 'verified') return gateResult = {
           approved: false,
           quantity: 0,
           reason: availability === 'unavailable' ? 'Market is unavailable from the configured provider.'
@@ -184,9 +186,15 @@ export async function advanceStoredTradePlans(input: {
               : availability === 'error' ? 'Market verification failed; paper entry is blocked.'
                 : availability === 'partially_verified' ? 'Market verification is partial; paper entry is blocked.'
                   : availability === 'unverified' ? 'Market availability is unverified; entry is blocked.'
-                    : 'Market is inactive or not USD quoted.',
+                    : !market ? 'Unknown instrument; paper entry is blocked.'
+                      : paperEligibilityReason(market),
         };
-        if (plan.side !== 'long') return gateResult = { approved: false, quantity: 0, reason: 'Spot paper accounts only support long entries.' };
+        if (!supportsPlanSide(market, plan.side)) {
+          return gateResult = { approved: false, quantity: 0, reason: `Spot paper accounts only support long entries; ${market.symbol} is not shortable.` };
+        }
+        // Exchange-traded instruments may only fill inside their configured session; crypto is continuous.
+        const session = evaluateMarketSession(market, input.candle.time * 1000);
+        if (!session.allowed) return gateResult = { approved: false, quantity: 0, reason: session.reason };
         if (!traderConfig.ALLOWED_GRADES.includes(plan.grade) || !traderConfig.ALLOWED_SETUP_TYPES.includes(plan.setupType)) return gateResult = { approved: false, quantity: 0, reason: 'Setup grade or type is not enabled.' };
         if (!isShadow && !promotedSetups.has(plan.setupType)) return gateResult = { approved: false, quantity: 0, reason: 'Setup has not passed the server-validated research promotion gate.' };
         const target = plan.targets[0]?.price;

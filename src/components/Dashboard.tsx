@@ -35,10 +35,9 @@ import RiskManagement from './pages/RiskManagement';
 import AILearning from './pages/AILearning';
 import SettingsPage from './pages/SettingsPage';
 import TraderDesk from './pages/TraderDesk';
-import MarketCoverageBadge from './MarketCoverageBadge';
 import AutonomousCommandCenter from './AutonomousCommandCenter';
-import { fetchMarketAvailability, fetchMarketCoverage, requestBackendDecision, type BackendDecision } from '../lib/backend-api';
-import { setMarketCoverageOverrides } from '../lib/market-coverage';
+import KineticCoach from './KineticCoach';
+import { fetchMarketAvailability, requestBackendDecision, type BackendDecision } from '../lib/backend-api';
 import { resolveAvatarUrl } from '../lib/avatar';
 import { fetchNotifications, markNotificationRead, type InAppNotification } from '../api/notifications';
 import { MULTI_TIMEFRAME_ANALYSIS_PANELS } from '../lib/terminal';
@@ -52,7 +51,6 @@ export default function Dashboard() {
   const [marketType, setMarketType] = useState<MarketType>('crypto');
   const [symbol, setSymbol] = useState<string>(getDefaultMarketSymbol());
   const [availabilityRevision, setAvailabilityRevision] = useState(0);
-  const [coverageVerified, setCoverageVerified] = useState(false);
   const [timeframe, setTimeframe] = useState<Timeframe>('1h');
   const [candles, setCandles] = useState<Candle[]>([]);
   const [decisionCandles, setDecisionCandles] = useState<Candle[]>([]);
@@ -131,12 +129,6 @@ export default function Dashboard() {
         ? getMarketsByType(marketType)[0]?.symbol ?? current
         : current);
     }).catch(() => undefined);
-    void fetchMarketCoverage().then((rows) => {
-      if (!active) return;
-      setMarketCoverageOverrides(rows.map((row) => ({ symbol: row.symbol, tier: row.tier, reason: row.reason, providerMappingVerified: false, sessionCalendarVerified: false, lastScannedAt: row.lastScannedAt })));
-      setCoverageVerified(true);
-      setAvailabilityRevision((revision) => revision + 1);
-    }).catch(() => { if (active) setCoverageVerified(false); });
     return () => { active = false; };
   }, [user, marketType]);
 
@@ -291,7 +283,7 @@ export default function Dashboard() {
     if (sidebarTab === 'trader-desk') return <TraderDesk />;
 
     if (sidebarTab === 'markets') return <MarketsPage />;
-    if (sidebarTab === 'ai-analysis') return <AIAnalysis signals={signals} ml={ml} mlStatus={mlStatus} recommendation={recommendation} onRefreshML={refreshML} mlLoading={mlLoading} candleCount={candles.length} marketLoading={loading} marketError={dataError} />;
+    if (sidebarTab === 'ai-analysis') return <AIAnalysis symbol={symbol} timeframe={timeframe} serverDecision={serverDecision} signals={signals} ml={ml} mlStatus={mlStatus} recommendation={recommendation} onRefreshML={refreshML} mlLoading={mlLoading} candleCount={candles.length} marketLoading={loading} marketError={dataError || serverDecisionError} />;
     if (sidebarTab === 'strategies') return <StrategyLab signals={signals} candles={decisionCandles} timeframe={timeframe} />;
     if (sidebarTab === 'portfolio') return <PortfolioPage />;
     if (sidebarTab === 'backtesting') return <BacktestingCenter candles={decisionCandles} timeframe={timeframe} symbol={symbol} theme={theme} marketLoading={loading} marketError={dataError} onRetryMarketData={() => setReloadKey((key) => key + 1)} />;
@@ -370,7 +362,6 @@ export default function Dashboard() {
             >
               {availableMarkets.map((p) => <option key={p.symbol} value={p.symbol}>{p.label}</option>)}
             </select>
-            <MarketCoverageBadge symbol={symbol} compact verified={coverageVerified} />
           </div>
 
           <div className="dashboard-timeframes" aria-label="Chart timeframe">
@@ -468,6 +459,7 @@ export default function Dashboard() {
         </main>
       </div>
       <MobileNavigation activeTab={sidebarTab} isAdmin={isAdmin} onNavigate={navigateToTab} onSignOut={() => void signOut()} />
+      {user && <KineticCoach symbol={symbol} timeframe={timeframe} decision={serverDecision} />}
     </div>
   );
 }

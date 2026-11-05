@@ -306,6 +306,9 @@ small { font-size: var(--fs-xs); }
   border-radius: 10px;
   background: rgb(var(--bg));
 }
+.mtf-chart-panel-compact { min-height: 180px; }
+.mtf-chart-panel-normal { min-height: 320px; }
+.mtf-chart-panel-expanded { min-height: 620px; }
 .mtf-chart-panel.is-execution { border-color: rgb(var(--primary) / 0.42); }
 .mtf-chart-header {
   min-height: 34px;

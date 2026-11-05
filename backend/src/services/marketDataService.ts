@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { TIMEFRAMES, type Candle, type Market, type MarketDataIdentity, type Timeframe } from '../../../src/lib/types';
 import { getMarket } from '../../../src/lib/markets';
+import { providerSupport } from '../../../src/lib/marketCapabilities';
 import { config } from '../config';
 import { fetchWithTimeout } from '../../../src/lib/providers/request';
 import { readJsonSafe } from '../../../shared/http';
@@ -122,19 +123,18 @@ export async function probeMarketData(canonicalSymbol: string, timeframe: Timefr
   sourceInstrument: string;
 }> {
   const instrument = getMarket(canonicalSymbol);
-  if (!instrument || !['massive', 'twelvedata'].includes(instrument.provider)) {
-    throw new Error('Market probe is not configured for this instrument.');
-  }
-  const sourceSymbol = instrument.sourceSymbol ?? (instrument.provider === 'twelvedata' ? `${instrument.baseAsset}/${instrument.quoteAsset}` : undefined);
-  if (!sourceSymbol) throw new Error('Market probe source mapping is not configured.');
-  const probeInstrument = { ...instrument, canonicalSymbol: instrument.canonicalSymbol ?? canonicalSymbol, sourceSymbol };
+  if (!instrument) throw new Error('Market probe is not configured for this instrument.');
+  const support = providerSupport(instrument);
+  if (!support.supported || !support.provider || !support.sourceSymbol) throw new Error(`Market probe is not configured for this instrument. ${support.reason}`);
+  const probeInstrument = { ...instrument, provider: support.provider, canonicalSymbol: instrument.canonicalSymbol ?? canonicalSymbol, sourceSymbol: support.sourceSymbol };
   const candles = await fetchFromProvider(probeInstrument, timeframe, requestedLimit, false);
   validateCandles(candles, probeInstrument, timeframe);
   if (candles.length === 0) throw new Error('Provider returned no candles.');
   const now = Date.now();
   const closed = selectClosedCandles(candles, timeframe, now, traderConfig.CLOSE_GRACE_MS);
   const latest = closed.at(-1);
-  if (!latest) return { candleCount: candles.length, closedCandleCount: 0, latestClosedCandleAt: null, ageMs: null, stale: true, provider: instrument.provider, sourceInstrument: sourceSymbol };
+  const sourceInstrument = support.sourceSymbol;
+  if (!latest) return { candleCount: candles.length, closedCandleCount: 0, latestClosedCandleAt: null, ageMs: null, stale: true, provider: support.provider, sourceInstrument };
   const durationMs = candleSeconds(timeframe, latest.time) * 1000;
   const ageMs = Math.max(0, now - latest.time * 1000 - durationMs);
   return {
@@ -143,8 +143,8 @@ export async function probeMarketData(canonicalSymbol: string, timeframe: Timefr
     latestClosedCandleAt: new Date(latest.time * 1000).toISOString(),
     ageMs,
     stale: ageMs > durationMs * config.marketDataMaxStaleTtlMultiplier,
-    provider: instrument.provider,
-    sourceInstrument: sourceSymbol,
+    provider: support.provider,
+    sourceInstrument,
   };
 }
 
@@ -242,29 +242,23 @@ function evictOldestCacheEntries(): void {
 async function fetchMarketDataUncoalesced(canonicalSymbol: string, timeframe: Timeframe, limit: number, priority: boolean): Promise<MarketDataSeries> {
   const configuredInstrument = getMarket(canonicalSymbol);
   if (!configuredInstrument) throw new Error(`Unknown canonical instrument: ${canonicalSymbol}`);
-  if (!['massive', 'twelvedata'].includes(configuredInstrument.provider)) {
-    throw new Error(`No supported market-data adapter is configured for ${canonicalSymbol}.`);
+  const support = providerSupport(configuredInstrument);
+  if (!support.supported || !support.provider || !support.sourceSymbol) {
+    throw new Error(`No supported market-data adapter is available for ${canonicalSymbol}. ${support.reason}`);
   }
-  const sourceSymbol = configuredInstrument.sourceSymbol ?? (
-    configuredInstrument.provider === 'twelvedata'
-      ? `${configuredInstrument.baseAsset}/${configuredInstrument.quoteAsset}`
-      : configuredInstrument.provider === 'massive'
-        ? configuredInstrument.symbol
-        : undefined
-  );
-  if (!configuredInstrument.provider || !sourceSymbol) throw new Error(`No market-data source is configured for ${canonicalSymbol}.`);
   if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw new Error('Candle limit must be an integer between 1 and 1000.');
   const instrument: Market = {
     ...configuredInstrument,
+    provider: support.provider,
     id: configuredInstrument.id ?? canonicalSymbol,
     canonicalSymbol: configuredInstrument.canonicalSymbol ?? canonicalSymbol,
-    sourceSymbol,
+    sourceSymbol: support.sourceSymbol,
   };
 
   const candles = await fetchFromProvider(instrument, timeframe, limit, priority);
   validateCandles(candles, instrument, timeframe);
   const provider = instrument.provider;
-  const sourceInstrument = sourceSymbol;
+  const sourceInstrument = instrument.sourceSymbol!;
   const startTimestamp = candles[0]?.time ?? null;
   const endTimestamp = candles.at(-1)?.time ?? null;
   const dataVersion = candleContentVersion(provider, candles);

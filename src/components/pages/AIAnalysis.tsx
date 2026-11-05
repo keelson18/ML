@@ -1,8 +1,12 @@
 import { Brain, TrendingUp, TrendingDown, Minus, Activity, BarChart3, Zap, RefreshCw } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { Signal, MLPrediction, Recommendation } from '../../lib/types';
+import type { BackendDecision } from '../../lib/backend-api';
 
 interface Props {
+  symbol: string;
+  timeframe: string;
+  serverDecision: BackendDecision | null;
   signals: Signal[];
   ml: MLPrediction | null;
   mlStatus: 'idle' | 'loading' | 'ready' | 'cached' | 'unavailable';
@@ -14,7 +18,7 @@ interface Props {
   marketError: string | null;
 }
 
-export default function AIAnalysis({ signals, ml, mlStatus, recommendation, onRefreshML, mlLoading, candleCount, marketLoading, marketError }: Props) {
+export default function AIAnalysis({ symbol, timeframe, serverDecision, signals, ml, mlStatus, recommendation, onRefreshML, mlLoading, candleCount, marketLoading, marketError }: Props) {
   const [signalFilter, setSignalFilter] = useState<'all' | 'buy' | 'sell' | 'neutral'>('all');
   const [selectedSignal, setSelectedSignal] = useState<string | null>(null);
   const filteredSignals = useMemo(() => signalFilter === 'all' ? signals : signals.filter((signal) => signal.side === signalFilter), [signalFilter, signals]);
@@ -26,32 +30,39 @@ export default function AIAnalysis({ signals, ml, mlStatus, recommendation, onRe
       </h2>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* AI Confidence Gauge */}
+        {/* Canonical decision confidence */}
         <div className="bg-surface border border-border rounded-xl p-4">
-          <div className="flex items-center justify-between mb-3"><h3 className="text-xs font-medium text-muted">AI Confidence Gauge</h3><button type="button" onClick={onRefreshML} disabled={mlLoading} aria-label="Refresh ML prediction" className="min-h-11 min-w-11 rounded-lg border border-border hover:bg-bg text-muted disabled:opacity-50" title="Refresh ML prediction"><RefreshCw className={`mx-auto h-4 w-4 ${mlLoading ? 'animate-spin' : ''}`} /></button></div>
-          <div className="flex items-center gap-4">
-            <div className="relative w-20 h-20">
-              <svg viewBox="0 0 36 36" className="w-20 h-20 -rotate-90">
-                <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="rgb(var(--border))" strokeWidth="3" />
-                <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="rgb(var(--primary))" strokeWidth="3" strokeDasharray={`${(ml?.probability ?? 0) * 100}, 100`} />
-              </svg>
-              <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-lg font-bold tabular-nums">{ml ? `${(ml.probability * 100).toFixed(0)}%` : '--'}</span>
-              </div>
+          <div className="flex items-center justify-between mb-3"><h3 className="text-xs font-medium text-muted">Overall Confidence</h3><button type="button" onClick={onRefreshML} disabled={mlLoading} aria-label="Refresh ML prediction" className="min-h-11 min-w-11 rounded-lg border border-border hover:bg-bg text-muted disabled:opacity-50" title="Refresh ML prediction"><RefreshCw className={`mx-auto h-4 w-4 ${mlLoading ? 'animate-spin' : ''}`} /></button></div>
+          <div className="space-y-3">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="text-2xl font-bold tabular-nums">{serverDecision ? `${(serverDecision.confidence * 100).toFixed(0)}%` : '--'}</span>
+              <span className="text-xs font-medium text-muted">{serverDecision?.decision ?? (marketLoading ? 'Loading' : 'Unavailable')}</span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-border" role="progressbar" aria-label="Canonical overall confidence" aria-valuemin={0} aria-valuemax={100} aria-valuenow={serverDecision ? serverDecision.confidence * 100 : undefined}>
+              {serverDecision ? <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${Math.min(100, Math.max(0, serverDecision.confidence * 100))}%` }} /> : <div className="h-full w-1/3 animate-pulse rounded-full bg-primary/60" />}
             </div>
             <div className="text-xs text-muted">
+              {!serverDecision ? (marketLoading ? 'Calculating canonical decision confidence…' : 'Canonical decision confidence is unavailable.') : `Decision for ${symbol} · ${timeframe} · ${new Date(serverDecision.timestamp).toLocaleString()}`}
+            </div>
+          </div>
+        </div>
+
+        {/* ML evidence, kept separate from canonical confidence */}
+        <div className="bg-surface border border-border rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3"><h3 className="text-xs font-medium text-muted">ML Evidence</h3><button type="button" onClick={onRefreshML} disabled={mlLoading} aria-label="Refresh ML prediction" className="min-h-11 min-w-11 rounded-lg border border-border hover:bg-bg text-muted disabled:opacity-50" title="Refresh ML prediction"><RefreshCw className={`mx-auto h-4 w-4 ${mlLoading ? 'animate-spin' : ''}`} /></button></div>
+          <div className="text-xs text-muted">
               {ml ? (
                 <div className="space-y-1">
                   <div>Direction: <span className="text-text font-medium capitalize">{ml.prediction}</span></div>
+                  <div>Model: <span className="text-text font-medium">{ml.model_version}</span></div>
                   <div>Calibrated move: <span className="text-text font-medium">{ml.expected_move_pct === null ? 'Not available' : `${ml.expected_move_pct >= 0 ? '+' : ''}${ml.expected_move_pct.toFixed(2)}%`}</span></div>
                   {ml.edge_status === 'no-edge' && <div className="text-warning">This model did not beat the momentum baseline on its held-out test.</div>}
                   <div>Confidence: <span className="text-text font-medium capitalize">{ml.confidence}</span></div>
                   {mlStatus === 'cached' && <div className="text-warning">Showing the last cached prediction; refresh is unavailable.</div>}
                 </div>
               ) : mlStatus === 'loading' ? 'Loading ML prediction…' : mlStatus === 'unavailable' ? 'ML service unavailable. Local strategy evidence remains active.' : 'No ML prediction available'}
-            </div>
           </div>
-        </div>
+          </div>
 
         {/* Trend Strength Meter */}
         <div className="bg-surface border border-border rounded-xl p-4">

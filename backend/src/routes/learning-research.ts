@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { getSupabaseClient, getSupabaseClientWithToken } from '../db';
 import type { Timeframe } from '../../../src/lib/types';
 import { getMarket } from '../../../src/lib/markets';
+import { marketSessionModel, providerSupport } from '../../../src/lib/marketCapabilities';
 import { fetchMarketData } from '../services/marketDataService';
 import { selectClosedCandles } from '../trader/candle-math';
 import { runResearchReplay } from '../trader/research-run';
@@ -184,8 +185,14 @@ export async function learningResearchRoutes(app: FastifyInstance) {
     const parsed = runResearchSchema.safeParse(request.body);
     if (!experimentId.success || !parsed.success) return reply.code(400).send({ error: 'Invalid research run request.' });
     const market = getMarket(parsed.data.symbol);
-    if (!market?.isActive || (market.priceCurrency ?? market.quoteAsset) !== 'USD') return reply.code(400).send({ error: 'Research supports only active USD markets.' });
-    if (market.marketType !== 'crypto') return reply.code(422).send({ error: 'Forward research collection requires a verified market-session calendar; this workflow currently supports continuous 24/7 crypto data only.' });
+    const providerInfo = market ? providerSupport(market) : null;
+    if (!market || !providerInfo?.supported) return reply.code(400).send({ error: `Research requires an active instrument with a configured provider adapter. ${providerInfo?.reason ?? ''}`.trim() });
+    // Collection appends every bar without gap handling, so it needs a continuous session model or
+    // an operator-configured exchange calendar for this instrument.
+    const calendarConfigured = Boolean(config.marketSessionCalendar[market.exchange] ?? config.marketSessionCalendar[market.marketType]);
+    if (marketSessionModel(market) !== 'continuous' && !calendarConfigured) {
+      return reply.code(422).send({ error: 'Forward research collection needs a continuous session model or a configured market-session calendar for this instrument.' });
+    }
     try {
       const ownerClient = getSupabaseClientWithToken(request.accessToken);
       const { data: experiment, error: experimentError } = await ownerClient.from('research_experiments')
