@@ -15,7 +15,9 @@ const proxyTarget = envValue('AUTONOMY_PROXY_TARGET')
   ?? envValue('VITE_BACKEND_URL')
   ?? `http://127.0.0.1:${envValue('AUTONOMY_PORT') ?? '8787'}`;
 const targetUrl = new URL(proxyTarget);
-const healthUrl = new URL('/health', targetUrl.origin).toString();
+// Node.js fetch may resolve "localhost" to IPv6 ::1 first; normalize to 127.0.0.1 for health checks
+// so the dev script reliably reaches the backend regardless of DNS resolution order.
+const healthUrl = new URL('/health', targetUrl.origin).toString().replace('://localhost:', '://127.0.0.1:');
 const localHosts = new Set(['localhost', '127.0.0.1', '::1']);
 const localApi = localHosts.has(targetUrl.hostname);
 const autonomyPort = targetUrl.port || (targetUrl.protocol === 'https:' ? '443' : '80');

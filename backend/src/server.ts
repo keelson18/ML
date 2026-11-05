@@ -208,7 +208,7 @@ export async function startServer() {
   const scheduler = paperAutopilotScheduler;
   const port = Number(process.env.AUTONOMY_PORT ?? process.env.PORT ?? 8787);
   try {
-    await app.listen({ port, host: '0.0.0.0' });
+    await app.listen({ port, host: '::' });
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'EADDRINUSE') {
