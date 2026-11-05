@@ -24,7 +24,7 @@ Each subscribe message covers one channel. The subscribe payload is `{ type: "su
 
 - Found: heartbeat about 1 second; candles updated about every second; most channels close after 60 to 90 seconds without updates when no heartbeat is subscribed.
 - Not found on the pages read: products per connection, message rate, connection lifetime cap, candles `start` units (seconds or milliseconds), and the exact message shape for `snapshot` and `update` events.
-- `LIVE_FEED_MAX_SYMBOLS` (default 20) is our own cap, not a Coinbase limit.
+- The server-owned Coinbase subscription cap is 20 symbols, independent of Coinbase's provider limit.
 
 ## Behaviour implemented
 
@@ -32,7 +32,7 @@ Each subscribe message covers one channel. The subscribe payload is `{ type: "su
 - Ticker sequence numbers are tracked per product within a connection, because Coinbase's overview defines them per product (docs.cloud.coinbase.com, `advanced-trade/docs/ws-overview`, read 2026-10-11). A sequence at or below the last one seen for that product is dropped as `duplicates`.
 - A sequence more than one above the last one seen is counted as `gaps` and logged with the product ID and the number of messages missed. Missed ticks are not replayed; the next tick for that product is used as the current price.
 - Reconnect uses exponential backoff with jitter, from 1 second up to 30 seconds. Subscriptions are resent on reconnect.
-- A connection with no inbound message for `LIVE_FEED_STALE_MS` is closed and reconnected.
+- A connection with no inbound message for the server-owned stale interval is closed and reconnected.
 - Coinbase's ticker has no volume, so forming candles carry `volume: null`. The UI must not draw a volume bar for a forming candle.
 - Status is `connected` after open, `reconnecting` while waiting to retry, and `down` when no symbols are subscribed or after `close()`.
 - Symbols Coinbase does not list are not detected by the adapter. The static map covers the USD crypto registry entries. A symbol with no ticks is shown as stale by the UI layer, not Live.
@@ -42,7 +42,7 @@ Each subscribe message covers one channel. The subscribe payload is `{ type: "su
 - `src/lib/providers/stream-client.ts` fetches a ticket, opens one shared socket, and subscribes per symbol and timeframe. Only the forming candle is streamed; closed candles still come from REST polling, which keeps running.
 - The header shows **Live** only while the server reports the symbol as `stream`. REST-only operation shows **Polling**.
 - Streamed forming candles set `volume: 0` because the client `Candle` type needs a number. They replace the REST forming bar until the next REST bar. No chart draws volume today.
-- A stream connection is closed by the server after `LIVE_FEED_MAX_CONNECTION_MS` so the client must request a fresh ticket and reauthenticate.
+- A stream connection is closed by the server after its maximum lifetime so the client must request a fresh ticket and reauthenticate.
 - Not browser-tested in this session.
 
 ## Known gaps
@@ -58,17 +58,17 @@ Each subscribe message covers one channel. The subscribe payload is `{ type: "su
 
 ## Massive request budget
 
-- Limits are config, not constants: `MASSIVE_REQUESTS_PER_WINDOW` (default 5, the free Basic tier at the date above), `MASSIVE_BUDGET_WINDOW_MS`, `MASSIVE_BUDGET_MAX_WAIT_MS`, `MASSIVE_BUDGET_MAX_QUEUE`, and `MASSIVE_TRADER_RESERVED_REQUESTS`. Set the window quota to your plan's limit.
-- Every server-side Massive request, including the market availability probe and autonomy reads, takes a slot from one shared budget. Browsers never call Massive. Trader/autopilot reads pass `priority: true`; standard chart/admin reads are capped below the full quota by `MASSIVE_TRADER_RESERVED_REQUESTS` so the trader has a reserved share.
-- A request that cannot get a slot within `MASSIVE_BUDGET_MAX_WAIT_MS` fails with 429 and `Retry-After`, without calling Massive. If a cached series is still inside its stale bound, that series is served instead.
+- Massive request protection uses a server-owned budget of 5 requests per 60 seconds, with bounded wait/queue behavior and 2 priority slots.
+- Every server-side Massive request, including the market availability probe and autonomy reads, takes a slot from one shared budget. Browsers never call Massive. Trader/autopilot reads pass `priority: true`; standard chart/admin reads are capped below the full quota so the trader has a reserved share.
+- A request that cannot get a slot within the internal maximum wait fails with 429 and `Retry-After`, without calling Massive. If a cached series is still inside its stale bound, that series is served instead.
 - A Massive 429 pauses all Massive requests for its `Retry-After` (or one window if the header is absent).
-- Twelve Data REST calls use a separate budget: `TWELVEDATA_REQUESTS_PER_WINDOW` (default 8 per `TWELVEDATA_BUDGET_WINDOW_MS`, set to the free-tier per-minute limit the owner gave), with its own wait and queue limits. A Twelve Data 429 pauses only Twelve Data. Twelve Data's daily caps are not enforced here.
+- Twelve Data REST calls use a separate server-owned budget of 8 requests per 60 seconds with bounded wait/queue limits and daily credit protection. A Twelve Data 429 pauses only Twelve Data.
 - Admin: `GET /api/v1/admin/markets/budget` returns quota, usage in the current window, queued requests, and any active backoff.
 - Not built: a dedicated background poller per symbol and timeframe. Requests are cached and coalesced on demand instead. The budget counts all Massive requests in one server process; Massive counts per asset class, so a separate budget is needed if stock requests are added.
 
 ## Disabling streaming
 
-Set `LIVE_FEED_ENABLED=false` (the default). The app then uses REST polling only.
+Live streaming is disabled by the server-owned default; the app then uses REST polling only.
 
 ## Terms
 

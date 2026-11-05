@@ -64,7 +64,7 @@ describe('GET /api/v1/admin/overview', () => {
     });
     getSupabaseClientWithToken.mockReturnValue({
       auth: {
-        getUser: vi.fn(async () => ({ data: { user: { id: 'admin-user', factors: [] } }, error: null })),
+        getUser: vi.fn(async () => ({ data: { user: { id: 'admin-user', factors: [{ status: 'verified' }] } }, error: null })),
         getClaims: vi.fn(async () => ({ data: { claims: { aal: 'aal2' } }, error: null })),
       },
       from: vi.fn((table: string) => queryBuilder(table)),
@@ -128,7 +128,7 @@ describe('GET /api/v1/admin/overview', () => {
     getSupabaseClient.mockReturnValue({ rpc, from: vi.fn((table: string) => queryBuilder(table)) });
     getSupabaseClientWithToken.mockReturnValue({
       auth: {
-        getUser: vi.fn(async () => ({ data: { user: { id: 'admin-user', factors: [] } }, error: null })),
+        getUser: vi.fn(async () => ({ data: { user: { id: 'admin-user', factors: [{ status: 'verified' }] } }, error: null })),
         getClaims: vi.fn(async () => ({ data: { claims: { aal: 'aal2' } }, error: null })),
       },
       from: vi.fn((table: string) => queryBuilder(table)),

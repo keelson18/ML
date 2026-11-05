@@ -76,7 +76,7 @@ export function registerAuthGuards(app: FastifyInstance) {
       }
       const hasVerifiedFactor = userData.user.factors?.some((factor) => factor.status === 'verified') ?? false;
       const currentLevel = claimsData.claims.aal;
-      if ((process.env.REQUIRE_ADMIN_MFA === 'true' || hasVerifiedFactor) && currentLevel !== 'aal2') {
+      if (!hasVerifiedFactor || currentLevel !== 'aal2') {
         await recordAdminDenial(request, 'admin.mfa_denied');
         reply.code(403).send({ error: 'Two-factor authentication required' });
       }

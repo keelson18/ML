@@ -35,7 +35,7 @@ The position manager used long-side comparisons for persisted `sell` positions e
 ### Data and configured universe
 
 - Trader defaults: `HTF_TIMEFRAMES=4h,1d`, `SETUP_TIMEFRAME=1h`, `TRIGGER_TIMEFRAMES=15m,1h` (1h retained for legacy plan processing; new planner setups require first trigger `15m`), and `MGMT_TIMEFRAME=5m`; setup expiry is configured with `SETUP_EXPIRY_BARS`. These are validated in `backend/src/trader/config.ts` and `.env.example`.
-- The server's autonomy symbol default is `DEFAULT_SYMBOL`, defaulting to the first active registry instrument (currently BTCUSD); `.env.example` explicitly sets `AUTONOMY_SYMBOLS=BTCUSD`. The registry also includes BTCUSD, ETHUSD, XAUUSD and silver as XAGUSD. “SilverUSD” is not the canonical registry symbol. Active registry status and actual provider availability are different facts.
+- The server's autonomy universe is derived from every active crypto and commodity instrument in the market registry. The registry also includes BTCUSD, ETHUSD, XAUUSD and silver as XAGUSD. “SilverUSD” is not the canonical registry symbol. Active registry status and actual provider availability are different facts.
 - Autopilot eligibility is narrower: `isAutopilotSymbol` currently admits only active USD crypto instruments on Massive whose availability status is `available`. This is not provider verification of XAUUSD/XAGUSD, and no market availability probe was run here.
 - Trader Desk now labels planner quality as a heuristic score, not a percentage probability. Research currently accepts only 15m runs; provider-history limitations described below prevent a full 90-day holdout run.
 

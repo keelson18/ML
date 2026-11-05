@@ -99,7 +99,7 @@ Positive controls confirmed: the server paper executor requires a boundary-verif
 
 ### Issue 13 (Medium): Admin MFA can be skipped by configuration
 
-- **Where:** `src/components/AdminRoute.tsx:16, 27`: when `VITE_REQUIRE_ADMIN_MFA` is not `'true'`, admins without enrolled MFA pass the guard.
+- **Where:** `src/components/AdminRoute.tsx`: administrator routes must require verified AAL2.
 - **Fix:** Make the server enforce MFA for admin functions and treat the client flag as display-only, or make MFA the default.
 
 ### Issue 14 (Medium): Static fallback coverage table

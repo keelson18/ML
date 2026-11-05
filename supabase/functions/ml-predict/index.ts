@@ -427,11 +427,8 @@ Deno.serve(async (req: Request) => {
       }
       if (!(await checkRate(supabase, 'retrain', 2))) return jsonResponse({ error: 'Rate limit exceeded' }, 429, headers);
       const requestBody = await req.json().catch(() => ({})) as { pair?: unknown; timeframe?: unknown };
-      const pair = requestBody.pair ?? Deno.env.get('DEFAULT_SYMBOL')?.trim();
+      const pair = requestBody.pair;
       const timeframe = requestBody.timeframe ?? '1h';
-      if (typeof pair !== 'string' || pair.length === 0) {
-        return jsonResponse({ error: 'Default market is not configured.' }, 503, headers);
-      }
       if (typeof pair !== 'string' || !/^[A-Z0-9]{2,20}$/.test(pair)
         || typeof timeframe !== 'string' || !['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d', '1w', '1M'].includes(timeframe)) {
         return jsonResponse({ error: 'A valid pair and timeframe are required' }, 400, headers);

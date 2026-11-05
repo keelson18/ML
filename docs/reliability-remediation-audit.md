@@ -196,7 +196,7 @@ Supabase CLI/database, hosted Supabase credentials, provider credentials and aut
 
 ## Stage 13 report — performance and bounded resources
 
-**Inspection:** market-data cache is LRU-bounded by validated `MARKET_DATA_CACHE_MAX_ENTRIES`; candle requests are limited to 1,000; provider budgets bound wait/queue sizes; autopilot deduplicates symbol/timeframe fetches, applies quota-derived spacing, and bounds replay catch-up. No performance benchmark or real-provider workload can be measured without external provider credentials. I made no performance claim beyond these source-level bounds.
+**Inspection:** market-data cache is LRU-bounded by a server-owned bound; candle requests are limited to 1,000; provider budgets bound wait/queue sizes; autopilot deduplicates symbol/timeframe fetches, applies quota-derived spacing, and bounds replay catch-up. No performance benchmark or real-provider workload can be measured without external provider credentials. I made no performance claim beyond these source-level bounds.
 
 ## Stage 14 report — final regression and deployment safety
 

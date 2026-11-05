@@ -172,7 +172,7 @@ export async function advanceStoredTradePlans(input: {
       let gateResult: EntryGateResult = { approved: false, quantity: 0, reason: 'Entry gates have not passed.' };
       const gate = (entryPrice: number): EntryGateResult => {
         if (input.entriesAllowed !== true) return gateResult = { approved: false, quantity: 0, reason: 'Entry paused: trigger candle freshness was not verified or exceeds the configured maximum entry age.' };
-        const eventDecision = evaluateEventEntryGate(eventRisk, traderConfig.EVENT_BLACKOUT_MIN_IMPACT);
+        const eventDecision = evaluateEventEntryGate(eventRisk, traderConfig.eventBlackoutMinImpact);
         if (!eventDecision.approved) return gateResult = { approved: false, quantity: 0, reason: eventDecision.reason, activeEventIds: eventDecision.activeEventIds };
         const market = getMarket(plan.symbol);
         const availability = getMarketAvailability().find((candidate) => candidate.symbol === plan.symbol)?.status;

@@ -13,7 +13,6 @@ interface Props {
 export default function AdminRoute({ children, fallback }: Props) {
   const { profile, loading } = useAuth();
   const [assurance, setAssurance] = useState<'loading' | 'aal2' | 'required' | 'unavailable'>('loading');
-  const requireAdminMfa = import.meta.env.VITE_REQUIRE_ADMIN_MFA === 'true';
   const [assuranceAttempt, setAssuranceAttempt] = useState(0);
 
   const checkAssurance = useCallback(async (active: () => boolean) => {
@@ -24,13 +23,13 @@ export default function AdminRoute({ children, fallback }: Props) {
         setAssurance('unavailable');
         return;
       }
-      setAssurance(data.currentLevel === 'aal2' || (!requireAdminMfa && data.nextLevel !== 'aal2') ? 'aal2' : 'required');
+      setAssurance(data.currentLevel === 'aal2' ? 'aal2' : 'required');
     } catch {
       // Network failures reject this Supabase call instead of returning an error result.
       // Resolve to a retryable state so the admin page cannot remain stuck loading.
       if (active()) setAssurance('unavailable');
     }
-  }, [requireAdminMfa]);
+  }, []);
 
   useEffect(() => {
     if (!profile || profile.role !== 'admin') return;

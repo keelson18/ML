@@ -3,7 +3,7 @@ import { analyze } from '../services/decisionService';
 import { advanceStoredTradePlans, generateDailyAccountReview, getAccount, manageOpenPositions, markCandleProcessed, storeTradePlan, wasCandleProcessed } from '../services/paperTradingService';
 import { fetchMarketData } from '../services/marketDataService';
 import type { AutonomousConfig, AutonomousState, PipelineResult, PipelineRole, PipelineSnapshot } from './types';
-import { getDefaultSymbols } from '../constants/markets';
+import { getEligibleSymbols } from '../constants/markets';
 import { getMarket } from '../../../src/lib/markets';
 import { evaluateMarketSession } from '../trader/sessions';
 import { selectClosedCandles, candleDurationMs } from './candle-clock';
@@ -11,7 +11,7 @@ import { traderConfig } from '../trader/config';
 import { createTradePlan } from '../trader/planner';
 
 const DEFAULT_CONFIG: AutonomousConfig = {
-  symbols: getDefaultSymbols(),
+  symbols: getEligibleSymbols(),
   timeframe: '15m',
   accountId: 'autonomy:default',
   enableExecution: true,

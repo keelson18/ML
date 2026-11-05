@@ -57,10 +57,9 @@ const traderConfigSchema = z.object({
   ALLOWED_SETUP_TYPES: csv(SETUP_TYPES.join(','), SETUP_TYPES),
   WATCHLIST_MAX_SIZE: z.coerce.number().int().positive().default(12),
   STALE_DATA_BLOCKS_ENTRIES: z.enum(['true', 'false']).default('true').transform((value) => value === 'true'),
-  EVENT_BLACKOUT_MIN_IMPACT: z.enum(['low', 'medium', 'high']).default('medium'),
 });
 
-export type TraderConfig = z.infer<typeof traderConfigSchema>;
+export type TraderConfig = z.infer<typeof traderConfigSchema> & { eventBlackoutMinImpact: 'low' | 'medium' | 'high' };
 
 export function parseTraderConfig(source: NodeJS.ProcessEnv = process.env): TraderConfig {
   const result = traderConfigSchema.safeParse(source);
@@ -68,7 +67,7 @@ export function parseTraderConfig(source: NodeJS.ProcessEnv = process.env): Trad
     const variable = result.error.issues[0]?.path[0] ?? 'trader configuration';
     throw new Error(`${String(variable)} has an invalid trader configuration value.`);
   }
-  return result.data;
+  return { ...result.data, eventBlackoutMinImpact: 'medium' };
 }
 
 export const traderConfig = parseTraderConfig();

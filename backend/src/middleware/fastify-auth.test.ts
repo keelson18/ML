@@ -1,5 +1,5 @@
 import Fastify from 'fastify';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { registerAuthGuards } from './fastify-auth';
 
 const authState = vi.hoisted(() => ({
@@ -27,8 +27,6 @@ vi.mock('../db.js', () => ({
   }),
 }));
 
-let originalRequireAdminMfa: string | undefined;
-
 beforeEach(() => {
   authState.role = 'admin';
   authState.aal = 'aal2';
@@ -36,12 +34,6 @@ beforeEach(() => {
   authState.authenticated = true;
   authState.unavailable = false;
   authState.denials.length = 0;
-  originalRequireAdminMfa = process.env.REQUIRE_ADMIN_MFA;
-});
-
-afterEach(() => {
-  if (originalRequireAdminMfa === undefined) delete process.env.REQUIRE_ADMIN_MFA;
-  else process.env.REQUIRE_ADMIN_MFA = originalRequireAdminMfa;
 });
 
 async function createApp() {
@@ -88,8 +80,7 @@ describe('admin authentication assurance', () => {
     await app.close();
   });
 
-  it('enforces aal2 when REQUIRE_ADMIN_MFA is enabled', async () => {
-    process.env.REQUIRE_ADMIN_MFA = 'true';
+  it('requires aal2 even when an admin has no enrolled factor', async () => {
     authState.factorStatus = null;
     authState.aal = 'aal1';
     const app = await createApp();

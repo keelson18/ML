@@ -1,6 +1,6 @@
 # Autopilot request and ledger budget
 
-The defaults are `MASSIVE_REQUESTS_PER_WINDOW=5` per `MASSIVE_BUDGET_WINDOW_MS=60000`, with `MASSIVE_TRADER_RESERVED_REQUESTS=2` reserved for trader work. The request spacing is derived as `ceil(windowMs / min(requestsPerWindow, reservedRequests))`; with defaults this is 30,000 ms. Doubling the quota and reserved share halves spacing. Configure paid provider plans through these environment values; there is no hard-coded scheduler spacing constant.
+The server-owned Massive budget allows 5 requests per 60 seconds, with 2 slots reserved for trader work. Request spacing is derived from the internal provider budget; it is not deployment-configurable, so security and provider protection remain consistent across environments.
 
 The default frames are planner `1d,4h`, triggers `15m,1h`, and management `5m`. A cold midnight UTC cycle for three distinct symbols can request all five frames per symbol: 15 fetches and 14 inter-request waits, or **7 minutes** of spacing at defaults, plus provider latency. The scheduler fetches management series first, trigger series second, and planner series last so stop checks get the earliest data. Warm process-local cache hits do not cause provider fetches or spacing. This is an upper bound for a cold cycle; other users sharing those same symbols can share each fetch in one process. Multiple replicas do not share the cache or request budget.
 
