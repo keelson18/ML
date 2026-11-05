@@ -55,11 +55,11 @@ function launchService(name, args, overrides = {}) {
 }
 
 async function waitUntilReady(name, url, child) {
-  const deadline = Date.now() + 30_000;
+  const deadline = Date.now() + 45_000;
   let lastFailure = 'no response';
   while (!stopping && Date.now() < deadline) {
     try {
-      const response = await fetch(url, { signal: AbortSignal.timeout(1000) });
+      const response = await fetch(url, { signal: AbortSignal.timeout(2000) });
       const health = response.ok ? await response.json().catch(() => null) : null;
       if (health?.service === 'quantum-api') return;
       lastFailure = response.ok ? 'response was not the Quantum API health check' : `HTTP ${response.status}`;
@@ -69,7 +69,7 @@ async function waitUntilReady(name, url, child) {
     if (child?.exitCode !== null && child?.exitCode !== undefined) {
       throw new Error(`${name} exited with code ${child.exitCode} before becoming healthy at ${url}`);
     }
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await new Promise((resolve) => setTimeout(resolve, 500));
   }
   throw new Error(`${name} failed to become healthy at ${url}: ${lastFailure}`);
 }
@@ -90,7 +90,7 @@ async function start() {
     if (await isHealthyApi(healthUrl)) {
       console.log(`[dev] Reusing the API already healthy at ${healthUrl}.`);
     } else {
-      const api = launchService('Autonomy API', [resolve(root, 'node_modules/tsx/dist/cli.mjs'), 'watch', 'backend/src/server.ts'], { AUTONOMY_PORT: autonomyPort });
+      const api = launchService('Autonomy API', [resolve(root, 'node_modules/tsx/dist/cli.mjs'), 'backend/src/server.ts'], { AUTONOMY_PORT: autonomyPort });
       await waitUntilReady('Autonomy API', healthUrl, api);
     }
   } else {
