@@ -2,6 +2,7 @@
 import { masterDecisionEngine, type DecisionEngineContext } from '../engines/decision-engine';
 import type { Candle, Timeframe } from '../../../src/lib/types';
 import type { MarketType } from '../../../src/lib/types';
+import type { MLPrediction } from '../../../src/lib/types';
 import type { TradePlan } from '../trader/types';
 import { traderConfig } from '../trader/config';
 import { markToMarket, calculatePositionSize } from '../trader/risk';
@@ -18,6 +19,7 @@ export interface AnalyzeInput {
   candleClosure?: 'verified_closed' | 'forming' | 'unknown';
   dataState?: 'ready' | 'degraded' | 'stale' | 'failed';
   dataSource?: { provider: string; fetchedAt: number; datasetId: string; marketType?: MarketType };
+  ml?: { prediction?: MLPrediction; featureSnapshot?: Record<string, number>; datasetId?: string };
 }
 
 async function buildContext(input: AnalyzeInput, accountId: string): Promise<DecisionEngineContext> {
@@ -76,6 +78,7 @@ async function buildContext(input: AnalyzeInput, accountId: string): Promise<Dec
     candleClosure: input.candleClosure ?? 'unknown',
     dataState: input.dataState ?? 'degraded',
     dataSource: input.dataSource,
+    ml: input.ml,
     risk: {
       trade: {
         size: sizing.quantity,

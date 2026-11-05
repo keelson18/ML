@@ -384,7 +384,7 @@ Deno.serve(async (req: Request) => {
       const authHeader = req.headers.get('Authorization') ?? '';
       const token = authHeader.slice('Bearer '.length);
       const modelState = await ensureModel(supabase, pair, timeframe, token);
-      const { candles, provider, quoteCurrency } = await fetchCandles(pair, timeframe, 1000, token);
+      const { candles, provider, quoteCurrency, datasetId } = await fetchCandles(pair, timeframe, 1000, token);
       const { features, valid } = computeFeatures(candles, true);
       if (!valid || features.length === 0) return jsonResponse({ error: 'Insufficient data' }, 422, headers);
       const last = features[features.length - 1];
@@ -407,6 +407,10 @@ Deno.serve(async (req: Request) => {
         confidence,
         dataProvider: provider,
         quoteCurrency,
+        dataset_id: datasetId,
+        data_end: candles.at(-1)?.time,
+        data_fetched_at: Date.now(),
+        prediction_timestamp: new Date().toISOString(),
       };
       // Cache prediction durably.
       await supabase.from('ml_predictions').upsert({

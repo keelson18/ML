@@ -4,7 +4,7 @@ import { AutonomousPipeline } from '../autonomy/pipeline';
 import { fetchMarketData, MarketDataProviderError } from '../services/marketDataService';
 import { getMarketAvailability } from '../services/marketAvailability';
 import { getMarket } from '../../../src/lib/markets';
-import { TIMEFRAMES, type Timeframe } from '../../../src/lib/types';
+import { TIMEFRAMES, type MLPrediction, type Timeframe } from '../../../src/lib/types';
 import { config } from '../config.js';
 import { BoundedMap, WindowLimiter } from '../utils/limits';
 import { selectClosedCandles } from '../trader/candle-math';
@@ -12,6 +12,7 @@ import { hasFreshClosedCandleData } from '../trader/market-data-quality';
 import { traderConfig } from '../trader/config';
 import { getSupabaseClientWithToken } from '../db';
 import { appendAiLearningJournalEvent } from '../services/aiLearningJournal';
+import { readJsonSafe } from '../../../shared/http';
 
 const VALID_TIMEFRAMES = new Set<string>(TIMEFRAMES.map((t) => t.value));
 const SYMBOL_PATTERN = /^[A-Z0-9._-]{1,20}$/;
@@ -68,6 +69,23 @@ interface DecisionRequest {
   symbol?: unknown;
   timeframe?: unknown;
   candles?: unknown;
+}
+
+async function fetchDecisionPrediction(pair: string, timeframe: Timeframe, accessToken: string): Promise<MLPrediction | undefined> {
+  if (!config.supabaseUrl || !config.supabaseAnonKey) return undefined;
+  const response = await fetch(`${config.supabaseUrl.replace(/\/$/, '')}/functions/v1/ml-predict/predict`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+      apikey: config.supabaseAnonKey,
+    },
+    body: JSON.stringify({ pair, timeframe }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  const { payload } = await readJsonSafe<MLPrediction & { error?: string }>(response);
+  if (!response.ok || payload === null) throw new Error(payload?.error ?? `ML prediction failed (${response.status}).`);
+  return payload;
 }
 
 function validateDecisionRequest(body: DecisionRequest | undefined): { symbol: string; timeframe: Timeframe } | string {
@@ -128,6 +146,12 @@ export async function decisionRoutes(app: FastifyInstance, pipeline: AutonomousP
       return reply.code(429).send({ error: 'Analysis is busy. Try again shortly.' });
     }
     try {
+      let mlPrediction: MLPrediction | undefined;
+      try {
+        mlPrediction = await fetchDecisionPrediction(symbol, timeframe, request.accessToken);
+      } catch (error) {
+        request.log.warn({ userId, symbol, timeframe, err: error instanceof Error ? error.message : 'unknown' }, 'ML evidence unavailable; decision continues in degraded mode');
+      }
       const result = await analyze({
         symbol,
         timeframe,
@@ -139,6 +163,11 @@ export async function decisionRoutes(app: FastifyInstance, pipeline: AutonomousP
           fetchedAt: marketData.fetchedAt,
           datasetId: marketData.dataset.id,
           marketType: marketData.instrument.marketType,
+        },
+        ml: {
+          prediction: mlPrediction,
+          featureSnapshot: { candleCount: candles.length },
+          datasetId: marketData.dataset.id,
         },
       }, userId);
       const researchContext = await getApprovedResearchContext(request.accessToken, symbol, timeframe);

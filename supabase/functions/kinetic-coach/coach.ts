@@ -125,13 +125,13 @@ export function createCoachHandler(deps: CoachDeps) {
         },
       );
       if (!upstream.ok) {
-        console.error("[kinetic-coach] upstream status", upstream.status);
+        console.error("coach upstream status", upstream.status);
         return json({ error: "The coach is unavailable right now. Please try again." }, 502, cors);
       }
 
       return json({ reply: extractReply(await upstream.json()) }, 200, cors);
     } catch (err) {
-      console.error("[kinetic-coach] request failed", err instanceof Error ? err.name : "unknown");
+      console.error("coach request failed", err instanceof Error ? err.name : "unknown");
       return json({ error: "Internal error" }, 500, cors);
     }
   };

@@ -1,9 +1,61 @@
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Candle } from '../lib/types';
 import PriceChart from './PriceChart';
+import { resolveThemeColors } from './price-chart-colors';
+
+const cssVariables: Record<string, string> = {};
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  for (const key of Object.keys(cssVariables)) delete cssVariables[key];
+});
+
+function stubCssVariables(values: Record<string, string>) {
+  Object.assign(cssVariables, values);
+  vi.stubGlobal('document', { documentElement: {} });
+  vi.stubGlobal('getComputedStyle', () => ({
+    getPropertyValue: (name: string) => cssVariables[name] ?? '',
+  }));
+}
 
 describe('PriceChart', () => {
+  it('converts CSS RGB channels into comma-separated colors', () => {
+    stubCssVariables({
+      '--bg': '150 150 165',
+      '--text': '52 211 153',
+      '--primary': '#3b82f6',
+    });
+
+    expect(resolveThemeColors('dark')).toMatchObject({
+      bg: 'rgb(150, 150, 165)',
+      text: 'rgb(52, 211, 153)',
+      primary: '#3b82f6',
+    });
+  });
+
+  it('uses theme fallbacks for missing and invalid CSS values', () => {
+    stubCssVariables({
+      '--bg': '1 2',
+      '--text': '256 0 0',
+      '--muted': 'not-a-color',
+      '--border': '1 two 3',
+    });
+
+    expect(resolveThemeColors('light')).toMatchObject({
+      bg: '#ffffff',
+      text: '#111827',
+      muted: '#787887',
+      border: '#f0f0f4',
+    });
+    expect(resolveThemeColors('dark')).toMatchObject({
+      bg: '#14141a',
+      text: '#f3f4f6',
+      muted: '#9696a5',
+      border: '#1e1e26',
+    });
+  });
+
   it('renders candle values without layer controls or chart-only drawings', () => {
     const candle: Candle = {
       time: 1_767_225_600,

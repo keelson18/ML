@@ -14,10 +14,14 @@ insert into public.ml_model_artifacts (
   weights, bias, feature_mean, feature_std, training_metrics, test_metrics,
   momentum_baseline_accuracy, no_edge, return_calibration, data_start, data_end
 ) values (
-  'BTCUSD', '1h', 'test-artifact-' || txid_current(), 'logistic-regression', 'ohlcv-v1', 5, 0.1,
+  'BTCUSD', '1h', 'test-artifact-' || txid_current(), 'logistic-regression', 'ohlcv-14-v2', 5, 0.1,
   '{"epochs":200,"learningRate":0.1}'::jsonb, 'test-dataset', 'twelvedata', 'BTC/USD', 'USD',
-  '[0.1]'::jsonb, 0, '[0]'::jsonb, '[1]'::jsonb, '{"accuracy":0.5}'::jsonb, '{"accuracy":0.5}'::jsonb,
-  0.5, true, '[]'::jsonb, 100, 200
+  '[0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1]'::jsonb, 0,
+  '[0,0,0,0,0,0,0,0,0,0,0,0,0,0]'::jsonb,
+  '[1,1,1,1,1,1,1,1,1,1,1,1,1,1]'::jsonb,
+  '{"accuracy":0.5,"f1":0.5,"samples":50}'::jsonb,
+  '{"accuracy":0.5,"f1":0.5,"samples":50}'::jsonb,
+  0.5, true, '[{"lowerProbability":0,"upperProbability":1,"samples":0,"expectedReturnPct":null}]'::jsonb, 100, 200
 );
 
 select throws_ok(

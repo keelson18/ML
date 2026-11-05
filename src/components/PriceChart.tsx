@@ -3,6 +3,7 @@ import {
   createChart,
   ColorType,
   CrosshairMode,
+  type IChartApi,
   type ISeriesApi,
   type LineWidth,
   type Time,
@@ -12,6 +13,7 @@ import type { Candle } from '../lib/types';
 import { normalizeCandles } from '../lib/chart-data';
 import { applyCandleUpdate } from '../lib/chart-feed';
 import { recordTiming } from '../lib/perf';
+import { resolveThemeColors } from './price-chart-colors';
 
 interface OverlayLine {
   type: 'line';
@@ -48,30 +50,11 @@ function toCandleBar(candle: Candle) {
   };
 }
 
-function resolveThemeColors(theme: 'light' | 'dark') {
-  const root = typeof document !== 'undefined' ? getComputedStyle(document.documentElement) : null;
-  // CSS variables hold space-separated RGB channels (e.g. "150 150 165"); wrap them as rgb(...)
-  // so lightweight-charts receives a parseable color string rather than the raw channel list.
-  const toColor = (varName: string, fallback: string) => {
-    const value = root?.getPropertyValue(varName).trim();
-    if (!value) return fallback;
-    if (/^(#|rgba?|hsla?)/i.test(value)) return value;
-    return `rgb(${value})`;
-  };
-  return {
-    bg: toColor('--bg', theme === 'dark' ? '#14141a' : '#ffffff'),
-    text: toColor('--text', theme === 'dark' ? '#f3f4f6' : '#111827'),
-    muted: toColor('--muted', theme === 'dark' ? '#9696a5' : '#787887'),
-    border: toColor('--border', theme === 'dark' ? '#1e1e26' : '#f0f0f4'),
-    primary: toColor('--primary', '#3b82f6'),
-    success: toColor('--success', '#22c55e'),
-    danger: toColor('--danger', '#ef4444'),
-  };
-}
-
 export default function PriceChart({ candles, theme, overlays = [] }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const overlaySeriesRef = useRef<ISeriesApi<'Line'>[]>([]);
   const appliedCandlesRef = useRef<Candle[]>([]);
 
   const safeCandles = useMemo(() => normalizeCandles(candles), [candles]);
@@ -102,6 +85,7 @@ export default function PriceChart({ candles, theme, overlays = [] }: Props) {
       rightPriceScale: { borderColor: colors.border },
       timeScale: { borderColor: colors.border, timeVisible: true },
     });
+    chartRef.current = chart;
     const candleSeries = chart.addCandlestickSeries({
       upColor: colors.success,
       downColor: colors.danger,
@@ -111,18 +95,6 @@ export default function PriceChart({ candles, theme, overlays = [] }: Props) {
     });
     candleSeriesRef.current = candleSeries;
     appliedCandlesRef.current = [];
-
-    for (const overlay of overlays) {
-      if (overlay.type !== 'line') continue;
-      const series = chart.addLineSeries({
-        color: overlay.color ?? colors.primary,
-        lineWidth: toLineWidth(overlay.width),
-        lineStyle: LineStyle.Solid,
-        lastValueVisible: true,
-        priceLineVisible: false,
-      });
-      series.setData(overlay.data.map((point) => ({ time: point.time as Time, value: point.value })));
-    }
 
     const updateSize = () => {
       if (!containerRef.current) return;
@@ -139,9 +111,31 @@ export default function PriceChart({ candles, theme, overlays = [] }: Props) {
     return () => {
       observer?.disconnect();
       chart.remove();
+      chartRef.current = null;
+      overlaySeriesRef.current = [];
       candleSeriesRef.current = null;
     };
-  }, [theme, overlays]);
+  }, [theme]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    for (const series of overlaySeriesRef.current) chart.removeSeries(series);
+    overlaySeriesRef.current = [];
+    const colors = resolveThemeColors(theme);
+    for (const overlay of overlays) {
+      if (overlay.type !== 'line') continue;
+      const series = chart.addLineSeries({
+        color: overlay.color ?? colors.primary,
+        lineWidth: toLineWidth(overlay.width),
+        lineStyle: LineStyle.Solid,
+        lastValueVisible: true,
+        priceLineVisible: false,
+      });
+      series.setData(overlay.data.map((point) => ({ time: point.time as Time, value: point.value })));
+      overlaySeriesRef.current.push(series);
+    }
+  }, [overlays, theme]);
 
   useEffect(() => {
     const candleSeries = candleSeriesRef.current;

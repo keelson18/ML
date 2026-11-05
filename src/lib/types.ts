@@ -47,6 +47,10 @@ export interface MLPrediction {
   confidence: 'low' | 'medium' | 'high';
   edge_status?: 'no-edge' | 'beats-momentum-baseline';
   momentum_baseline_accuracy?: number;
+  dataset_id?: string;
+  data_end?: number;
+  data_fetched_at?: number;
+  prediction_timestamp?: string;
 }
 
 export interface Recommendation {

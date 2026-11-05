@@ -45,6 +45,10 @@ export const mlApi = {
         confidence: data.confidence as MLPrediction['confidence'],
         edge_status: (data.payload as Partial<MLPrediction> | null)?.edge_status,
         momentum_baseline_accuracy: (data.payload as Partial<MLPrediction> | null)?.momentum_baseline_accuracy,
+        dataset_id: (data.payload as Partial<MLPrediction> | null)?.dataset_id,
+        data_end: (data.payload as Partial<MLPrediction> | null)?.data_end,
+        data_fetched_at: (data.payload as Partial<MLPrediction> | null)?.data_fetched_at,
+        prediction_timestamp: (data.payload as Partial<MLPrediction> | null)?.prediction_timestamp,
       } : null,
     };
   },
