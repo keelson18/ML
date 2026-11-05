@@ -50,16 +50,23 @@ function toCandleBar(candle: Candle) {
 
 function resolveThemeColors(theme: 'light' | 'dark') {
   const root = typeof document !== 'undefined' ? getComputedStyle(document.documentElement) : null;
-  const palette = {
-    bg: root?.getPropertyValue('--bg').trim() || (theme === 'dark' ? '#14141a' : '#ffffff'),
-    text: root?.getPropertyValue('--text').trim() || (theme === 'dark' ? '#f3f4f6' : '#111827'),
-    muted: root?.getPropertyValue('--muted').trim() || (theme === 'dark' ? '#9696a5' : '#787887'),
-    border: root?.getPropertyValue('--border').trim() || (theme === 'dark' ? '#1e1e26' : '#f0f0f4'),
-    primary: root?.getPropertyValue('--primary').trim() || '#3b82f6',
-    success: root?.getPropertyValue('--success').trim() || '#22c55e',
-    danger: root?.getPropertyValue('--danger').trim() || '#ef4444',
+  // CSS variables hold space-separated RGB channels (e.g. "150 150 165"); wrap them as rgb(...)
+  // so lightweight-charts receives a parseable color string rather than the raw channel list.
+  const toColor = (varName: string, fallback: string) => {
+    const value = root?.getPropertyValue(varName).trim();
+    if (!value) return fallback;
+    if (/^(#|rgba?|hsla?)/i.test(value)) return value;
+    return `rgb(${value})`;
   };
-  return palette;
+  return {
+    bg: toColor('--bg', theme === 'dark' ? '#14141a' : '#ffffff'),
+    text: toColor('--text', theme === 'dark' ? '#f3f4f6' : '#111827'),
+    muted: toColor('--muted', theme === 'dark' ? '#9696a5' : '#787887'),
+    border: toColor('--border', theme === 'dark' ? '#1e1e26' : '#f0f0f4'),
+    primary: toColor('--primary', '#3b82f6'),
+    success: toColor('--success', '#22c55e'),
+    danger: toColor('--danger', '#ef4444'),
+  };
 }
 
 export default function PriceChart({ candles, theme, overlays = [] }: Props) {
