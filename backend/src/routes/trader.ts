@@ -7,7 +7,8 @@ import { isProviderSupportedMarket, paperEligibilityReason, paperSettlementEligi
 import type { Market } from '../../../src/lib/types';
 import { getSupabaseClientWithToken } from '../db';
 import { config } from '../config';
-import { fetchMarketData, getCachedCandleFreshness } from '../services/marketDataService';
+import { fetchMarketData, getCachedCandleFreshness, isTimeframe } from '../services/marketDataService';
+import { buildBotStatus } from '../services/botStatus';
 import { getMarketAvailability, type MarketAvailability } from '../services/marketAvailability';
 import { traderConfig } from '../trader/config';
 import { createTradePlan, rankPlannerResults } from '../trader/planner';
@@ -113,6 +114,26 @@ export async function traderRoutes(app: FastifyInstance) {
     catch (error) {
       const message = error instanceof Error ? error.message : 'Autopilot run failed.';
       return reply.code(message.startsWith('Enable paper autopilot') || message.startsWith('Paper autopilot is paused') || message.startsWith('AUTONOMOUS_TRADING is disabled') ? 409 : 503).send({ error: message });
+    }
+  });
+
+  app.get<{ Querystring: { symbol?: string; timeframe?: string } }>('/api/v1/trader/bot-status', {
+    preHandler: app.requireAuth,
+    config: { rateLimit: { max: config.marketRateLimitMax, timeWindow: config.rateLimitWindowMs } },
+  }, async (request, reply) => {
+    if (!request.authenticatedUserId) return reply.code(401).send({ error: 'Authentication required.' });
+    const symbol = request.query.symbol;
+    const timeframe = request.query.timeframe;
+    if (!symbol || !MARKET_UNIVERSE.some((market) => market.isActive && market.symbol === symbol)) {
+      return reply.code(400).send({ error: 'Choose an active registered instrument.' });
+    }
+    if (!timeframe || !isTimeframe(timeframe)) return reply.code(400).send({ error: 'Choose a supported timeframe.' });
+    try {
+      // Reads the bot's real lifecycle state; it never triggers a provider request or a bot cycle.
+      return { status: await buildBotStatus(request.authenticatedUserId, symbol, timeframe) };
+    } catch {
+      request.log.error({ symbol, timeframe }, 'bot status read failed');
+      return reply.code(503).send({ error: 'Bot status is unavailable.' });
     }
   });
 

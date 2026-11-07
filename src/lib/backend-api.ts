@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 import { readJsonSafe } from '../../shared/http';
-import type { Candle, MarketDataProvider, MLPrediction, Timeframe } from './types';
+import type { Candle, MarketDataProvider, MarketType, MLPrediction, Timeframe } from './types';
 
 export async function authenticatedBackendRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const { data: { session } } = await supabase.auth.getSession();
@@ -429,6 +429,73 @@ export async function fetchBackendHealth(): Promise<BackendHealth> {
 
 export interface TraderAutopilotRunResult {
   queued: true;
+}
+
+export type BotActionState =
+  | 'OFFLINE' | 'DISABLED' | 'INITIALIZING' | 'MONITORING' | 'ANALYZING' | 'NO_SETUP'
+  | 'PLAN_CREATED' | 'WAITING_FOR_TRIGGER' | 'TRIGGER_CONFIRMED' | 'RISK_REJECTED'
+  | 'READY_FOR_PAPER_EXECUTION' | 'PAPER_ORDER_PENDING' | 'PAPER_BUY' | 'PAPER_SELL'
+  | 'POSITION_OPEN' | 'PAUSED' | 'ERROR';
+
+export interface BotStatus {
+  action: BotActionState;
+  selectedSymbol: string;
+  assetClass: MarketType | null;
+  settlementCurrency: string | null;
+  timeframe: Timeframe;
+  botEnabled: boolean;
+  shadowMode: boolean;
+  scheduler: {
+    running: boolean;
+    cycleInProgress: boolean;
+    lastCycleAt: string | null;
+    nextScheduledAt: string | null;
+    lastError: string | null;
+    leaseContentionCount: number;
+    leaseClaimFailureCount: number;
+    leaseRenewalFailureCount: number;
+    activeLeaseCount: number;
+  };
+  enrollment: { enabled: boolean; symbols: string[]; pausedReason: string | null; lastRunAt: string | null } | null;
+  data: {
+    providerSupported: boolean;
+    provider: string | null;
+    sourceInstrument: string | null;
+    status: 'verified' | 'partially_verified' | 'unverified' | 'unavailable' | 'stale' | 'error' | 'unsupported';
+    checkedAt: number | null;
+    reason: string | null;
+    sessionOpen: boolean;
+    sessionReason: string;
+  };
+  analysis: { state: 'NOT_RUN' | 'NO_SETUP' | 'PLAN_AVAILABLE'; marketBias: 'BUY' | 'SELL' | 'NEUTRAL' | 'UNKNOWN' };
+  plan: {
+    id: string; symbol: string; side: 'long' | 'short'; status: string; htfBias: string;
+    triggerTimeframe: Timeframe | null; triggerLevel: number | null; invalidation: number; targets: number[];
+    lastReason: string | null; createdAt: string; updatedAt: string;
+  } | null;
+  trigger: { state: 'NONE' | 'WAITING' | 'CONFIRMED'; reason: string | null };
+  risk: { state: 'NOT_EVALUATED' | 'REJECTED' | 'APPROVED'; reason: string | null };
+  execution: {
+    finalAction: 'NONE' | 'BUY' | 'SELL';
+    orderStatus: 'NONE' | 'PENDING' | 'FILLED';
+    orderSide: 'buy' | 'sell' | null;
+    positionStatus: 'NONE' | 'OPEN';
+    positionSide: 'buy' | 'sell' | null;
+    positionEntry: number | null;
+    positionQuantity: number | null;
+  };
+  ledger: 'verified' | 'broken' | 'unavailable';
+  lastProcessedCandleAt: string | null;
+  lastClosedTradeAt: string | null;
+  closedTradeCount: number;
+  blockingReason: string | null;
+  updatedAt: string;
+}
+
+export async function fetchBotStatus(symbol: string, timeframe: Timeframe): Promise<BotStatus> {
+  const query = new URLSearchParams({ symbol, timeframe });
+  const payload = await authenticatedBackendRequest<{ status: BotStatus }>(`/api/v1/trader/bot-status?${query}`);
+  return payload.status;
 }
 
 export async function fetchTraderAutopilot(): Promise<TraderAutopilotSettings> {

@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, AlertTriangle, ShieldCheck, Target, TrendingDown, TrendingUp } from 'lucide-react';
 import TradingTerminal from './TradingTerminal';
-import type { AutonomyStatus, BackendDecision } from '../lib/backend-api';
-import { fetchAutonomyStatus } from '../lib/backend-api';
+import type { BackendDecision, BotStatus } from '../lib/backend-api';
+import { fetchBotStatus } from '../lib/backend-api';
+import { botToneClass, describeBotBias, describeExecution, describePlan, describeRisk, describeTrigger, formatBotTimestamp, presentBotAction } from '../lib/bot-status';
 import type { Candle, Market, Recommendation, Signal, Timeframe } from '../lib/types';
 import { formatMarketPrice } from '../lib/markets';
 
@@ -22,41 +23,52 @@ interface Props {
   loading: boolean;
 }
 
-const initialStatus: AutonomyStatus = { state: 'OFFLINE', processedDecisions: 0, executedOrders: 0, skippedRuns: 0, consecutiveFailures: 0 };
-
 export default function AutonomousCommandCenter({ symbol, timeframe, candles, candlesStale, recommendation, serverDecision, serverDecisionError, signals, markets, onSymbolChange, theme, livePrice, loading }: Props) {
-  const [status, setStatus] = useState<AutonomyStatus>(initialStatus);
-  const [statusError, setStatusError] = useState(false);
+  const [botStatus, setBotStatus] = useState<BotStatus | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const requestSequence = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
-    const refresh = () => fetchAutonomyStatus().then((next) => { if (!cancelled) { setStatus(next); setStatusError(false); } }).catch(() => { if (!cancelled) setStatusError(true); });
+    // Polls the authenticated bot-status endpoint only; it never forces a provider fetch or a bot cycle.
+    const refresh = () => {
+      const sequence = ++requestSequence.current;
+      fetchBotStatus(symbol, timeframe)
+        .then((next) => {
+          if (cancelled || sequence !== requestSequence.current) return;
+          setBotStatus(next);
+          setStatusError(null);
+        })
+        .catch((cause: unknown) => {
+          if (cancelled || sequence !== requestSequence.current) return;
+          // Never keep showing a previous successful status as if it were current.
+          setBotStatus(null);
+          setStatusError(cause instanceof Error ? cause.message : 'Bot status is unavailable.');
+        });
+    };
     refresh();
     const timer = window.setInterval(refresh, 15_000);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, []);
+  }, [symbol, timeframe]);
 
   const serverDirection = serverDecision?.marketBias ?? (serverDecision?.decision === 'BUY' ? 'buy' : serverDecision?.decision === 'SELL' ? 'sell' : 'neutral');
-  const direction = serverDecision ? serverDirection : recommendation?.side ?? 'neutral';
+  const botBias = botStatus?.analysis.marketBias;
+  const direction = botBias === 'BUY' ? 'buy' : botBias === 'SELL' ? 'sell' : botBias === 'NEUTRAL' ? 'neutral' : serverDecision ? serverDirection : recommendation?.side ?? 'neutral';
   const confidenceScore = serverDecision?.confidence ?? (recommendation ? Math.abs(recommendation.score) : 0);
   const confidenceLabel = confidenceScore >= 0.7 ? 'HIGH' : confidenceScore >= 0.4 ? 'MODERATE' : 'LOW';
   const evidence = useMemo(() => signals.slice(0, 6), [signals]);
-  const automatic = status.state === 'MONITORING' || status.state === 'DECIDING';
-  const actionable = serverDecision?.decision === 'BUY' || serverDecision?.decision === 'SELL';
-  const actionLabel = serverDecision ? serverDecision.decision : serverDecisionError ? 'BLOCKED' : 'WAIT';
-  const decisionMessage = serverDecisionError
-    ? [
-      `${serverDecisionError.replace(/[.!?]+$/, '')}.`,
-      serverDecisionError.includes('Market is not verified') ? 'An admin can verify configured markets from Admin → Market Availability → Probe markets.' : null,
-      'Local indicator output is bias context only.',
-    ].filter(Boolean).join(' ')
-    : 'Waiting for the server decision. Local indicator output is bias context only.';
+  const presentation = botStatus ? presentBotAction(botStatus.action) : null;
+  const live = Boolean(botStatus && ['MONITORING', 'ANALYZING', 'PLAN_CREATED', 'WAITING_FOR_TRIGGER', 'TRIGGER_CONFIRMED', 'READY_FOR_PAPER_EXECUTION', 'PAPER_ORDER_PENDING', 'POSITION_OPEN', 'PAPER_BUY', 'PAPER_SELL'].includes(botStatus.action));
+  const actionLabel = presentation ? presentation.label : statusError ? 'UNAVAILABLE' : 'LOADING';
+  const decisionMessage = statusError
+    ? `Bot status connection failed: ${statusError.replace(/[.!?]+$/, '')}. No previous state is shown because it may no longer be current.`
+    : botStatus?.blockingReason ?? presentation?.description ?? 'Loading the authoritative bot lifecycle from the backend.';
 
   return (
     <section className="command-center" aria-label="Autonomous trading command center">
       <div className="command-center-header">
         <div><span className="command-kicker">AUTONOMOUS COMMAND CENTER</span><h2>{symbol} <span>{timeframe} execution</span></h2></div>
-        <div className="command-health"><span className={`health-dot ${automatic ? 'is-live' : ''}`} />{statusError ? 'API OFFLINE' : automatic ? 'AUTOMATIC' : status.state}</div>
+        <div className="command-health"><span className={`health-dot ${live ? 'is-live' : ''}`} />{statusError ? 'API OFFLINE' : presentation ? presentation.label : 'CONNECTING'}</div>
       </div>
 
       <div className="command-center-grid">
@@ -65,9 +77,10 @@ export default function AutonomousCommandCenter({ symbol, timeframe, candles, ca
           <div className="command-watchlist">{markets.slice(0, 6).map((market) => <button key={market.symbol} className={market.symbol === symbol ? 'is-active' : ''} onClick={() => onSymbolChange(market.symbol)}><span>{market.baseAsset}</span><small>{market.symbol === symbol ? 'ACTIVE' : market.label}</small></button>)}</div>
 
           <div className={`bias-badge ${direction === 'buy' ? 'bullish' : direction === 'sell' ? 'bearish' : 'neutral'}`}>{direction === 'buy' ? <TrendingUp className="w-4 h-4" /> : direction === 'sell' ? <TrendingDown className="w-4 h-4" /> : <Target className="w-4 h-4" />} {direction.toUpperCase()}</div>
-          <ContextRow label="Market bias" value={direction === 'neutral' ? 'Unknown' : direction === 'buy' ? 'Bullish' : 'Bearish'} />
-          <ContextRow label="Execution" value={`${timeframe} active`} />
-          <ContextRow label="Data" value={loading ? 'Loading' : candles.length >= 60 ? 'Validated' : 'Collecting'} />
+          <ContextRow label="Market bias" value={botStatus ? describeBotBias(botStatus.analysis.marketBias) : direction === 'neutral' ? 'Unknown' : direction === 'buy' ? 'Bullish' : 'Bearish'} />
+          <ContextRow label="Active plan" value={describePlan(botStatus?.plan ?? null)} />
+          <ContextRow label="Data" value={statusError ? 'Unavailable' : botStatus ? `${botStatus.data.status}${botStatus.data.provider ? ` · ${botStatus.data.provider}` : ''}` : loading ? 'Loading' : 'Connecting'} />
+          <ContextRow label="Shadow mode" value={botStatus ? (botStatus.shadowMode ? 'On · no paper fill' : 'Off') : 'Unknown'} />
           <div className="context-note">The engine watches, decides, and manages paper positions automatically. This view is for oversight.</div>
         </aside>
 
@@ -97,12 +110,21 @@ export default function AutonomousCommandCenter({ symbol, timeframe, candles, ca
       </div>
 
       <div className="command-decision-bar">
-        <div className={`command-decision decision-${actionable ? serverDirection : 'neutral'}`}><span>ACTION</span><strong>{actionLabel}</strong></div>
-        <div className="decision-explanation">{serverDecision?.explanation ?? decisionMessage}</div>
-        <div className="decision-risk"><span><ShieldCheck className="w-3.5 h-3.5" /> Risk capacity</span><strong>{serverDecision?.stages?.riskApproval.status.toUpperCase() ?? (actionable ? 'APPROVED' : serverDecision ? 'NOT CLEARED' : 'WAITING')}</strong></div>
-        <div className="decision-risk"><span>Orders</span><strong>{status.executedOrders}</strong></div>
-        {status.state === 'PAUSED' && <span title="Automatic engine paused after a safety event"><AlertTriangle className="w-4 h-4 text-warning" /></span>}
+        <div className={`command-decision decision-${botStatus?.execution.finalAction === 'SELL' ? 'sell' : botStatus?.execution.finalAction === 'BUY' ? 'buy' : 'neutral'}`}>
+          <span>ACTION</span>
+          <strong className={presentation ? botToneClass(presentation.tone) : undefined}>{actionLabel}</strong>
+        </div>
+        <div className="decision-explanation">{decisionMessage}</div>
+        <div className="decision-risk"><span>Trigger</span><strong>{botStatus ? describeTrigger(botStatus) : '—'}</strong></div>
+        <div className="decision-risk"><span><ShieldCheck className="w-3.5 h-3.5" /> Risk</span><strong>{botStatus ? describeRisk(botStatus) : '—'}</strong></div>
+        <div className="decision-risk"><span>Execution</span><strong>{botStatus ? describeExecution(botStatus) : '—'}</strong></div>
+        <div className="decision-risk"><span>Closed trades</span><strong>{botStatus?.closedTradeCount ?? 0}</strong></div>
+        {botStatus?.action === 'PAUSED' && <span title="Automatic engine paused after a safety event"><AlertTriangle className="w-4 h-4 text-warning" /></span>}
       </div>
+      <div className="decision-explanation border-t border-border/60 pt-2 text-[11px] text-muted">
+        Market bias {botStatus ? describeBotBias(botStatus.analysis.marketBias) : 'unknown'} · Last bot cycle {formatBotTimestamp(botStatus?.scheduler.lastCycleAt ?? null)} · Last processed candle {formatBotTimestamp(botStatus?.lastProcessedCandleAt ?? null)} · Bias is context only and never an approved paper trade.
+      </div>
+      {serverDecisionError && <p role="status" className="decision-explanation text-[11px] text-warning">Decision analysis is unavailable: {serverDecisionError.replace(/[.!?]+$/, '')}. This does not change the bot lifecycle state above.</p>}
       {serverDecision?.stages && <div className="decision-explanation border-t border-border/50 px-3 py-2 text-xs text-muted" aria-label="Decision stages">
         Setup: {serverDecision.stages.setupDetection.status.replaceAll('_', ' ')} · Entry: {serverDecision.stages.entryConfirmation.status.replaceAll('_', ' ')} · Final: {serverDecision.stages.finalDecision.action.replaceAll('_', ' ')}
       </div>}

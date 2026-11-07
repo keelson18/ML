@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Activity, AlertTriangle, ClipboardList, RefreshCw, ShieldCheck } from 'lucide-react';
 import PageFrame from '../PageFrame';
-import { fetchActiveEventBlackouts, fetchAutonomyStatus, fetchBackendHealth, fetchTraderAutopilot, fetchTraderHistory, fetchTraderOverview, fetchTraderPlans, refreshTraderPlans, runTraderAutopilotNow, updateTraderAutopilot, type AutonomyStatus, type BackendHealth, type EventBlackout, type TraderAutopilotRunResult, type TraderAutopilotSettings, type TraderOverview, type TraderPlan } from '../../lib/backend-api';
+import { fetchActiveEventBlackouts, fetchAutonomyStatus, fetchBackendHealth, fetchBotStatus, fetchTraderAutopilot, fetchTraderHistory, fetchTraderOverview, fetchTraderPlans, refreshTraderPlans, runTraderAutopilotNow, updateTraderAutopilot, type AutonomyStatus, type BackendHealth, type BotStatus, type EventBlackout, type TraderAutopilotRunResult, type TraderAutopilotSettings, type TraderOverview, type TraderPlan } from '../../lib/backend-api';
+import { botToneClass, describeBotBias, describeExecution, describePlan, describeRisk, describeTrigger, formatBotTimestamp, presentBotAction } from '../../lib/bot-status';
 import { getPaperTradableMarkets } from '../../lib/markets';
 
 // Autopilot candidates come from the shared capability resolver: any asset class that settles in
@@ -34,6 +35,8 @@ export default function TraderDesk() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState(false);
+  const [botStatus, setBotStatus] = useState<BotStatus | null>(null);
+  const [botError, setBotError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -103,6 +106,22 @@ export default function TraderDesk() {
     } finally { setRefreshing(false); }
   };
 
+  const botSymbol = autopilotSymbols[0] ?? plans[0]?.symbol ?? '';
+  useEffect(() => {
+    if (!botSymbol) { setBotStatus(null); return; }
+    let cancelled = false;
+    const sequenceGuard = { current: 0 };
+    const refreshStatus = () => {
+      const sequence = ++sequenceGuard.current;
+      fetchBotStatus(botSymbol, '15m')
+        .then((next) => { if (!cancelled && sequence === sequenceGuard.current) { setBotStatus(next); setBotError(null); } })
+        .catch(() => { if (!cancelled && sequence === sequenceGuard.current) { setBotStatus(null); setBotError('Bot status is unavailable.'); } });
+    };
+    refreshStatus();
+    const timer = window.setInterval(refreshStatus, 30_000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [botSymbol]);
+
   const waitingPlans = useMemo(() => plans.filter((plan) => ['WATCHING', 'ARMED', 'PENDING_ORDER'].includes(plan.status)), [plans]);
   const dailyLossLimitPct = overview?.dailyLossLimitPct ?? 0;
   const weeklyLossLimitPct = overview?.weeklyLossLimitPct ?? 0;
@@ -115,6 +134,25 @@ export default function TraderDesk() {
       <div className="mb-5 flex items-start gap-3 rounded-xl border border-warning/30 bg-warning/10 p-4 text-sm text-text">
         <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
         <div><strong>Paper trading only — not financial advice.</strong> Results are simulated and do not predict real performance.</div>
+      </div>
+      <div aria-label="Bot lifecycle" aria-live="polite" className="mb-5 rounded-xl border border-border bg-surface p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs uppercase tracking-wide text-muted">Bot lifecycle {botSymbol ? `· ${botSymbol}` : ''}</span>
+          {botError
+            ? <strong role="alert" className="text-sm text-danger">Connection error: {botError}</strong>
+            : <strong className={`text-sm ${botStatus ? botToneClass(presentBotAction(botStatus.action).tone) : 'text-muted'}`}>{botStatus ? presentBotAction(botStatus.action).label : 'Loading'}</strong>}
+        </div>
+        {botStatus && !botError && <div className="mt-2 grid gap-x-4 gap-y-1 text-xs text-muted sm:grid-cols-2 lg:grid-cols-4">
+          <span>Bias <strong className="text-text">{describeBotBias(botStatus.analysis.marketBias)}</strong></span>
+          <span>Plan <strong className="text-text">{describePlan(botStatus.plan)}</strong></span>
+          <span>Trigger <strong className="text-text">{describeTrigger(botStatus)}</strong></span>
+          <span>Risk <strong className="text-text">{describeRisk(botStatus)}</strong></span>
+          <span>Execution <strong className="text-text">{describeExecution(botStatus)}</strong></span>
+          <span>Shadow mode <strong className="text-text">{botStatus.shadowMode ? 'On' : 'Off'}</strong></span>
+          <span>Last cycle <strong className="text-text">{formatBotTimestamp(botStatus.scheduler.lastCycleAt)}</strong></span>
+          <span>Last candle <strong className="text-text">{formatBotTimestamp(botStatus.lastProcessedCandleAt)}</strong></span>
+        </div>}
+        {botStatus?.blockingReason && !botError && <p className="mt-2 text-xs text-warning">{botStatus.blockingReason}</p>}
       </div>
       {error && <div role="alert" className="mb-5 flex items-center gap-2 rounded-xl border border-danger/30 bg-danger/10 p-3 text-sm text-danger"><AlertTriangle className="h-4 w-4 shrink-0" />{error}</div>}
       {loading && <div className="mb-5 rounded-xl border border-border bg-surface p-4 text-sm text-muted">Loading paper account and plan history…</div>}
