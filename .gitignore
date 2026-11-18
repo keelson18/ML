@@ -21,5 +21,6 @@ dist-ssr
 *.sln
 *.sw?
 .env
+.bolt/
 .builder/
 supabase/.temp/

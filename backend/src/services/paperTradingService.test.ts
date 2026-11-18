@@ -6,13 +6,19 @@ import type { TradePlan } from '../trader/types';
 import { traderConfig } from '../trader/config';
 import { calculatePositionSize } from '../trader/risk';
 import { config } from '../config';
+import { candleSeconds } from '../trader/candle-math';
 
 // Unit fixtures use historical synthetic candles; every normal fixture explicitly
 // represents an upstream freshness-approved candle unless the test overrides it.
-const advanceStoredTradePlans: typeof advanceVerifiedTradePlans = (input) => advanceVerifiedTradePlans({
-  ...input,
-  entriesAllowed: input.entriesAllowed ?? true,
-});
+const advanceStoredTradePlans: typeof advanceVerifiedTradePlans = async (input) => {
+  const closedAt = (input.candle.time + candleSeconds(input.timeframe, input.candle.time)) * 1000;
+  const mockNow = vi.spyOn(Date, 'now').mockReturnValue(closedAt + traderConfig.CLOSE_GRACE_MS + 100);
+  try {
+    return await advanceVerifiedTradePlans({ ...input, entriesAllowed: input.entriesAllowed ?? true });
+  } finally {
+    mockNow.mockRestore();
+  }
+};
 
 let availabilityStatus = 'verified';
 vi.mock('./marketAvailability', () => ({
@@ -249,7 +255,7 @@ describe('backend paper position lifecycle', () => {
   it('rejects a forming candle before loading plans or touching account state', async () => {
     const accountId = `forming-execution-${Date.now()}`;
     const forming = { time: Math.floor(Date.now() / 900_000) * 900, open: 99, high: 101, low: 98, close: 101, volume: 100 };
-    await expect(advanceStoredTradePlans({ accountId, symbol: 'BTCUSD', timeframe: '15m', candle: forming, candles: [forming], shadowMode: false }))
+    await expect(advanceVerifiedTradePlans({ accountId, symbol: 'BTCUSD', timeframe: '15m', candle: forming, candles: [forming], shadowMode: false }))
       .rejects.toThrow('boundary-verified closed candle');
     expect((await getAccount(accountId)).positions).toHaveLength(0);
   });
@@ -273,8 +279,30 @@ describe('backend paper position lifecycle', () => {
       expect(result.filled).toBe(0);
       expect(result.orders).toHaveLength(0);
       expect((await getAccount(accountId)).positions).toHaveLength(0);
-      expect((await getAccount(accountId)).tradePlans?.[0]?.lastReason).toContain('freshness was not verified');
+      expect((await getAccount(accountId)).tradePlans?.[0]?.lastReason).toContain('not fresh at execution time');
     } finally { traderConfig.PROMOTED_SETUP_TYPES = priorPromotions; }
+  });
+
+  it('rechecks the trigger age at the fill gate even if an earlier worker check approved it', async () => {
+    const accountId = `late-entry-${Date.now()}`;
+    const time = Math.floor(Date.parse('2026-01-06T00:00:00Z') / 1000 / 900) * 900;
+    const plan: TradePlan = {
+      id: `plan-${accountId}`, accountId, symbol: 'BTCUSD', side: 'long', setupType: 'trend-pullback', htfBias: 'bull',
+      zone: { low: 98, high: 100 }, trigger: { kind: 'close_above_level', level: 100 }, invalidation: 95,
+      targets: [{ price: 110, fractionOfPosition: 1 }], minRR: 2, expiresAtBar: time / 900 + 20,
+      thesis: 'late candle test', falsification: 'close below stop', grade: 'A', status: 'WATCHING', contextSnapshot: {},
+      engineVersions: {}, datasetId: 'late-entry-test', createdAt: new Date(time * 1000).toISOString(), updatedAt: new Date(time * 1000).toISOString(),
+    };
+    await storeTradePlan(accountId, plan);
+    const candle = { time, open: 99, high: 101, low: 98, close: 101, volume: 100 };
+    const result = await advanceVerifiedTradePlans({
+      accountId, symbol: plan.symbol, timeframe: '15m', candle, candles: [candle], shadowMode: false, entriesAllowed: true,
+    });
+
+    expect(result.filled).toBe(0);
+    expect(result.orders).toHaveLength(0);
+    expect((await getAccount(accountId)).positions).toHaveLength(0);
+    expect((await getAccount(accountId)).tradePlans?.[0]?.lastReason).toContain('not fresh at execution time');
   });
 
   it('rejects malformed or non-finite market prices before changing account state', async () => {

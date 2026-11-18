@@ -1,6 +1,32 @@
 export interface MlCandle { time: number; open: number; high: number; low: number; close: number; volume: number }
 
+function validateCloses(closes: number[], period: number): void {
+  if (!Number.isInteger(period) || period < 1) throw new Error('RSI period must be a positive integer.');
+  if (closes.some((close) => !Number.isFinite(close) || close <= 0)) {
+    throw new Error('RSI closes must be finite positive prices.');
+  }
+}
+
+function validateCandles(candles: MlCandle[]): void {
+  for (let index = 0; index < candles.length; index += 1) {
+    const candle = candles[index];
+    if (!candle || ![candle.time, candle.open, candle.high, candle.low, candle.close, candle.volume].every(Number.isFinite)) {
+      throw new Error(`ML candle ${index} contains a missing or non-finite value.`);
+    }
+    if (candle.open <= 0 || candle.high <= 0 || candle.low <= 0 || candle.close <= 0 || candle.volume < 0) {
+      throw new Error(`ML candle ${index} contains an invalid price or volume.`);
+    }
+    if (candle.high < Math.max(candle.open, candle.close) || candle.low > Math.min(candle.open, candle.close) || candle.low > candle.high) {
+      throw new Error(`ML candle ${index} has inconsistent OHLC values.`);
+    }
+    if (index > 0 && candle.time <= candles[index - 1]!.time) {
+      throw new Error('ML candle times must be strictly increasing.');
+    }
+  }
+}
+
 export function computeRsi(closes: number[], period = 14): number[] {
+  validateCloses(closes, period);
   const out = new Array<number>(closes.length).fill(50);
   if (closes.length <= period) return out;
 
@@ -36,6 +62,7 @@ export function computeMlFeatures(
   const predictionHorizon = options.predictionHorizon ?? 5;
   const minimumMoveAtr = options.minimumMoveAtr ?? 0.1;
   const includeUnlabeledTail = options.includeUnlabeledTail ?? false;
+  validateCandles(candles);
   if (!Number.isInteger(predictionHorizon) || predictionHorizon < 1) throw new Error('Prediction horizon must be a positive integer.');
   if (!Number.isFinite(minimumMoveAtr) || minimumMoveAtr < 0) throw new Error('Minimum ATR move must be finite and non-negative.');
   if (candles.length < 210) return { features: [], labels: [], sampleIndices: [], forwardReturns: [], valid: false };

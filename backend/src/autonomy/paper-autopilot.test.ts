@@ -1,9 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
-import { accountEntriesAllowed, eligibleAutopilotSymbols, entryCandleIsFresh, PaperAutopilotScheduler, prioritizeSeriesRequests, providerRequestSpacingMs, replayCandlesAfter, replaySequentialCandles, uniqueSeriesRequests, verifiedAutopilotSymbols } from './paper-autopilot';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { accountEntriesAllowed, configuredAutopilotSymbols, eligibleAutopilotSymbols, entryCandleIsFresh, PaperAutopilotScheduler, prioritizeSeriesRequests, providerRequestSpacingMs, recordSeriesAvailability, replayCandlesAfter, replaySequentialCandles, uniqueSeriesRequests, verifiedAutopilotSymbols } from './paper-autopilot';
 import { hasFreshClosedCandleData } from '../trader/market-data-quality';
 import { config } from '../config';
 
-const restrictions = vi.hoisted(() => ({ blocked: [] as Array<{ symbol: string }> }));
+const restrictions = vi.hoisted(() => ({
+  blocked: [] as Array<{ symbol: string }>,
+  availabilityChecks: [] as unknown[][],
+}));
 
 vi.mock('../db', () => ({
   getSupabaseClient: () => ({
@@ -21,13 +24,50 @@ vi.mock('../services/marketAvailability', () => ({
     { symbol: 'XAUUSD', status: 'verified', checkedAt: 1 },
     { symbol: 'USDJPY', status: 'verified', checkedAt: 1 },
   ],
+  recordProviderTimeframeAvailability: (...args: unknown[]) => restrictions.availabilityChecks.push(args),
+  recordProviderTimeframeError: vi.fn(),
+  recordProviderUnavailable: vi.fn(),
 }));
 import { closePaperPosition, simulatePaperOrder, type PaperAccountState } from '../engines/paper-execution';
 import { traderConfig } from '../trader/config';
 
+beforeEach(() => {
+  restrictions.blocked = [];
+  restrictions.availabilityChecks = [];
+});
+
 describe('paper autopilot scheduling helpers', () => {
   it('keeps unverified markets out of planner and entry scheduling', () => {
     expect(verifiedAutopilotSymbols(['BTCUSD', 'ETHUSD', 'BTCUSD'])).toEqual(['ETHUSD']);
+  });
+
+  it('lets the scheduler refresh a configured market even when process-local verification reset', () => {
+    expect(configuredAutopilotSymbols(['BTCUSD', 'ETHUSD', 'USDJPY', 'JP225']))
+      .toEqual(['BTCUSD', 'ETHUSD']);
+    expect(verifiedAutopilotSymbols(['BTCUSD'])).toEqual([]);
+  });
+
+  it('records fresh candle evidence per timeframe and marks stale provider data stale', () => {
+    const timeframe = '1h';
+    const now = Date.UTC(2026, 10, 14, 15, 5) / 1000;
+    const lastClosedStart = Math.floor(now / 3600) * 3600 - 3600;
+    const candles = Array.from({ length: 60 }, (_, index) => {
+      const close = 100 + index;
+      return { time: lastClosedStart - (59 - index) * 3600, open: close, high: close + 1, low: close - 1, close, volume: 1 };
+    });
+    const freshCount = recordSeriesAvailability('BTCUSD', timeframe, {
+      candles, stale: false, fetchedAt: now * 1000,
+    } as never, now * 1000);
+    const staleCount = recordSeriesAvailability('BTCUSD', timeframe, {
+      candles, stale: true, fetchedAt: now * 1000,
+    } as never, now * 1000);
+
+    expect(freshCount).toBe(60);
+    expect(staleCount).toBe(60);
+    expect(restrictions.availabilityChecks).toHaveLength(2);
+    expect(restrictions.availabilityChecks[0]?.slice(0, 4)).toEqual(['BTCUSD', '1h', 60, 60]);
+    expect(restrictions.availabilityChecks[0]?.[6]).toBe(false);
+    expect(restrictions.availabilityChecks[1]?.[6]).toBe(true);
   });
 
   it('admits verified USD-settled instruments from every asset class but not non-USD settlement', () => {

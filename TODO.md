@@ -1,13 +1,25 @@
-# Quantuam Trade — Implementation Batch 1
+# Quantuam Trade — Intelligence Integration Status
 
-Add the spec-mandated **Confidence Engine** (§22) and **Contradiction Engine** (§23), integrate them into the Master Decision Engine, enrich the `TradeDecision` output, and add tests — all without removing existing working functionality.
+The original implementation batch targeted `src/lib/intelligence/`. The current
+application keeps authoritative decision intelligence in `backend/src/engines/`
+and calls it through the existing backend decision service. Creating a second
+copy in the browser would duplicate authoritative logic and weaken the server's
+decision boundary, so the feature is implemented in the existing backend engine
+architecture.
 
-## Steps
+## Confidence and contradiction integration
 
-- [ ] 1. Create `src/lib/intelligence/confidence-engine.ts` (multi-factor confidence per §22)
-- [ ] 2. Create `src/lib/intelligence/contradiction-engine.ts` (active contradiction search per §23)
-- [ ] 3. Enrich `TradeDecision` in `decision-engine.ts` (entryZone, invalidation, targets, engineVersions, timestamp)
-- [ ] 4. Wire confidence + contradiction engines into `masterDecisionEngine.analyze`
-- [ ] 5. Export new modules from `src/lib/intelligence/index.ts`
-- [ ] 6. Add tests for confidence engine, contradiction engine, and enriched decision engine
-- [ ] 7. Run type check, lint, and tests; fix any issues
+- [x] Implement multi-factor confidence scoring in `backend/src/engines/confidence-engine.ts`.
+- [x] Detect evidence conflicts in `backend/src/engines/contradiction-engine.ts`.
+- [x] Integrate both engines into `backend/src/engines/decision-engine.ts`.
+- [x] Include confidence factors, contradiction penalties, engine versions, and decision timestamps in the decision result.
+- [x] Keep unconfirmed entry levels out of analysis results; validated plan levels remain in the planner and execution workflow.
+- [x] Cover confidence aggregation and hard-risk behavior in `backend/src/engines/confidence-engine.test.ts` and `backend/src/engines/market-structure-engine.test.ts`.
+- [x] Cover contradiction lineage, hard-gate blocking, and result metadata in `backend/src/engines/contradiction-engine.test.ts`.
+
+## Verification boundary
+
+Local unit tests and type checks verify source behavior. They do not verify the
+deployed database, provider access, paper-trading lifecycle, or trading
+performance. Those checks remain governed by `docs/VERIFICATION.md` and
+`docs/OPERATIONS_RUNBOOK.md`.

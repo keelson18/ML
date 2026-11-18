@@ -1,11 +1,12 @@
 import type { Candle, Timeframe } from '../../../src/lib/types';
 import { randomUUID } from 'node:crypto';
 import { getMarket } from '../../../src/lib/markets';
+import { providerSupport } from '../../../src/lib/marketCapabilities';
 import { getSupabaseClient } from '../db';
 import { config } from '../config';
-import { fetchMarketData, type MarketDataSeries } from '../services/marketDataService';
+import { fetchMarketData, MarketDataProviderError, type MarketDataSeries } from '../services/marketDataService';
 import { advanceStoredTradePlans, getAccount, listStoredTradePlans, manageOpenPositions, storeTradePlan } from '../services/paperTradingService';
-import { getMarketAvailability } from '../services/marketAvailability';
+import { getMarketAvailability, recordProviderTimeframeAvailability, recordProviderTimeframeError, recordProviderUnavailable } from '../services/marketAvailability';
 import { getBlockedMarketSymbols } from '../services/marketRestrictions';
 import { paperSettlementEligible } from '../../../src/lib/marketCapabilities';
 import { createTradePlan } from '../trader/planner';
@@ -89,12 +90,36 @@ export function verifiedAutopilotSymbols(symbols: readonly string[]): string[] {
   return [...new Set(symbols)].filter(isAutopilotSymbol);
 }
 
+export function configuredAutopilotSymbols(symbols: readonly string[]): string[] {
+  return [...new Set(symbols)].filter((symbol) => {
+    const market = getMarket(symbol);
+    return Boolean(market?.isActive && providerSupport(market).supported && paperSettlementEligible(market));
+  });
+}
+
 // Chart access never implies trading eligibility: enrollment still requires a verified provider
 // series, and an explicit administrator restriction removes the instrument from autonomy.
 export async function eligibleAutopilotSymbols(symbols: readonly string[]): Promise<string[]> {
   const verified = verifiedAutopilotSymbols(symbols);
   const blocked = await getBlockedMarketSymbols(verified);
   return verified.filter((symbol) => !blocked.has(symbol));
+}
+
+export function recordSeriesAvailability(symbol: string, timeframe: Timeframe, series: MarketDataSeries, now: number): number {
+  const closed = selectClosedCandles(series.candles, timeframe, now, traderConfig.CLOSE_GRACE_MS);
+  const latest = closed.at(-1);
+  const ageMs = latest ? Math.max(0, now - (latest.time + candleSeconds(timeframe, latest.time)) * 1000) : null;
+  const fresh = !series.stale && hasFreshClosedCandleData(series.candles, timeframe, now);
+  recordProviderTimeframeAvailability(
+    symbol,
+    timeframe,
+    series.candles.length,
+    closed.length,
+    latest ? new Date(latest.time * 1000).toISOString() : null,
+    ageMs,
+    !fresh,
+  );
+  return closed.length;
 }
 
 export class PaperAutopilotScheduler {
@@ -225,7 +250,9 @@ export class PaperAutopilotScheduler {
       const account = snapshots.get(row.account_id)!;
       const activePlans = (account.tradePlans ?? []).filter((plan) => ['WATCHING', 'ARMED', 'PENDING_ORDER'].includes(plan.status));
       const openSymbols = new Set(account.positions.filter((position) => position.status === 'open').map((position) => position.symbol));
-      const entrySymbols = await eligibleAutopilotSymbols(row.symbols);
+      const supportedSymbols = configuredAutopilotSymbols(row.symbols);
+      const blockedSymbols = await getBlockedMarketSymbols(supportedSymbols);
+      const entrySymbols = supportedSymbols.filter((symbol) => !blockedSymbols.has(symbol));
       entrySymbolsByAccount.set(row.account_id, entrySymbols);
       const managedSymbols = new Set([...entrySymbols, ...openSymbols]);
       const accountRequests = new Map<string, Set<Timeframe>>();
@@ -269,12 +296,23 @@ export class PaperAutopilotScheduler {
       try {
         const series = await fetchMarketData(symbol, timeframe, 1000, { priority: true });
         previousRequestWasFresh = series.fetchedAt >= startedAt;
-        if (series.stale) throw new Error(`Stale ${timeframe} market data for ${symbol}.`);
-        if (!hasFreshClosedCandleData(series.candles, timeframe, now)) throw new Error(`Stale or missing closed ${timeframe} market data for ${symbol}.`);
+        const closedCandleCount = recordSeriesAvailability(symbol, timeframe, series, Date.now());
+        if (series.stale) {
+          failuresByKey.set(key, `Stale ${timeframe} market data for ${symbol}.`);
+          continue;
+        }
+        if (closedCandleCount < 50 || !hasFreshClosedCandleData(series.candles, timeframe, Date.now())) {
+          failuresByKey.set(key, `Stale or insufficient closed ${timeframe} market data for ${symbol}; 50 fresh closed candles are required.`);
+          continue;
+        }
         seriesByKey.set(key, series);
       } catch (error) {
         previousRequestWasFresh = true;
-        failuresByKey.set(key, error instanceof Error ? error.message : `Market data unavailable for ${symbol} ${timeframe}.`);
+        const reason = error instanceof Error ? error.message : `Market data unavailable for ${symbol} ${timeframe}.`;
+        failuresByKey.set(key, reason);
+        if (error instanceof MarketDataProviderError && error.status === 404) recordProviderUnavailable(symbol, timeframe);
+        else recordProviderTimeframeError(symbol, timeframe, error instanceof MarketDataProviderError && error.status === 429
+          ? 'rate-limited' : error instanceof Error && /timeout|timed out/i.test(error.message) ? 'timeout' : 'provider-or-validation-error');
       }
     }
 
@@ -388,7 +426,7 @@ export class PaperAutopilotScheduler {
     const checkpoint = account.processedCandles?.[`${symbol}:executor:${timeframe}`] ?? account.processedCandles?.[`${symbol}:${timeframe}`];
     return replaySequentialCandles(candles, checkpoint, traderConfig.SCHEDULER_MAX_CATCH_UP_BARS,
       async (candle, history) => {
-        const allowEntries = entryCandleIsFresh(candle, timeframe, now);
+        const allowEntries = entryCandleIsFresh(candle, timeframe, Date.now());
         await advanceStoredTradePlans({ accountId, symbol, timeframe, candle, candles: history, entriesAllowed: allowEntries, writeFence: lease });
       });
   }

@@ -96,8 +96,11 @@ export default function AuthScreen({ initialMode = 'signin', onHome, onModeChang
           <div className="auth-story-kicker"><Activity aria-hidden="true" /> MARKET INTELLIGENCE, IN CONTEXT</div>
           <h1>Bring your market workflow into focus.</h1>
           <p>Price action, supporting evidence, and risk oversight—connected in one workspace.</p>
-          <div className="auth-story-visual" aria-hidden="true"><div /><div /><div /><div /><div /><div /><div /><div /><div /><div /><div /><div /></div>
-          <div className="auth-story-foot"><span>01 / 03</span><span>Understand the full picture</span></div>
+          <ol className="auth-story-steps">
+            <li><span>01</span><div><strong>Market context</strong><p>Review price action across supported markets.</p></div></li>
+            <li><span>02</span><div><strong>Visible reasoning</strong><p>Inspect the evidence behind each analysis.</p></div></li>
+            <li><span>03</span><div><strong>Paper evaluation</strong><p>Track decisions without live execution.</p></div></li>
+          </ol>
         </div>
       </aside>
       <section className="auth-form-column">

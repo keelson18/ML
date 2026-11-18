@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Activity, Brain, Database, FlaskConical, RefreshCw, ShieldCheck } from 'lucide-react';
 import { authenticatedBackendRequest } from '../../lib/backend-api';
+import ResearchBacklogPanel, { type ResearchBacklogItem } from './ResearchBacklogPanel';
+import { filterAndSortResearchBacklog } from './research-backlog-utils';
 
 type JsonRecord = Record<string, unknown>;
 interface ModelVersion { id: string; version: string; algorithm: string; status: string; metrics: JsonRecord; created_at: string }
@@ -23,6 +25,8 @@ interface LearningOverview {
   results: ResearchResult[];
   journal: JournalEvent[];
   collections: ResearchCollection[];
+  backlog: ResearchBacklogItem[];
+  backlogAvailable: boolean;
   refreshedAt: string;
 }
 
@@ -82,6 +86,7 @@ export default function AILearning() {
   const runs = data?.runs ?? [];
   const results = data?.results ?? [];
   const collections = data?.collections ?? [];
+  const backlogItems = data?.backlog ?? [];
   const searchTerm = search.trim().toLowerCase();
 
   const journalRows = useMemo(() => [
@@ -110,6 +115,7 @@ export default function AILearning() {
   const filteredExperiments = experiments.filter((item) => !searchTerm || `${item.name} ${item.hypothesis} ${item.status} ${item.dataset_id}`.toLowerCase().includes(searchTerm));
   const filteredVersions = modelVersions.filter((item) => !searchTerm || `${item.version} ${item.algorithm} ${item.status}`.toLowerCase().includes(searchTerm));
   const filteredStrategies = strategyVersions.filter((item) => !searchTerm || `${item.version} ${item.status} ${recordText(item.logic_definition)} ${recordText(item.parameters)}`.toLowerCase().includes(searchTerm));
+  const filteredBacklog = filterAndSortResearchBacklog(backlogItems, searchTerm);
   const pageItems = <T,>(items: T[]) => items.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const totalPages = (count: number) => Math.max(1, Math.ceil(count / PAGE_SIZE));
   const activeCollections = collections.filter((collection) => collection.continuous);
@@ -122,7 +128,8 @@ export default function AILearning() {
   const pageCount = section === 'Learning Journal' ? totalPages(visibleJournal.length)
     : section === 'Knowledge Base' ? totalPages(filteredKnowledge.length)
       : section === 'Research Lab' ? totalPages(filteredExperiments.length)
-        : section === 'Models & Strategy Versions' ? totalPages(filteredVersions.length + filteredStrategies.length) : 1;
+        : section === 'Models & Strategy Versions' ? totalPages(filteredVersions.length + filteredStrategies.length)
+          : section === 'Research Backlog' ? totalPages(filteredBacklog.length) : 1;
 
   return <div className="page-frame space-y-6">
     <div className="page-heading">
@@ -144,7 +151,7 @@ export default function AILearning() {
     </div>
 
     <label className="block max-w-xl text-xs font-medium text-muted">Search saved records
-      <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find experiments, evidence, models, or journal entries"
+      <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find experiments, evidence, models, journal entries, or questions"
         className="mt-1 block w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-muted/60" />
     </label>
 
@@ -263,10 +270,8 @@ export default function AILearning() {
       <p className="text-xs text-warning">This is a read-only registry view. No active engine changes, promotions, or rollbacks are initiated from AI Learning.</p>
     </div>}
 
-    {section === 'Research Backlog' && <section className="rounded-xl border border-warning/30 bg-warning/10 p-4">
-      <h2 className="text-sm font-semibold">Research backlog is not implemented</h2>
-      <p className="mt-2 text-xs text-muted">There is no durable backlog schema or evidence-to-question prioritization workflow in the current repository. AI Learning does not simulate backlog items or claim automatic gap discovery.</p>
-    </section>}
+    {section === 'Research Backlog' && data?.backlogAvailable === false && <section role="status" className="rounded-xl border border-warning/30 bg-warning/10 p-4"><h2 className="text-sm font-semibold">Research backlog is unavailable</h2><p className="mt-2 text-xs text-muted">The backlog migration or its admin read policy is not available to this backend yet. Existing AI Learning records continue to load. Apply and verify the research backlog migration, then refresh this page.</p></section>}
+    {section === 'Research Backlog' && data?.backlogAvailable && <ResearchBacklogPanel items={pageItems(filteredBacklog)} totalItems={filteredBacklog.length} hasRecords={backlogItems.length > 0} onRefresh={load} />}
 
     {pageCount > 1 && <div className="flex items-center justify-between text-xs text-muted">
       <span>Page {page + 1} of {pageCount} · {PAGE_SIZE} records per page</span>

@@ -1,10 +1,22 @@
 export interface ClassificationMetrics { accuracy: number; f1: number; samples: number }
+export interface PairedBaselineComparison {
+  modelWins: number;
+  baselineWins: number;
+  discordantPairs: number;
+  modelAccuracy: number;
+  baselineAccuracy: number;
+  modelWinsLowerBound: number;
+  beatsBaseline: boolean;
+}
 export interface ReturnCalibrationBucket { lowerProbability: number; upperProbability: number; samples: number; expectedReturnPct: number | null }
 export interface ChronologicalSampleSplit { train: number[]; validation: number[]; test: number[]; trainBoundary: number; testBoundary: number }
 
 export function purgedChronologicalSplit(sampleIndices: number[], candleCount: number, horizon: number): ChronologicalSampleSplit {
   if (!Number.isInteger(candleCount) || candleCount < 1 || !Number.isInteger(horizon) || horizon < 1) {
     throw new Error('Candle count and prediction horizon must be positive integers.');
+  }
+  if (sampleIndices.some((index, row) => row > 0 && index <= sampleIndices[row - 1]!)) {
+    throw new Error('Sample indices must be strictly increasing and unique.');
   }
   const trainBoundary = Math.floor(candleCount * 0.7);
   const testBoundary = Math.floor(candleCount * 0.85);
@@ -50,11 +62,56 @@ export function momentumBaselineAccuracy(lastCandleReturns: number[], labels: nu
   return classificationMetrics(lastCandleReturns.map((value) => value > 0 ? 1 : 0), labels).accuracy;
 }
 
-export function modelHasNoEdge(testAccuracy: number, baselineAccuracy: number): boolean {
-  if (![testAccuracy, baselineAccuracy].every((value) => Number.isFinite(value) && value >= 0 && value <= 1)) {
-    throw new Error('Model and baseline accuracies must be between zero and one.');
+export function compareWithBaseline(
+  modelPredictions: number[],
+  baselinePredictions: number[],
+  labels: number[],
+  minimumSamples = 100,
+  minimumDiscordantPairs = 20,
+): PairedBaselineComparison {
+  if (modelPredictions.length !== labels.length || baselinePredictions.length !== labels.length) {
+    throw new Error('Model, baseline, and label samples must have the same length.');
   }
-  return testAccuracy <= baselineAccuracy;
+  if (labels.length === 0) throw new Error('Cannot compare models on an empty test set.');
+  if (!Number.isInteger(minimumSamples) || minimumSamples < 1
+    || !Number.isInteger(minimumDiscordantPairs) || minimumDiscordantPairs < 1) {
+    throw new Error('Minimum comparison sample counts must be positive integers.');
+  }
+  const modelMetrics = classificationMetrics(modelPredictions, labels);
+  const baselineMetrics = classificationMetrics(baselinePredictions, labels);
+  let modelWins = 0;
+  let baselineWins = 0;
+  for (let index = 0; index < labels.length; index += 1) {
+    const modelCorrect = modelPredictions[index] === labels[index];
+    const baselineCorrect = baselinePredictions[index] === labels[index];
+    if (modelCorrect && !baselineCorrect) modelWins += 1;
+    else if (baselineCorrect && !modelCorrect) baselineWins += 1;
+  }
+  const discordantPairs = modelWins + baselineWins;
+  const winRate = discordantPairs === 0 ? 0 : modelWins / discordantPairs;
+  const z = 1.6448536269514722;
+  const zSquared = z * z;
+  const denominator = 1 + zSquared / Math.max(1, discordantPairs);
+  const center = winRate + zSquared / (2 * Math.max(1, discordantPairs));
+  const radius = z * Math.sqrt(
+    winRate * (1 - winRate) / Math.max(1, discordantPairs)
+      + zSquared / (4 * Math.max(1, discordantPairs) ** 2),
+  );
+  const modelWinsLowerBound = Math.max(0, (center - radius) / denominator);
+  const beatsBaseline = labels.length >= minimumSamples
+    && discordantPairs >= minimumDiscordantPairs
+    && modelWins > baselineWins
+    && modelMetrics.accuracy > baselineMetrics.accuracy
+    && modelWinsLowerBound > 0.5;
+  return {
+    modelWins,
+    baselineWins,
+    discordantPairs,
+    modelAccuracy: modelMetrics.accuracy,
+    baselineAccuracy: baselineMetrics.accuracy,
+    modelWinsLowerBound,
+    beatsBaseline,
+  };
 }
 
 export function calibrateExpectedReturns(probabilities: number[], forwardReturns: number[], minimumBucketSamples = 10): ReturnCalibrationBucket[] {

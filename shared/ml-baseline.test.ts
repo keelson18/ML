@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calibratedExpectedMove, calibrateExpectedReturns, classificationMetrics, modelHasNoEdge, momentumBaselineAccuracy, purgedChronologicalSplit } from './ml-baseline';
+import { calibratedExpectedMove, calibrateExpectedReturns, classificationMetrics, compareWithBaseline, momentumBaselineAccuracy, purgedChronologicalSplit } from './ml-baseline';
 
 describe('ML held-out benchmark metrics', () => {
   it('scores the previous-candle momentum baseline against the same labels', () => {
@@ -10,10 +10,24 @@ describe('ML held-out benchmark metrics', () => {
     expect(classificationMetrics([1, 1, 0, 0], [1, 0, 0, 0])).toEqual({ accuracy: 0.75, f1: 2 / 3, samples: 4 });
   });
 
-  it('marks a tie or a loss against momentum as no-edge', () => {
-    expect(modelHasNoEdge(0.6, 0.6)).toBe(true);
-    expect(modelHasNoEdge(0.55, 0.6)).toBe(true);
-    expect(modelHasNoEdge(0.61, 0.6)).toBe(false);
+  it('requires a large paired holdout and meaningful paired evidence before declaring a baseline win', () => {
+    const labels = Array<number>(120).fill(1);
+    const baseline = Array<number>(120).fill(0);
+    const model = labels.map((_, index) => index < 70 ? 1 : 0);
+    const comparison = compareWithBaseline(model, baseline, labels);
+    expect(comparison).toMatchObject({ modelWins: 70, baselineWins: 0, discordantPairs: 70, beatsBaseline: true });
+    expect(comparison.modelWinsLowerBound).toBeGreaterThan(0.5);
+
+    expect(compareWithBaseline(model.slice(0, 99), baseline.slice(0, 99), labels.slice(0, 99)).beatsBaseline).toBe(false);
+    const inconclusiveModel = labels.map((_, index) => index < 11 ? 1 : index < 20 ? 0 : 1);
+    const inconclusiveBaseline = labels.map((_, index) => index < 11 ? 0 : index < 20 ? 1 : 1);
+    expect(compareWithBaseline(inconclusiveModel, inconclusiveBaseline, labels).beatsBaseline).toBe(false);
+  });
+
+  it('rejects invalid paired benchmark samples', () => {
+    expect(() => compareWithBaseline([1], [], [1])).toThrow(/same length/);
+    expect(() => compareWithBaseline([2], [1], [1])).toThrow(/binary/);
+    expect(() => compareWithBaseline([], [], [])).toThrow(/empty test set/);
   });
 
   it('purges forward-label windows across train, validation, and test boundaries', () => {
@@ -23,6 +37,11 @@ describe('ML held-out benchmark metrics', () => {
     expect(split.test.every((row) => row >= split.testBoundary)).toBe(true);
     expect(split.train.at(-1)).toBe(64);
     expect(split.validation.at(-1)).toBe(79);
+  });
+
+  it('rejects duplicate and out-of-order sample indices before splitting', () => {
+    expect(() => purgedChronologicalSplit([10, 10, 11], 100, 5)).toThrow(/strictly increasing/);
+    expect(() => purgedChronologicalSplit([11, 10], 100, 5)).toThrow(/strictly increasing/);
   });
 
   it('calibrates signed forward returns on validation probabilities and withholds sparse buckets', () => {

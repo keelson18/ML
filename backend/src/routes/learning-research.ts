@@ -22,6 +22,29 @@ const learningEventSchema = z.object({
   hypothesis: z.string().trim().min(1).max(2_000),
 }).strict();
 
+const researchBacklogEvidenceSchema = z.object({
+  source_type: z.enum(['paper_trade', 'research', 'risk_event', 'data_quality']),
+  source_id: z.string().uuid(),
+  description: z.string().trim().min(1).max(500),
+}).strict();
+
+const researchBacklogCreateSchema = z.object({
+  title: z.string().trim().min(1).max(160),
+  question: z.string().trim().min(1).max(2_000),
+  rationale: z.string().trim().max(2_000).default(''),
+  priority: z.enum(['critical', 'high', 'medium', 'low']),
+  evidence: z.array(researchBacklogEvidenceSchema).min(1).max(20),
+}).strict();
+
+const researchBacklogStatusSchema = z.object({
+  status: z.enum(['open', 'in_progress', 'blocked', 'done', 'dismissed']),
+  statusNote: z.string().trim().max(500).default(''),
+}).strict().superRefine((value, context) => {
+  if (value.status === 'blocked' && !value.statusNote) {
+    context.addIssue({ code: 'custom', message: 'A reason is required when blocking a research question.', path: ['statusNote'] });
+  }
+});
+
 const researchExperimentSchema = z.object({
   name: z.string().trim().min(1).max(160),
   hypothesis: z.string().trim().min(1).max(2_000),
@@ -86,7 +109,7 @@ export async function learningResearchRoutes(app: FastifyInstance) {
     if (!request.accessToken) return reply.code(401).send({ error: 'Authentication required.' });
     try {
       const client = getSupabaseClientWithToken(request.accessToken);
-      const [versions, strategies, events, experiments, knowledge, runs, results, journal, collections] = await Promise.all([
+      const [versions, strategies, events, experiments, knowledge, runs, results, journal, collections, backlog] = await Promise.all([
         client.from('model_versions').select('id,version,algorithm,status,metrics,created_at').order('created_at', { ascending: false }).limit(50),
         client.from('strategy_versions').select('id,strategy_id,version,status,logic_definition,risk_definition,parameters,created_at').order('created_at', { ascending: false }).limit(100),
         client.from('learning_events').select('id,source_type,source_id,observation,hypothesis,status,created_at').order('created_at', { ascending: false }).limit(100),
@@ -96,10 +119,12 @@ export async function learningResearchRoutes(app: FastifyInstance) {
         client.from('research_results').select('id,run_id,metrics,artifacts,conclusion,created_at').order('created_at', { ascending: false }).limit(100),
         client.from('ai_learning_journal').select('id,event_key,event_type,title,detail,symbol,timeframe,source_service,correlation_id,related_records,evidence,created_at').order('created_at', { ascending: false }).limit(100),
         client.from('research_collection_state').select('experiment_id,user_id,symbol,provider,continuous,test_start_time,initialized_at').order('initialized_at', { ascending: false }).limit(100),
+        client.from('ai_research_backlog').select('id,title,question,rationale,priority,status,status_note,evidence,created_by,created_at,updated_at').order('created_at', { ascending: false }).limit(200),
       ]);
       if ([versions, strategies, events, experiments, knowledge, runs, results, journal, collections].some((query) => query.error)) {
         throw new Error('AI Learning records unavailable.');
       }
+      if (backlog.error) request.log.warn({ code: backlog.error.code }, 'Research backlog is unavailable; other AI Learning records remain available');
       return {
         versions: versions.data ?? [],
         strategyVersions: strategies.data ?? [],
@@ -110,11 +135,61 @@ export async function learningResearchRoutes(app: FastifyInstance) {
         results: results.data ?? [],
         journal: journal.data ?? [],
         collections: collections.data ?? [],
+        backlog: backlog.data ?? [],
+        backlogAvailable: !backlog.error,
         refreshedAt: new Date().toISOString(),
       };
     } catch {
       request.log.warn('AI Learning records are unavailable.');
       return reply.code(503).send({ error: 'AI Learning records are temporarily unavailable.' });
+    }
+  });
+
+  app.post('/api/v1/admin/ai/research-backlog', { preHandler: app.requireAdmin, config: { rateLimit: { max: 10, timeWindow: config.rateLimitWindowMs } } }, async (request, reply) => {
+    if (!request.authenticatedUserId || !request.accessToken) return reply.code(401).send({ error: 'Authentication required.' });
+    const parsed = researchBacklogCreateSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'Invalid research backlog item.' });
+    if (JSON.stringify(parsed.data).length > 24_000) return reply.code(400).send({ error: 'Research backlog evidence exceeds the allowed size.' });
+    try {
+      const { data, error } = await getSupabaseClientWithToken(request.accessToken).rpc('admin_create_ai_research_backlog', {
+        p_title: parsed.data.title,
+        p_question: parsed.data.question,
+        p_rationale: parsed.data.rationale,
+        p_priority: parsed.data.priority,
+        p_evidence: parsed.data.evidence,
+      });
+      if (error || typeof data !== 'string') {
+        request.log.warn({ userId: request.authenticatedUserId, code: error?.code }, 'Research backlog insert failed');
+        return reply.code(error?.code === '42501' ? 403 : error?.code === '22023' ? 400 : 503)
+          .send({ error: error?.code === '42501' ? 'Administrator access required.' : error?.code === '22023' ? 'Check the question fields and confirm that the referenced evidence record exists.' : 'Research backlog could not be saved.' });
+      }
+      return reply.code(201).send({ id: data });
+    } catch {
+      request.log.warn({ userId: request.authenticatedUserId }, 'Research backlog insert failed');
+      return reply.code(503).send({ error: 'Research backlog is temporarily unavailable.' });
+    }
+  });
+
+  app.patch<{ Params: { id: string } }>('/api/v1/admin/ai/research-backlog/:id/status', { preHandler: app.requireAdmin, config: { rateLimit: { max: 20, timeWindow: config.rateLimitWindowMs } } }, async (request, reply) => {
+    if (!request.authenticatedUserId || !request.accessToken) return reply.code(401).send({ error: 'Authentication required.' });
+    const id = z.string().uuid().safeParse(request.params.id);
+    const parsed = researchBacklogStatusSchema.safeParse(request.body);
+    if (!id.success || !parsed.success) return reply.code(400).send({ error: 'Invalid research backlog status update.' });
+    try {
+      const { error } = await getSupabaseClientWithToken(request.accessToken).rpc('admin_update_ai_research_backlog_status', {
+        p_id: id.data,
+        p_status: parsed.data.status,
+        p_status_note: parsed.data.statusNote,
+      });
+      if (error) {
+        request.log.warn({ userId: request.authenticatedUserId, code: error.code }, 'Research backlog status update failed');
+        const status = error.code === '42501' ? 403 : error.code === 'P0002' ? 404 : error.code === '22023' ? 409 : 503;
+        return reply.code(status).send({ error: status === 404 ? 'Research backlog item was not found.' : status === 409 ? 'The backlog item already has that status.' : status === 403 ? 'Administrator access required.' : 'Research backlog could not be updated.' });
+      }
+      return { updated: true };
+    } catch {
+      request.log.warn({ userId: request.authenticatedUserId }, 'Research backlog status update failed');
+      return reply.code(503).send({ error: 'Research backlog is temporarily unavailable.' });
     }
   });
 

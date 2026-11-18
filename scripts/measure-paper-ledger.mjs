@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer';
 
-const symbols = ['BTCUSD', 'ETHUSD', 'SOLUSD'];
+var symbols = ['BTCUSD', 'ETHUSD', 'SOLUSD'];
 const state = { accountId: 'scripted-budget-account', cash: 94_950, positions: [{ id: 'position-1', symbol: 'BTCUSD', status: 'open', entryPrice: 50_000, quantity: 0.1, entryFee: 5 }], trades: [], tradePlans: [], pendingPaperOrders: [], tradeJournal: [], dailyReviews: [], executionGateResults: [], processedCandles: {} };
 const eventBytes = [];
 const oldSnapshotBytes = [];

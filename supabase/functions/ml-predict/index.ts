@@ -7,14 +7,14 @@
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.57.4";
-import { readJsonSafe } from "../../../shared/http.ts";
+import { readJsonRequest, readJsonSafe } from "../../../shared/http.ts";
 import { resolveCorsOrigin } from "../../../shared/cors.ts";
 import { computeMlFeatures, type MlCandle } from "../../../shared/ml-features.ts";
-import { calibratedExpectedMove, calibrateExpectedReturns, classificationMetrics, modelHasNoEdge, momentumBaselineAccuracy, purgedChronologicalSplit, type ReturnCalibrationBucket } from "../../../shared/ml-baseline.ts";
+import { calibratedExpectedMove, calibrateExpectedReturns, classificationMetrics, compareWithBaseline, purgedChronologicalSplit, type PairedBaselineComparison, type ReturnCalibrationBucket } from "../../../shared/ml-baseline.ts";
 
 function corsHeaders(origin: string | undefined): Record<string, string> {
   return {
-    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
     "Access-Control-Max-Age": "600",
     "Vary": "Origin",
@@ -28,7 +28,8 @@ function corsHeaders(origin: string | undefined): Record<string, string> {
 // SECURITY: ML_SERVICE_API_KEY must be explicitly configured in the environment
 // for protected maintenance operations. It is never sent to the browser.
 function maintenanceApiKey(): string | null {
-  return Deno.env.get("ML_SERVICE_API_KEY") ?? null;
+  const key = Deno.env.get("ML_SERVICE_API_KEY")?.trim();
+  return key && key.length >= 32 ? key : null;
 }
 
 function backendUrl(): string | null {
@@ -39,6 +40,9 @@ function backendUrl(): string | null {
     parsed = new URL(value);
   } catch {
     throw new Error('BACKEND_URL must be a valid absolute URL.');
+  }
+  if (parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) {
+    throw new Error('BACKEND_URL must be an origin URL without credentials, paths, query parameters, or fragments.');
   }
   const functionEnvironment = Deno.env.get('ML_FUNCTION_ENV') ?? 'production';
   if (!['development', 'production'].includes(functionEnvironment)) {
@@ -58,6 +62,14 @@ const PRED_HORIZON = 5; // candles ahead to predict
 const DEFAULT_LABEL_ATR_MULTIPLE = 0.1;
 const TRAINING_EPOCHS = 200;
 const TRAINING_LEARNING_RATE = 0.1;
+const MODEL_CACHE_TTL_MS = 60_000;
+const MAX_ML_REQUEST_BYTES = 8_192;
+
+class MarketDataServiceError extends Error {
+  constructor(readonly status: number) {
+    super('Market data service request failed.');
+  }
+}
 
 function labelAtrMultiple(): number {
   const configured = Deno.env.get("ML_LABEL_ATR_MULTIPLE");
@@ -66,10 +78,10 @@ function labelAtrMultiple(): number {
   if (!Number.isFinite(value) || value < 0) throw new Error("ML_LABEL_ATR_MULTIPLE must be a finite non-negative number.");
   return value;
 }
-const FEATURE_SCHEMA_VERSION = 'ohlcv-14-v2';
+const FEATURE_SCHEMA_VERSION = 'ohlcv-14-v3';
 
 // In-memory model state. NOTE: edge functions may reset between requests, so this is
-// best-effort. For durable state we persist to the `ml_predictions` table on each retrain.
+// best-effort. Model weights are loaded from immutable `ml_model_artifacts` rows.
 interface ModelState {
   weights: number[];
   bias: number;
@@ -81,7 +93,9 @@ interface ModelState {
   std: number[];
   pair: string;
   timeframe: string;
+  trainingDatasetId: string;
   returnCalibration: ReturnCalibrationBucket[];
+  loadedAt: number;
 }
 const modelStates = new Map<string, ModelState>();
 const trainingFlights = new Map<string, Promise<{ ok: boolean; metrics: ModelMetrics; version: string }>>();
@@ -90,7 +104,7 @@ const modelKey = (pair: string, timeframe: string) => `${pair}:${timeframe}`;
 async function ensureModel(supabase: SupabaseClient, pair: string, timeframe: string, accessToken: string): Promise<ModelState> {
   const key = modelKey(pair, timeframe);
   const existing = modelStates.get(key);
-  if (existing) return existing;
+  if (existing && Date.now() - existing.loadedAt < MODEL_CACHE_TTL_MS) return existing;
   const persisted = await loadPersistedModel(supabase, pair, timeframe);
   if (persisted) {
     modelStates.set(key, persisted);
@@ -131,11 +145,13 @@ interface ModelMetrics {
   trainSamples: number;
   momentumBaselineAccuracy: number;
   noEdge: boolean;
+  baselineComparison: PairedBaselineComparison;
 }
 
 interface StoredModelArtifact {
   symbol: string;
   timeframe: string;
+  dataset_id: unknown;
   version: string;
   prediction_horizon: unknown;
   weights: unknown;
@@ -168,6 +184,21 @@ function storedMetrics(value: unknown): { accuracy: number; f1: number; samples:
   return { accuracy: metrics.accuracy, f1: metrics.f1, samples: metrics.samples };
 }
 
+function storedBaselineComparison(value: unknown): PairedBaselineComparison | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const comparison = value as Record<string, unknown>;
+  const numericValues = ['modelWins', 'baselineWins', 'discordantPairs', 'modelAccuracy', 'baselineAccuracy', 'modelWinsLowerBound'];
+  if (numericValues.some((key) => typeof comparison[key] !== 'number' || !Number.isFinite(comparison[key]))) return undefined;
+  if (!Number.isInteger(comparison.modelWins) || Number(comparison.modelWins) < 0
+    || !Number.isInteger(comparison.baselineWins) || Number(comparison.baselineWins) < 0
+    || comparison.discordantPairs !== Number(comparison.modelWins) + Number(comparison.baselineWins)
+    || Number(comparison.modelAccuracy) < 0 || Number(comparison.modelAccuracy) > 1
+    || Number(comparison.baselineAccuracy) < 0 || Number(comparison.baselineAccuracy) > 1
+    || Number(comparison.modelWinsLowerBound) < 0 || Number(comparison.modelWinsLowerBound) > 1
+    || typeof comparison.beatsBaseline !== 'boolean') return undefined;
+  return value as PairedBaselineComparison;
+}
+
 function storedCalibration(value: unknown): ReturnCalibrationBucket[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const valid = value.every((item) => {
@@ -183,7 +214,9 @@ function storedCalibration(value: unknown): ReturnCalibrationBucket[] | undefine
 
 async function loadPersistedModel(supabase: SupabaseClient, pair: string, timeframe: string): Promise<ModelState | undefined> {
   const { data, error } = await supabase.from('ml_model_artifacts').select('*')
-    .eq('symbol', pair).eq('timeframe', timeframe).order('trained_at', { ascending: false }).limit(1).maybeSingle();
+    .eq('symbol', pair).eq('timeframe', timeframe).eq('algorithm', 'logistic-regression')
+    .eq('feature_schema_version', FEATURE_SCHEMA_VERSION).eq('prediction_horizon', PRED_HORIZON)
+    .order('trained_at', { ascending: false }).limit(1).maybeSingle();
   if (error) throw new Error(`Could not load persisted ML model: ${error.message}`);
   if (!data) return undefined;
   const row = data as unknown as StoredModelArtifact;
@@ -192,27 +225,30 @@ async function loadPersistedModel(supabase: SupabaseClient, pair: string, timefr
   const std = numberArray(row.feature_std);
   const train = storedMetrics(row.training_metrics);
   const test = storedMetrics(row.test_metrics);
+  const baselineComparison = storedBaselineComparison((row.test_metrics as Record<string, unknown> | null)?.baselineComparison);
   const calibration = storedCalibration(row.return_calibration);
   const baseline = Number(row.momentum_baseline_accuracy);
   const dataStart = Number(row.data_start);
   const dataEnd = Number(row.data_end);
+  const trainingDatasetId = typeof row.dataset_id === 'string' ? row.dataset_id : '';
   if (row.algorithm !== 'logistic-regression' || row.feature_schema_version !== FEATURE_SCHEMA_VERSION
     || Number(row.prediction_horizon) !== PRED_HORIZON || typeof row.version !== 'string'
     || !weights || !mean || !std || weights.length !== 14 || weights.length !== mean.length || mean.length !== std.length
     || std.some((value) => value <= 0) || typeof row.bias !== 'number' || !Number.isFinite(row.bias)
-    || !train || !test || !Number.isFinite(baseline) || baseline < 0 || baseline > 1
+    || !train || !test || !baselineComparison || !Number.isFinite(baseline) || baseline < 0 || baseline > 1
     || typeof row.no_edge !== 'boolean' || !calibration
+    || !trainingDatasetId
     || !Number.isFinite(dataStart) || !Number.isFinite(dataEnd) || dataEnd < dataStart
     || typeof row.trained_at !== 'string') throw new Error('Persisted ML model artifact failed schema validation.');
   const metrics: ModelMetrics = {
     accuracy: test.accuracy, f1: test.f1, samples: test.samples,
     trainAccuracy: train.accuracy, trainF1: train.f1, trainSamples: train.samples,
-    momentumBaselineAccuracy: baseline, noEdge: row.no_edge,
+    momentumBaselineAccuracy: baseline, noEdge: row.no_edge, baselineComparison,
   };
   return {
     weights, mean, std, bias: row.bias, metrics, returnCalibration: calibration,
     trainedAt: row.trained_at, dataRange: { start: dataStart, end: dataEnd },
-    version: row.version, pair, timeframe,
+    version: row.version, pair, timeframe, trainingDatasetId, loadedAt: Date.now(),
   };
 }
 
@@ -260,11 +296,26 @@ function predictProba(model: { weights: number[]; bias: number; mean: number[]; 
 // provider (Massive/Twelve Data) as the UI, not a separate legacy feed.
 async function fetchCandles(symbol: string, timeframe: string, limit: number, accessToken: string): Promise<{ candles: Candle[]; provider: string; quoteCurrency: string; sourceInstrument: string; datasetId: string }> {
   if (!BACKEND_URL) throw new Error('Market data service is not configured.');
-  const url = `${BACKEND_URL}/api/v1/market/candles/${encodeURIComponent(symbol)}?timeframe=${encodeURIComponent(timeframe)}&limit=${limit}`;
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  const maintenanceKey = maintenanceApiKey();
+  const maintenanceRequest = !accessToken && Boolean(maintenanceKey);
+  if (!accessToken && !maintenanceKey) throw new Error('ML service maintenance key is not configured.');
+  const endpoint = maintenanceRequest ? 'internal/ml/candles' : 'market/candles';
+  const url = `${BACKEND_URL}/api/v1/${endpoint}/${encodeURIComponent(symbol)}?timeframe=${encodeURIComponent(timeframe)}&limit=${limit}`;
+  const headers = maintenanceRequest
+    ? { 'x-ml-service-key': maintenanceKey! }
+    : { Authorization: `Bearer ${accessToken}` };
+  let res: Response;
+  try {
+    res = await fetch(url, { headers, signal: AbortSignal.timeout(30_000) });
+  } catch {
+    throw new MarketDataServiceError(502);
+  }
   const { payload } = await readJsonSafe<{ candles: Candle[]; dataset: { id: string; provider: string; quoteCurrency: string; sourceInstrument: string } }>(res);
-  if (!res.ok) throw new Error(`Market data service ${res.status}`);
-  if (payload === null) throw new Error('Market data service returned an empty or invalid response.');
+  if (!res.ok) throw new MarketDataServiceError(res.status === 429 ? 429 : res.status === 400 || res.status === 403 ? res.status : 502);
+  if (!payload || !Array.isArray(payload.candles) || !payload.dataset
+    || ['id', 'provider', 'quoteCurrency', 'sourceInstrument'].some((field) => typeof payload.dataset[field as keyof typeof payload.dataset] !== 'string')) {
+    throw new MarketDataServiceError(502);
+  }
   return {
     candles: payload.candles,
     provider: payload.dataset.provider,
@@ -288,7 +339,7 @@ async function checkRate(supabase: SupabaseClient, key: string, maxPerMin: numbe
 function authorized(req: Request): boolean {
   const key = req.headers.get('x-api-key');
   const configuredKey = maintenanceApiKey();
-  return configuredKey !== null && key === configuredKey;
+  return configuredKey !== null && key !== null && key.length === configuredKey.length && key === configuredKey;
 }
 
 async function authenticatedUser(req: Request): Promise<string | null> {
@@ -326,16 +377,23 @@ Deno.serve(async (req: Request) => {
 
     // /model/status is public (metadata only); artifact weights remain service-role only.
     if (path === 'model-status' || path === 'status') {
+      if (req.method !== 'GET') return jsonResponse({ error: 'Method not allowed.' }, 405, headers);
       const pair = url.searchParams.get('pair');
       const timeframe = url.searchParams.get('timeframe');
-      const modelState = pair && timeframe
+      if ((pair === null) !== (timeframe === null)) return jsonResponse({ error: 'Pair and timeframe must be supplied together.' }, 400, headers);
+      if (pair !== null && (!/^[A-Z0-9]{2,20}$/.test(pair) || !['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d', '1w', '1M'].includes(timeframe ?? ''))) {
+        return jsonResponse({ error: 'A valid pair and timeframe are required.' }, 400, headers);
+      }
+      const cachedModelState = pair && timeframe
         ? modelStates.get(modelKey(pair, timeframe))
-        : Array.from(modelStates.values()).at(-1);
+        : Array.from(modelStates.values()).filter((model) => Date.now() - model.loadedAt < MODEL_CACHE_TTL_MS).at(-1);
+      const modelState = cachedModelState && Date.now() - cachedModelState.loadedAt < MODEL_CACHE_TTL_MS ? cachedModelState : undefined;
       let artifact: Record<string, unknown> | null = null;
       if (!modelState) {
         let query = supabase.from('ml_model_artifacts')
-          .select('symbol,timeframe,version,trained_at,data_start,data_end,training_metrics,test_metrics,momentum_baseline_accuracy,no_edge')
-          .order('trained_at', { ascending: false }).limit(1);
+          .select('symbol,timeframe,version,trained_at,data_start,data_end,dataset_id,training_metrics,test_metrics,momentum_baseline_accuracy,no_edge')
+          .eq('algorithm', 'logistic-regression').eq('feature_schema_version', FEATURE_SCHEMA_VERSION)
+          .eq('prediction_horizon', PRED_HORIZON).order('trained_at', { ascending: false }).limit(1);
         if (pair && timeframe) query = query.eq('symbol', pair).eq('timeframe', timeframe);
         const { data, error } = await query.maybeSingle();
         if (error) return jsonResponse({ error: 'Model status is temporarily unavailable.' }, 503, headers);
@@ -350,6 +408,7 @@ Deno.serve(async (req: Request) => {
         trainSamples: artifact.training_metrics && (artifact.training_metrics as Record<string, unknown>).samples,
         momentumBaselineAccuracy: Number(artifact.momentum_baseline_accuracy),
         noEdge: artifact.no_edge,
+        baselineComparison: artifact.test_metrics && (artifact.test_metrics as Record<string, unknown>).baselineComparison,
       } : null);
       const noEdge = modelState?.metrics.noEdge ?? artifact?.no_edge;
       return jsonResponse({
@@ -361,6 +420,7 @@ Deno.serve(async (req: Request) => {
         dataRange: modelState?.dataRange ?? (artifact ? { start: artifact.data_start, end: artifact.data_end } : null),
         pair: modelState?.pair ?? artifact?.symbol ?? pair ?? null,
         timeframe: modelState?.timeframe ?? artifact?.timeframe ?? timeframe ?? null,
+        trainingDatasetId: modelState?.trainingDatasetId ?? (typeof artifact?.dataset_id === 'string' ? artifact.dataset_id : null),
         availableModels: [...modelStates.values()].map(({ pair: modelPair, timeframe: modelTimeframe, version }) => ({ pair: modelPair, timeframe: modelTimeframe, version })),
         horizon: PRED_HORIZON,
       }, 200, headers);
@@ -372,7 +432,12 @@ Deno.serve(async (req: Request) => {
         console.warn(`[ml] unauthenticated prediction attempt from ${req.headers.get('x-forwarded-for') ?? 'unknown'}`);
         return jsonResponse({ error: 'Authentication required' }, 401, headers);
       }
-      const { pair, timeframe } = await req.json() as { pair?: string; timeframe?: string };
+      const parsedRequest = await readJsonRequest<{ pair?: unknown; timeframe?: unknown }>(req, MAX_ML_REQUEST_BYTES);
+      if (!parsedRequest.ok) return jsonResponse({ error: parsedRequest.status === 413 ? 'Request body is too large.' : 'A valid JSON request body is required.' }, parsedRequest.status, headers);
+      if (!parsedRequest.value || typeof parsedRequest.value !== 'object' || Array.isArray(parsedRequest.value)) {
+        return jsonResponse({ error: 'A valid JSON object is required.' }, 400, headers);
+      }
+      const { pair, timeframe } = parsedRequest.value;
       if (typeof pair !== 'string' || !/^[A-Z0-9]{2,20}$/.test(pair)
         || typeof timeframe !== 'string' || !['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d', '1w', '1M'].includes(timeframe)) {
         return jsonResponse({ error: 'A valid pair and timeframe are required' }, 400, headers);
@@ -402,6 +467,7 @@ Deno.serve(async (req: Request) => {
         expected_move_pct: expectedMovePct,
         expected_move_calibrated: expectedMovePct !== null,
         model_version: modelState.version,
+        training_dataset_id: modelState.trainingDatasetId,
         edge_status: modelState.metrics.noEdge ? 'no-edge' : 'beats-momentum-baseline',
         momentum_baseline_accuracy: modelState.metrics.momentumBaselineAccuracy,
         confidence,
@@ -413,11 +479,15 @@ Deno.serve(async (req: Request) => {
         prediction_timestamp: new Date().toISOString(),
       };
       // Cache prediction durably.
-      await supabase.from('ml_predictions').upsert({
+      const { error: predictionCacheError } = await supabase.from('ml_predictions').upsert({
         symbol: pair, timeframe, prediction, probability: probUp,
         expected_move_pct: expectedMovePct, model_version: modelState.version, confidence,
         payload: out,
       }, { onConflict: 'symbol,timeframe' });
+      if (predictionCacheError) {
+        console.error('[ml] prediction cache persistence failed:', predictionCacheError.message);
+        return jsonResponse({ error: 'Prediction could not be persisted.' }, 503, headers);
+      }
       return jsonResponse(out, 200, headers);
     }
 
@@ -426,7 +496,12 @@ Deno.serve(async (req: Request) => {
         return jsonResponse({ error: 'Unauthorized' }, 401, headers);
       }
       if (!(await checkRate(supabase, 'retrain', 2))) return jsonResponse({ error: 'Rate limit exceeded' }, 429, headers);
-      const requestBody = await req.json().catch(() => ({})) as { pair?: unknown; timeframe?: unknown };
+      const parsedRequest = await readJsonRequest<{ pair?: unknown; timeframe?: unknown }>(req, MAX_ML_REQUEST_BYTES);
+      if (!parsedRequest.ok) return jsonResponse({ error: parsedRequest.status === 413 ? 'Request body is too large.' : 'A valid JSON request body is required.' }, parsedRequest.status, headers);
+      if (!parsedRequest.value || typeof parsedRequest.value !== 'object' || Array.isArray(parsedRequest.value)) {
+        return jsonResponse({ error: 'A valid JSON object is required.' }, 400, headers);
+      }
+      const requestBody = parsedRequest.value;
       const pair = requestBody.pair;
       const timeframe = requestBody.timeframe ?? '1h';
       if (typeof pair !== 'string' || !/^[A-Z0-9]{2,20}$/.test(pair)
@@ -444,6 +519,11 @@ Deno.serve(async (req: Request) => {
     if (err instanceof Error && err.message === 'Market data service is not configured.') {
       console.error('[ml] market data backend URL is not configured');
       return jsonResponse({ error: 'Market data service not configured.' }, 503, headers);
+    }
+    if (err instanceof MarketDataServiceError) {
+      const status = err.status === 429 ? 429 : err.status === 400 || err.status === 403 ? err.status : 502;
+      console.warn('[ml] market data service request failed:', status);
+      return jsonResponse({ error: status === 429 ? 'Market data provider rate limit exceeded.' : status === 403 ? 'Market access is disabled.' : 'Market data unavailable.' }, status, headers);
     }
     console.error('[ml]', err);
     return jsonResponse({ error: 'Internal error' }, 500, headers);
@@ -469,8 +549,7 @@ interface ModelMetrics {
 }
 
 async function retrainInternal(supabase: SupabaseClient, symbol: string, timeframe: string, accessToken?: string): Promise<{ ok: boolean; metrics: ModelMetrics; version: string }> {
-  const token = accessToken ?? Deno.env.get('SERVICE_ACCESS_TOKEN') ?? '';
-  const { candles, provider, quoteCurrency, sourceInstrument, datasetId } = await fetchCandles(symbol, timeframe, 1000, token);
+  const { candles, provider, quoteCurrency, sourceInstrument, datasetId } = await fetchCandles(symbol, timeframe, 1000, accessToken ?? '');
   const { features, labels, sampleIndices, forwardReturns, valid } = computeFeatures(candles);
   if (!valid) throw new Error('Insufficient data for training');
 
@@ -496,8 +575,10 @@ async function retrainInternal(supabase: SupabaseClient, symbol: string, timefra
   // The test period is untouched by training and calibration.
   const testPredictions = test.x.map((features) => predictProba(model, features) > 0.5 ? 1 : 0);
   const testMetrics = classificationMetrics(testPredictions, test.y);
-  const baselineAccuracy = momentumBaselineAccuracy(test.x.map((features) => features[0]!), test.y);
-  const noEdge = modelHasNoEdge(testMetrics.accuracy, baselineAccuracy);
+  const baselinePredictions = test.x.map((features) => features[0]! > 0 ? 1 : 0);
+  const comparison = compareWithBaseline(testPredictions, baselinePredictions, test.y);
+  const baselineAccuracy = comparison.baselineAccuracy;
+  const noEdge = !comparison.beatsBaseline;
   const trainedAt = new Date().toISOString();
   const version = `${trainedAt.replace(/[-:.TZ]/g, '')}-${crypto.randomUUID()}`;
   const persistedTestMetrics = {
@@ -507,6 +588,7 @@ async function retrainInternal(supabase: SupabaseClient, symbol: string, timefra
     validationSamples: validation.x.length,
     testStartIndex: split.testBoundary,
     predictionHorizon: PRED_HORIZON,
+    baselineComparison: comparison,
   };
 
   const modelState: ModelState = {
@@ -521,6 +603,7 @@ async function retrainInternal(supabase: SupabaseClient, symbol: string, timefra
       trainSamples: trainMetrics.samples,
       momentumBaselineAccuracy: Number(baselineAccuracy.toFixed(3)),
       noEdge,
+      baselineComparison: comparison,
     },
     trainedAt,
     dataRange: { start: candles[0].time, end: candles[candles.length - 1].time },
@@ -529,7 +612,9 @@ async function retrainInternal(supabase: SupabaseClient, symbol: string, timefra
     std: model.std,
     pair: symbol,
     timeframe,
+    trainingDatasetId: datasetId,
     returnCalibration,
+    loadedAt: Date.now(),
   };
   const { error: persistError } = await supabase.from('ml_model_artifacts').insert({
     symbol,
@@ -563,7 +648,7 @@ async function retrainInternal(supabase: SupabaseClient, symbol: string, timefra
   });
   if (persistError) throw new Error(`Could not persist trained ML model artifact: ${persistError.message}`);
   modelStates.set(modelKey(symbol, timeframe), modelState);
-  console.log(`[ml] retrained on ${symbol} ${timeframe}: test_acc=${testMetrics.accuracy.toFixed(3)} momentum_acc=${baselineAccuracy.toFixed(3)} no_edge=${noEdge} test_samples=${testMetrics.samples}`);
+  console.log(`[ml] retrained on ${symbol} ${timeframe}: test_acc=${testMetrics.accuracy.toFixed(3)} momentum_acc=${baselineAccuracy.toFixed(3)} baseline_discordant=${comparison.discordantPairs} baseline_lcb=${comparison.modelWinsLowerBound.toFixed(3)} no_edge=${noEdge} test_samples=${testMetrics.samples}`);
   return { ok: true, metrics: modelState.metrics, version };
 }
 

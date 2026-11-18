@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity, Sun, Moon, Wifi, WifiOff, TrendingUp, TrendingDown,
   Bell, ChevronDown, LogOut, Settings, ShieldCheck,
@@ -11,31 +11,31 @@ import { getDataProvider } from '../lib/providers';
 import { runAllStrategies } from '../lib/strategies/index';
 import { combineSignals } from '../lib/backtest';
 import { fetchMLPrediction, fetchCachedMLPrediction } from '../lib/mlClient';
-import AdminPanel from './AdminPanel';
 import { isPerfOverlayEnabled, measureAsync } from '../lib/perf';
 import PerfOverlay from './PerfOverlay';
 import AdminRoute from './AdminRoute';
-import CMSManager from './CMS/CMSManager';
 import CMSViewer from './CMS/CMSViewer';
 import Sidebar from './Sidebar';
 import MobileNavigation from './MobileNavigation';
-import MultiTimeframeTerminal from './MultiTimeframeTerminal';
 import { pathForSidebarTab, sidebarTabFromPath, type SidebarTab } from '../lib/routes';
 import { formatMarketPrice, getDefaultMarketSymbol, getMarketsByType, setMarketAvailability } from '../lib/markets';
 import { fetchPublishedContent } from '../lib/cms';
-import MarketsPage from './pages/MarketsPage';
-import AIAnalysis from './pages/AIAnalysis';
-import StrategyLab from './pages/StrategyLab';
-import PortfolioPage from './pages/PortfolioPage';
-import BacktestingCenter from './pages/BacktestingCenter';
-import WatchlistsPage from './pages/WatchlistsPage';
-import AlertsPage from './pages/AlertsPage';
-import NewsPage from './pages/NewsPage';
-import RiskManagement from './pages/RiskManagement';
-import AILearning from './pages/AILearning';
-import SettingsPage from './pages/SettingsPage';
-import TraderDesk from './pages/TraderDesk';
-import AutonomousCommandCenter from './AutonomousCommandCenter';
+const AdminPanel = lazy(() => import('./AdminPanel'));
+const CMSManager = lazy(() => import('./CMS/CMSManager'));
+const MultiTimeframeTerminal = lazy(() => import('./MultiTimeframeTerminal'));
+const MarketsPage = lazy(() => import('./pages/MarketsPage'));
+const AIAnalysis = lazy(() => import('./pages/AIAnalysis'));
+const StrategyLab = lazy(() => import('./pages/StrategyLab'));
+const PortfolioPage = lazy(() => import('./pages/PortfolioPage'));
+const BacktestingCenter = lazy(() => import('./pages/BacktestingCenter'));
+const WatchlistsPage = lazy(() => import('./pages/WatchlistsPage'));
+const AlertsPage = lazy(() => import('./pages/AlertsPage'));
+const NewsPage = lazy(() => import('./pages/NewsPage'));
+const RiskManagement = lazy(() => import('./pages/RiskManagement'));
+const AILearning = lazy(() => import('./pages/AILearning'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const TraderDesk = lazy(() => import('./pages/TraderDesk'));
+const AutonomousCommandCenter = lazy(() => import('./AutonomousCommandCenter'));
 import KineticCoach from './KineticCoach';
 import { fetchMarketAvailability, requestBackendDecision, type BackendDecision } from '../lib/backend-api';
 import { resolveAvatarUrl } from '../lib/avatar';
@@ -454,7 +454,9 @@ export default function Dashboard() {
               {TIMEFRAMES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
             </select>
           </div>}
-          {renderContent()}
+          <Suspense fallback={<div className="flex min-h-40 items-center justify-center p-6 text-sm text-muted" role="status">Loading workspace…</div>}>
+            {renderContent()}
+          </Suspense>
           {perfOverlayEnabled && <PerfOverlay candleCount={candles.length} />}
         </main>
       </div>

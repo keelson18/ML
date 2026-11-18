@@ -9,6 +9,8 @@ describe('LandingPage', () => {
     expect(markup).toContain('CRYPTO &amp; COMMODITY MARKET RESEARCH');
     expect(markup).toContain('no live orders or real-money execution');
     expect(markup).toContain('Paper trading only');
-    expect(markup).toContain('Illustrative preview of the market intelligence workspace');
+    expect(markup).toContain('A clear review process');
+    expect(markup).toContain('Evaluate on paper');
+    expect(markup).not.toContain('Illustrative preview');
   });
 });

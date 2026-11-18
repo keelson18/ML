@@ -1,4 +1,4 @@
-import { Activity, ArrowRight, BarChart3, Brain, Moon, ShieldCheck, Sun, TrendingUp } from 'lucide-react';
+import { Activity, ArrowRight, BarChart3, Brain, Moon, ShieldCheck, Sun } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 
 interface Props {
@@ -45,26 +45,15 @@ export default function LandingPage({ onSignIn, onSignUp }: Props) {
           </div>
         </div>
 
-        <div className="landing-preview" aria-label="Illustrative preview of the market intelligence workspace">
-          <div className="preview-window-bar"><div className="preview-brand"><span className="preview-mark"><Activity aria-hidden="true" /></span><span>Market workspace</span></div><span className="preview-label">ILLUSTRATIVE PREVIEW</span></div>
-          <div className="preview-market-row"><div><small>MARKET STRUCTURE</small><strong>Price action</strong></div><span className="preview-status"><i /> Context view</span></div>
-          <div className="preview-chart-wrap">
-            <div className="preview-chart-labels"><span>Trend context</span><span>Signal map</span></div>
-            <svg className="preview-chart" viewBox="0 0 720 250" role="img" aria-label="Illustrative market chart with trend and signal overlays" preserveAspectRatio="none">
-              <defs><linearGradient id="preview-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="currentColor" stopOpacity=".22" /><stop offset="1" stopColor="currentColor" stopOpacity="0" /></linearGradient></defs>
-              {[38, 88, 138, 188, 238].map((y) => <line key={y} x1="0" y1={y} x2="720" y2={y} className="preview-gridline" />)}
-              <path d="M0 188 C38 176 46 153 79 164 S126 137 155 150 S201 120 232 139 S281 108 312 126 S355 95 386 112 S428 123 455 100 S502 111 531 76 S573 92 602 60 S652 79 680 38 S706 50 720 28 L720 250 L0 250Z" fill="url(#preview-fill)" />
-              <path d="M0 188 C38 176 46 153 79 164 S126 137 155 150 S201 120 232 139 S281 108 312 126 S355 95 386 112 S428 123 455 100 S502 111 531 76 S573 92 602 60 S652 79 680 38 S706 50 720 28" className="preview-line" />
-              <path d="M0 204 C46 194 62 187 100 184 S162 168 195 165 S251 156 287 151 S345 145 378 139 S433 134 469 126 S522 120 559 108 S613 98 650 86 S693 76 720 70" className="preview-average" />
-              <circle cx="531" cy="76" r="5" className="preview-point" /><circle cx="531" cy="76" r="12" className="preview-point-halo" />
-            </svg>
-            <div className="preview-axis"><span>Structure</span><span>Momentum</span><span>Risk review</span><span>Decision</span></div>
-          </div>
-          <div className="preview-insights">
-            <div className="preview-insight"><span className="preview-insight-icon"><TrendingUp aria-hidden="true" /></span><div><small>MARKET CONTEXT</small><strong>Trend & momentum</strong></div><span className="preview-insight-state">IN VIEW</span></div>
-            <div className="preview-insight"><span className="preview-insight-icon"><Brain aria-hidden="true" /></span><div><small>SUPPORTING EVIDENCE</small><strong>Signals with reasoning</strong></div><span className="preview-insight-state">TRACEABLE</span></div>
-            <div className="preview-insight"><span className="preview-insight-icon"><ShieldCheck aria-hidden="true" /></span><div><small>RISK OVERSIGHT</small><strong>Review before action</strong></div><span className="preview-insight-state">BUILT IN</span></div>
-          </div>
+        <div className="landing-review" aria-labelledby="landing-review-title">
+          <p className="landing-review-label">A clear review process</p>
+          <h2 id="landing-review-title">From market data to a decision you can inspect.</h2>
+          <ol>
+            <li><span>01</span><div><strong>Read the context</strong><p>Compare price action across supported markets and timeframes.</p></div></li>
+            <li><span>02</span><div><strong>Check the evidence</strong><p>Review the signals and uncertainty behind an analysis.</p></div></li>
+            <li><span>03</span><div><strong>Evaluate on paper</strong><p>Track a hypothetical decision without placing a live order.</p></div></li>
+          </ol>
+          <p className="landing-review-note"><ShieldCheck aria-hidden="true" /> Paper trading only. No broker execution.</p>
         </div>
       </section>
 

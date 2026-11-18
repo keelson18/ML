@@ -23,6 +23,7 @@
 - **Explainable trade cards** — reasoning breakdown per signal
 - **Multi-timeframe analysis** — 1m through 1M
 - **Role-based access** — User / Admin with CMS content management, manual event blackouts, and Supabase MFA support
+- **AI Learning review** — Admin-only research registry and evidence-linked backlog. Questions are manually curated, priorities are human-assigned, and all creation/status changes are audited; no automatic strategy promotion occurs.
 
 ## Architecture
 
@@ -86,12 +87,12 @@ Fill in `.env`:
 | `SUPABASE_SERVICE_ROLE_KEY` | Legacy service-role JWT fallback (server-only) |
 | `MASSIVE_API_KEY` | Market-data provider account (server-only) |
 | `TWELVEDATA_API_KEY` | Optional market-data provider account (server-only) |
-| `ML_SERVICE_API_KEY` | Generate a random secret string |
+| `ML_SERVICE_API_KEY` | Generate a random secret of at least 32 characters and configure the same value on the backend and the `ml-predict` Edge Function |
 | `GEMINI_API_KEY` | Google AI Studio (server-only) |
 | `CORS_ORIGIN` | `http://localhost:5173` for local dev |
 | `VITE_BACKEND_URL` | `http://localhost:8787` for local backend |
 
-For the local Supabase Edge Function runtime, set `BACKEND_URL` to a URL reachable from its container (for example `http://host.docker.internal:8787` on Docker Desktop) and set `ML_FUNCTION_ENV=development`. Hosted Edge Functions require `BACKEND_URL` to be an HTTPS URL; configure `BACKEND_URL` and `ML_FUNCTION_ENV=production` as server-side function secrets. If `BACKEND_URL` is missing, ML prediction/retraining returns a generic 503 instead of calling localhost. Set `CORS_ORIGIN` on the Edge Function to the frontend origin(s), comma-separated. Local development mode permits localhost preview ports; production only echoes origins explicitly listed in `CORS_ORIGIN`.
+For the local Supabase Edge Function runtime, set `BACKEND_URL` to a URL reachable from its container (for example `http://host.docker.internal:8787` on Docker Desktop) and set `ML_FUNCTION_ENV=development`. Hosted Edge Functions require `BACKEND_URL` to be an HTTPS URL; configure `BACKEND_URL`, `ML_FUNCTION_ENV=production`, and `ML_SERVICE_API_KEY` as server-side function secrets. Set the same `ML_SERVICE_API_KEY` on the backend: it protects the internal ML market-data route used for maintenance retraining, so retraining does not need a long-lived user access token. ML prediction and the optional `decision-analyze` compatibility proxy use this backend; decision requests are revalidated and analyzed by Fastify, never by browser-supplied candle data. If `BACKEND_URL` is missing, Edge requests return a generic 503 rather than inventing a local analysis. Set `CORS_ORIGIN` on the Edge Function to the frontend origin(s), comma-separated. Local development mode permits localhost preview ports; production only echoes origins explicitly listed in `CORS_ORIGIN`.
 
 Trader Desk and event-risk parameters are server-side and validated from `.env.example`. Provider symbols are unverified until the backend probe succeeds. Manual blackout windows block entries when configured and position management remains independent of entry holds.
 

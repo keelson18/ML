@@ -44,6 +44,7 @@ export interface MLPrediction {
   expected_move_pct: number | null;
   expected_move_calibrated?: boolean;
   model_version: string;
+  training_dataset_id?: string;
   confidence: 'low' | 'medium' | 'high';
   edge_status?: 'no-edge' | 'beats-momentum-baseline';
   momentum_baseline_accuracy?: number;

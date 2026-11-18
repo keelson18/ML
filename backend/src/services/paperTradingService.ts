@@ -35,6 +35,13 @@ function freshestClosedCandle(candles: Candle[], timeframe: Timeframe, stale: bo
   return now - closeTime <= maximumAgeMs ? closed : undefined;
 }
 
+function entryCandleIsFreshNow(candle: Candle, timeframe: Timeframe): boolean {
+  const durationMs = candleSeconds(timeframe, candle.time) * 1000;
+  const closesAt = (candle.time + candleSeconds(timeframe, candle.time)) * 1000;
+  const ageMs = Date.now() - closesAt;
+  return ageMs >= 0 && ageMs <= durationMs * traderConfig.MAX_ENTRY_AGE_BARS;
+}
+
 async function activePromotedSetups(): Promise<Set<string>> {
   if (process.env.NODE_ENV === 'test') return new Set(traderConfig.PROMOTED_SETUP_TYPES);
   const { data, error } = await getSupabaseClient().from('strategy_promotions').select('setup_type').eq('status', 'active');
@@ -173,7 +180,7 @@ export async function advanceStoredTradePlans(input: {
       if (plan.symbol !== input.symbol || (plan.triggerTimeframe ?? traderConfig.TRIGGER_TIMEFRAMES[0]) !== input.timeframe || !['WATCHING', 'ARMED', 'PENDING_ORDER'].includes(plan.status)) continue;
       let gateResult: EntryGateResult = { approved: false, quantity: 0, reason: 'Entry gates have not passed.' };
       const gate = (entryPrice: number): EntryGateResult => {
-        if (input.entriesAllowed !== true) return gateResult = { approved: false, quantity: 0, reason: 'Entry paused: trigger candle freshness was not verified or exceeds the configured maximum entry age.' };
+        if (input.entriesAllowed !== true || !entryCandleIsFreshNow(input.candle, input.timeframe)) return gateResult = { approved: false, quantity: 0, reason: 'Entry paused: trigger candle is not fresh at execution time or exceeds the configured maximum entry age.' };
         const eventDecision = evaluateEventEntryGate(eventRisk, traderConfig.eventBlackoutMinImpact);
         if (!eventDecision.approved) return gateResult = { approved: false, quantity: 0, reason: eventDecision.reason, activeEventIds: eventDecision.activeEventIds };
         const market = getMarket(plan.symbol);

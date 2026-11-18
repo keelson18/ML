@@ -13,6 +13,7 @@ vi.mock('../services/marketDataService', () => ({ fetchMarketData: marketMocks.f
 
 const TEST_ID = 'a1b2c3d4-1111-4111-8111-111111111111';
 let insert: ReturnType<typeof vi.fn>;
+let rpc: ReturnType<typeof vi.fn>;
 
 const INTERVALS: Record<Timeframe, number> = { '1m': 60, '3m': 180, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h': 14_400, '1d': 86_400, '1w': 604_800, '1M': 2_592_000 };
 
@@ -78,6 +79,7 @@ async function createApp() {
 describe('learning and research persistence routes', () => {
   beforeEach(() => {
     insert = vi.fn().mockReturnThis();
+    rpc = vi.fn().mockResolvedValue({ data: TEST_ID, error: null });
     const query = {
       insert,
       select: vi.fn().mockReturnThis(),
@@ -87,7 +89,7 @@ describe('learning and research persistence routes', () => {
       order: vi.fn().mockReturnThis(),
       limit: vi.fn().mockResolvedValue({ data: [], error: null }),
     };
-    dbMocks.getSupabaseClientWithToken.mockReturnValue({ from: vi.fn().mockReturnValue(query), rpc: vi.fn().mockResolvedValue({ data: TEST_ID, error: null }) });
+    dbMocks.getSupabaseClientWithToken.mockReturnValue({ from: vi.fn().mockReturnValue(query), rpc });
     dbMocks.getSupabaseClient.mockReturnValue({ rpc: vi.fn().mockResolvedValue({ data: TEST_ID, error: null }) });
     marketMocks.fetchMarketData.mockReset();
   });
@@ -124,9 +126,54 @@ describe('learning and research persistence routes', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       versions: [], strategyVersions: [], events: [], experiments: [], knowledge: [],
-      runs: [], results: [], journal: [], collections: [],
+      runs: [], results: [], journal: [], collections: [], backlog: [], backlogAvailable: true,
     });
     expect(response.json().refreshedAt).toEqual(expect.any(String));
+    await app.close();
+  });
+
+  it('creates an evidence-linked admin backlog item through the audited database function', async () => {
+    const app = await createApp();
+    const evidence = { source_type: 'research', source_id: TEST_ID, description: 'The saved research result has insufficient holdout samples.' };
+    const response = await app.inject({
+      method: 'POST', url: '/api/v1/admin/ai/research-backlog', headers: { authorization: 'Bearer admin-token' },
+      payload: { title: 'Review holdout size', question: 'Does this setup retain enough independent forward observations?', rationale: 'The result did not reach the planned sample minimum.', priority: 'high', evidence: [evidence] },
+    });
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toEqual({ id: TEST_ID });
+    expect(rpc).toHaveBeenCalledWith('admin_create_ai_research_backlog', expect.objectContaining({
+      p_title: 'Review holdout size', p_priority: 'high', p_evidence: [evidence],
+    }));
+    await app.close();
+  });
+
+  it('rejects backlog records without a valid evidence reference or with caller supplied fields', async () => {
+    const app = await createApp();
+    const base = { title: 'Review a result', question: 'Is the result robust?', priority: 'medium' };
+    const noEvidence = await app.inject({ method: 'POST', url: '/api/v1/admin/ai/research-backlog', headers: { authorization: 'Bearer admin-token' }, payload: base });
+    const invalidSource = await app.inject({ method: 'POST', url: '/api/v1/admin/ai/research-backlog', headers: { authorization: 'Bearer admin-token' }, payload: { ...base, evidence: [{ source_type: 'research', source_id: 'not-a-uuid', description: 'A saved result.' }] } });
+    const suppliedOwner = await app.inject({ method: 'POST', url: '/api/v1/admin/ai/research-backlog', headers: { authorization: 'Bearer admin-token' }, payload: { ...base, ownerId: 'other-user', evidence: [{ source_type: 'research', source_id: TEST_ID, description: 'A saved result.' }] } });
+    expect(noEvidence.statusCode).toBe(400);
+    expect(invalidSource.statusCode).toBe(400);
+    expect(suppliedOwner.statusCode).toBe(400);
+    expect(rpc).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('requires admin access and a reason when blocking a backlog item', async () => {
+    const app = await createApp();
+    const url = `/api/v1/admin/ai/research-backlog/${TEST_ID}/status`;
+    expect((await app.inject({ method: 'PATCH', url, payload: { status: 'done' } })).statusCode).toBe(401);
+    expect((await app.inject({ method: 'PATCH', url, headers: { authorization: 'Bearer user-token' }, payload: { status: 'done' } })).statusCode).toBe(403);
+    const missingNote = await app.inject({ method: 'PATCH', url, headers: { authorization: 'Bearer admin-token' }, payload: { status: 'blocked' } });
+    expect(missingNote.statusCode).toBe(400);
+    expect(rpc).not.toHaveBeenCalled();
+    const updated = await app.inject({ method: 'PATCH', url, headers: { authorization: 'Bearer admin-token' }, payload: { status: 'blocked', statusNote: 'Provider candles are currently unavailable.' } });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json()).toEqual({ updated: true });
+    expect(rpc).toHaveBeenCalledWith('admin_update_ai_research_backlog_status', {
+      p_id: TEST_ID, p_status: 'blocked', p_status_note: 'Provider candles are currently unavailable.',
+    });
     await app.close();
   });
 

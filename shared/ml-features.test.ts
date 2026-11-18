@@ -53,4 +53,19 @@ describe('ML feature engineering', () => {
   it('rejects invalid label thresholds', () => {
     expect(() => computeMlFeatures(flatCandles(220), { minimumMoveAtr: Number.NaN })).toThrow('Minimum ATR move');
   });
+
+  it('rejects malformed, non-finite, and out-of-order candles before feature calculation', () => {
+    const validCandles = flatCandles(220);
+    expect(() => computeMlFeatures(validCandles.map((candle, index) => index === 4 ? { ...candle, close: Number.NaN } : candle)))
+      .toThrow(/non-finite/);
+    expect(() => computeMlFeatures(validCandles.map((candle, index) => index === 4 ? { ...candle, low: 101 } : candle)))
+      .toThrow(/inconsistent OHLC/);
+    expect(() => computeMlFeatures(validCandles.map((candle, index) => index === 4 ? { ...candle, time: 3 } : candle)))
+      .toThrow(/strictly increasing/);
+  });
+
+  it('rejects invalid RSI periods and non-positive closes', () => {
+    expect(() => computeRsi([1, 2, 3], 0)).toThrow(/positive integer/);
+    expect(() => computeRsi([1, 0, 3])).toThrow(/finite positive prices/);
+  });
 });
