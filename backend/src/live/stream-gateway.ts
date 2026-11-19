@@ -233,7 +233,9 @@ export class StreamGateway {
       this.sendJson(client, { type: 'tick', symbol: tick.symbol, sequence, price: tick.price, timestamp: tick.timestamp }, true);
       for (const timeframe of subscription.timeframes) {
         const candle = this.aggregator.formingCandle(tick.symbol, timeframe);
-        if (candle) this.sendJson(client, { type: 'forming_candle', symbol: tick.symbol, timeframe, sequence, candle }, true);
+        // Include the server clock so clients never fall back to their own clock
+        // when deciding whether a streamed bar is still forming.
+        if (candle) this.sendJson(client, { type: 'forming_candle', symbol: tick.symbol, timeframe, sequence, serverTime: tick.timestamp, candle }, true);
       }
     }
   }

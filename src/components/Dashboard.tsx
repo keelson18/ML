@@ -1,11 +1,11 @@
-import { forwardRef, lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity, Sun, Moon, Wifi, WifiOff, TrendingUp, TrendingDown,
-  Bell, ChevronDown, LogOut, Settings, ShieldCheck,
+  Bell, ChevronDown, Settings, ShieldCheck,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { TIMEFRAMES, MARKET_TYPES, type Candle, type Timeframe, type Signal, type Recommendation, type MLPrediction, type MarketType, type CMSContent } from '../lib/types';
+import { type Candle, type Timeframe, type Signal, type Recommendation, type MLPrediction, type MarketType, type CMSContent } from '../lib/types';
 import { selectClosedCandles } from '../lib/candle-clock';
 import { getDataProvider } from '../lib/providers';
 import { runAllStrategies } from '../lib/strategies/index';
@@ -37,10 +37,12 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const TraderDesk = lazy(() => import('./pages/TraderDesk'));
 const AutonomousCommandCenter = lazy(() => import('./AutonomousCommandCenter'));
 import KineticCoach from './KineticCoach';
-import { fetchMarketAvailability, requestBackendDecision, type BackendDecision } from '../lib/backend-api';
+import { fetchCanonicalMarketData, fetchMarketAvailability, requestBackendDecision, type BackendDecision } from '../lib/backend-api';
 import { resolveAvatarUrl } from '../lib/avatar';
 import { fetchNotifications, markNotificationRead, type InAppNotification } from '../api/notifications';
 import { MULTI_TIMEFRAME_ANALYSIS_PANELS } from '../lib/terminal';
+import SignOutButton from './SignOutButton';
+import { MarketSymbolSelect, MarketTypeSelect, TimeframeButtons, TimeframeSelect } from './controls/MarketControls';
 
 type WsStatus = 'connecting' | 'open' | 'polling' | 'closed' | 'reconnecting';
 
@@ -58,6 +60,7 @@ export default function Dashboard() {
   const [serverDecisionError, setServerDecisionError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [dataError, setDataError] = useState<string | null>(null);
+  const [dataStale, setDataStale] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [wsStatus, setWsStatus] = useState<WsStatus>('connecting');
   const [livePrice, setLivePrice] = useState<number | null>(null);
@@ -65,10 +68,20 @@ export default function Dashboard() {
   const [mlLoading, setMlLoading] = useState(false);
   const [mlStatus, setMlStatus] = useState<'idle' | 'loading' | 'ready' | 'cached' | 'unavailable'>('idle');
   const candlesRef = useRef<Candle[]>([]);
-  const candleCacheRef = useRef(new Map<string, Candle[]>());
+  // Each cached series carries the backend timestamp used for its candle-closure checks.
+  const candleCacheRef = useRef(new Map<string, { candles: Candle[]; fetchedAt: number }>());
   const notificationRef = useRef<HTMLDivElement>(null);
   const accountMenuRef = useRef<HTMLDivElement>(null);
   const [openHeaderPanel, setOpenHeaderPanel] = useState<'notifications' | 'account' | null>(null);
+
+  // One handler for every market-type selector (header, mobile row, dashboard).
+  const handleMarketTypeChange = useCallback((nextType: MarketType) => {
+    setMarketType(nextType);
+    const nextMarkets = getMarketsByType(nextType);
+    if (nextMarkets.length && !nextMarkets.some((market) => market.symbol === symbol)) {
+      setSymbol(nextMarkets[0].symbol);
+    }
+  }, [symbol]);
 
   useEffect(() => {
     if (!openHeaderPanel) return;
@@ -136,26 +149,29 @@ export default function Dashboard() {
   useEffect(() => {
     let disposed = false;
     const cacheKey = `${symbol}:${timeframe}`;
-    const cachedCandles = candleCacheRef.current.get(cacheKey) ?? [];
+    const cached = candleCacheRef.current.get(cacheKey);
+    const cachedCandles = cached?.candles ?? [];
     setLoading(true);
     candlesRef.current = cachedCandles;
     setCandles(cachedCandles);
-    setDecisionCandles(selectClosedCandles(cachedCandles, timeframe));
+    setDecisionCandles(cached ? selectClosedCandles(cachedCandles, timeframe, cached.fetchedAt) : []);
     setLivePrice(cachedCandles.at(-1)?.close ?? null);
     setDataError(null);
+    setDataStale(false);
     setWsStatus('connecting');
     setMl(null);
     setMlStatus('idle');
 
     (async () => {
       try {
-        const data = await measureAsync('candles.fetch', () => dataProvider.fetchKlines(symbol, timeframe, 1000));
+        const data = await measureAsync('candles.fetch', () => fetchCanonicalMarketData(symbol, timeframe, 1000));
         if (disposed) return;
-        const merged = [...new Map([...data, ...candlesRef.current].map((candle) => [candle.time, candle])).values()].sort((a, b) => a.time - b.time);
+        setDataStale(data.stale);
+        const merged = [...new Map([...data.candles, ...candlesRef.current].map((candle) => [candle.time, candle])).values()].sort((a, b) => a.time - b.time);
         candlesRef.current = merged;
-        candleCacheRef.current.set(cacheKey, merged);
+        candleCacheRef.current.set(cacheKey, { candles: merged, fetchedAt: data.fetchedAt });
         setCandles(merged);
-        setDecisionCandles(selectClosedCandles(merged, timeframe));
+        setDecisionCandles(selectClosedCandles(merged, timeframe, data.fetchedAt));
         setLivePrice(merged.length ? merged[merged.length - 1].close : null);
       } catch (error) {
         if (!disposed) {
@@ -174,12 +190,14 @@ export default function Dashboard() {
       const arr = candlesRef.current;
       setCandles(arr);
       setDataError(null);
-      if (closedTime !== null) {
+      const serverNow = candleCacheRef.current.get(cacheKey)?.fetchedAt ?? null;
+      if (closedTime !== null && serverNow !== null) {
         const time = closedTime;
+        const nowMs = serverNow;
         closedTime = null;
         setDecisionCandles((previous) => {
           if (previous.at(-1) && previous[previous.length - 1].time > time) return previous;
-          return selectClosedCandles(arr.filter((item) => item.time <= time), timeframe);
+          return selectClosedCandles(arr.filter((item) => item.time <= time), timeframe, nowMs);
         });
       }
       if (latestPrice !== null) setLivePrice(latestPrice);
@@ -191,7 +209,8 @@ export default function Dashboard() {
       else if (!last || candle.time > last.time) arr.push(candle);
       if (arr.length > 1500) arr.shift();
       candlesRef.current = arr;
-      candleCacheRef.current.set(`${symbol}:${timeframe}`, arr);
+      const cachedSeries = candleCacheRef.current.get(cacheKey);
+      if (cachedSeries) candleCacheRef.current.set(cacheKey, { candles: arr, fetchedAt: cachedSeries.fetchedAt });
       latestPrice = candle.close;
       if (closed) closedTime = candle.time;
       if (frame === null) frame = window.requestAnimationFrame(flush);
@@ -266,6 +285,13 @@ export default function Dashboard() {
     return ((last - first) / first) * 100;
   }, [candles]);
 
+  const priceState: 'live' | 'updating' | 'stale' = dataError || dataStale
+    ? 'stale'
+    : loading || wsStatus !== 'open'
+      ? 'updating'
+      : 'live';
+  const priceStateLabel = priceState === 'stale' ? 'Stale' : 'Updating';
+
   const renderContent = () => {
     if (sidebarTab === 'admin' && isAdmin) {
       return <div className="p-4 lg:p-6"><AdminPanel /></div>;
@@ -297,14 +323,12 @@ export default function Dashboard() {
       return (
         <div className="p-4 lg:p-6">
           <div className="flex flex-wrap items-center gap-3 mb-4">
-            <select aria-label="Trading terminal symbol" value={symbol} onChange={(e) => setSymbol(e.target.value)}
-              className="px-3.5 py-2 rounded-lg bg-surface border border-border text-text focus:outline-none focus:border-primary/40 text-sm font-medium">
-              {availableMarkets.map((p) => <option key={p.symbol} value={p.symbol}>{p.label}</option>)}
-            </select>
+            <MarketSymbolSelect ariaLabel="Trading terminal symbol" value={symbol} onChange={setSymbol} markets={availableMarkets}
+              className="px-3.5 py-2 rounded-lg bg-surface border border-border text-text focus:outline-none focus:border-primary/40 text-sm font-medium" />
             <div className="flex items-center gap-1 rounded-lg bg-surface border border-border p-1" role="group" aria-label="Jump to terminal timeframe">
               {MULTI_TIMEFRAME_ANALYSIS_PANELS.map(({ timeframe: frame, label }) => <button key={frame} type="button" onClick={() => document.getElementById(`terminal-${frame}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })} aria-label={`Show ${label} chart`} aria-controls={`terminal-${frame}`} className="rounded px-2 py-1 text-xs font-medium text-muted hover:bg-bg hover:text-text">{label}</button>)}
             </div>
-            <span className="text-lg font-semibold tabular-nums ml-auto text-text">{formatMarketPrice(symbol, livePrice)}</span>
+            <span className="text-lg font-semibold tabular-nums ml-auto text-text flex items-center gap-2">{formatMarketPrice(symbol, livePrice)}{priceState !== 'live' && <span className="dashboard-price-state" role="status">{priceStateLabel}</span>}</span>
           </div>
           <div className="terminal-chart-frame bg-surface border border-border rounded-xl overflow-hidden relative">
             <MultiTimeframeTerminal symbol={symbol} theme={theme} />
@@ -324,6 +348,7 @@ export default function Dashboard() {
           <div className="dashboard-market-price">
             <span className="dashboard-price-label">{symbol} <span>·</span> {timeframe}</span>
             <strong>{formatMarketPrice(symbol, livePrice)}</strong>
+            {priceState !== 'live' && <span className="dashboard-price-state" role="status">{priceStateLabel}</span>}
             <div className="dashboard-price-change">
               {priceChange !== null && <span className={priceChange >= 0 ? 'is-positive' : 'is-negative'}>
                 {priceChange >= 0 ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
@@ -336,46 +361,12 @@ export default function Dashboard() {
 
         <div className="dashboard-controls">
           <div className="dashboard-market-filters">
-            <select
-              aria-label="Market type"
-              value={marketType}
-              onChange={(e) => {
-                const newType = e.target.value as MarketType;
-                setMarketType(newType);
-                const markets = getMarketsByType(newType);
-                if (markets.length > 0 && !markets.find((m) => m.symbol === symbol)) {
-                  setSymbol(markets[0].symbol);
-                }
-              }}
-              className="dashboard-select"
-            >
-              {MARKET_TYPES.map((mt) => (
-                <option key={mt.value} value={mt.value}>{mt.icon} {mt.label}</option>
-              ))}
-            </select>
+            <MarketTypeSelect ariaLabel="Market type" value={marketType} onChange={handleMarketTypeChange} showIcon className="dashboard-select" />
 
-            <select
-              aria-label="Market symbol"
-              value={symbol}
-              onChange={(e) => setSymbol(e.target.value)}
-              className="dashboard-select"
-            >
-              {availableMarkets.map((p) => <option key={p.symbol} value={p.symbol}>{p.label}</option>)}
-            </select>
+            <MarketSymbolSelect ariaLabel="Market symbol" value={symbol} onChange={setSymbol} markets={availableMarkets} className="dashboard-select" />
           </div>
 
-          <div className="dashboard-timeframes" aria-label="Chart timeframe">
-            {TIMEFRAMES.map((tf) => (
-              <button
-                key={tf.value}
-                onClick={() => setTimeframe(tf.value)}
-                aria-pressed={timeframe === tf.value}
-                className={timeframe === tf.value ? 'is-active' : ''}
-              >
-                {tf.label}
-              </button>
-            ))}
-          </div>
+          <TimeframeButtons value={timeframe} onChange={setTimeframe} />
         </div>
 
         {dataError && (
@@ -407,22 +398,11 @@ export default function Dashboard() {
           </div>
           {sidebarTab !== 'dashboard' && <div className="hidden md:flex min-w-0 flex-1 items-center justify-center gap-2 px-3">
             <label className="sr-only" htmlFor="global-market-type">Market type</label>
-            <select id="global-market-type" aria-label="Market type" value={marketType} onChange={(event) => {
-              const nextType = event.target.value as MarketType;
-              setMarketType(nextType);
-              const nextMarkets = getMarketsByType(nextType);
-              if (nextMarkets.length && !nextMarkets.some((market) => market.symbol === symbol)) setSymbol(nextMarkets[0].symbol);
-            }} className="max-w-28 truncate rounded-lg border border-border bg-bg px-2 py-1.5 text-xs text-text">
-              {MARKET_TYPES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-            </select>
+            <MarketTypeSelect id="global-market-type" ariaLabel="Market type" value={marketType} onChange={handleMarketTypeChange} className="max-w-28 truncate rounded-lg border border-border bg-bg px-2 py-1.5 text-xs text-text" />
             <label className="sr-only" htmlFor="global-market-symbol">Market symbol</label>
-            <select id="global-market-symbol" aria-label="Market symbol" value={symbol} onChange={(event) => setSymbol(event.target.value)} className="max-w-36 truncate rounded-lg border border-border bg-bg px-2 py-1.5 text-xs text-text">
-              {availableMarkets.map((market) => <option key={market.symbol} value={market.symbol}>{market.label}</option>)}
-            </select>
+            <MarketSymbolSelect id="global-market-symbol" ariaLabel="Market symbol" value={symbol} onChange={setSymbol} markets={availableMarkets} className="max-w-36 truncate rounded-lg border border-border bg-bg px-2 py-1.5 text-xs text-text" />
             <label className="sr-only" htmlFor="global-timeframe">Analysis timeframe</label>
-            <select id="global-timeframe" aria-label="Analysis timeframe" value={timeframe} onChange={(event) => setTimeframe(event.target.value as Timeframe)} className="rounded-lg border border-border bg-bg px-2 py-1.5 text-xs text-text">
-              {TIMEFRAMES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-            </select>
+            <TimeframeSelect id="global-timeframe" ariaLabel="Analysis timeframe" value={timeframe} onChange={setTimeframe} className="rounded-lg border border-border bg-bg px-2 py-1.5 text-xs text-text" />
           </div>}
           <div className="app-header-actions">
             <WsIndicator status={wsStatus} />
@@ -437,22 +417,11 @@ export default function Dashboard() {
         <main className="app-main flex-1 overflow-y-auto">
           {sidebarTab !== 'dashboard' && <div className="mobile-market-row flex md:hidden items-center gap-1.5 border-b border-border bg-surface px-2 py-2">
             <label className="sr-only" htmlFor="mobile-market-type">Market type</label>
-            <select id="mobile-market-type" aria-label="Market type" value={marketType} onChange={(event) => {
-              const nextType = event.target.value as MarketType;
-              setMarketType(nextType);
-              const nextMarkets = getMarketsByType(nextType);
-              if (nextMarkets.length && !nextMarkets.some((market) => market.symbol === symbol)) setSymbol(nextMarkets[0].symbol);
-            }} className="min-w-0 flex-1 rounded-lg border border-border bg-bg px-2 py-1.5 text-xs text-text">
-              {MARKET_TYPES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-            </select>
+            <MarketTypeSelect id="mobile-market-type" ariaLabel="Market type" value={marketType} onChange={handleMarketTypeChange} className="min-w-0 flex-1 rounded-lg border border-border bg-bg px-2 py-1.5 text-xs text-text" />
             <label className="sr-only" htmlFor="mobile-market-symbol">Market symbol</label>
-            <select id="mobile-market-symbol" aria-label="Market symbol" value={symbol} onChange={(event) => setSymbol(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-border bg-bg px-2 py-1.5 text-xs text-text">
-              {availableMarkets.map((market) => <option key={market.symbol} value={market.symbol}>{market.label}</option>)}
-            </select>
+            <MarketSymbolSelect id="mobile-market-symbol" ariaLabel="Market symbol" value={symbol} onChange={setSymbol} markets={availableMarkets} className="min-w-0 flex-1 rounded-lg border border-border bg-bg px-2 py-1.5 text-xs text-text" />
             <label className="sr-only" htmlFor="mobile-timeframe">Analysis timeframe</label>
-            <select id="mobile-timeframe" aria-label="Analysis timeframe" value={timeframe} onChange={(event) => setTimeframe(event.target.value as Timeframe)} className="w-16 rounded-lg border border-border bg-bg px-2 py-1.5 text-xs text-text">
-              {TIMEFRAMES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-            </select>
+            <TimeframeSelect id="mobile-timeframe" ariaLabel="Analysis timeframe" value={timeframe} onChange={setTimeframe} className="w-16 rounded-lg border border-border bg-bg px-2 py-1.5 text-xs text-text" />
           </div>}
           <Suspense fallback={<div className="flex min-h-40 items-center justify-center p-6 text-sm text-muted" role="status">Loading workspace…</div>}>
             {renderContent()}
@@ -534,7 +503,7 @@ const AvatarMenu = forwardRef<HTMLDivElement, { open: boolean; onToggle: () => v
       </div>
       <div className="account-menu-actions">
         <button type="button" role="menuitem" onClick={onSettings} className="account-menu-action"><Settings aria-hidden="true" /><span>Profile & settings</span><ChevronDown className="-rotate-90" aria-hidden="true" /></button>
-        <button type="button" role="menuitem" onClick={onSignOut} className="account-menu-action is-danger"><LogOut aria-hidden="true" /><span>Sign out</span></button>
+        <SignOutButton onSignOut={onSignOut} variant="menu" />
       </div>
     </div>}
   </div>;

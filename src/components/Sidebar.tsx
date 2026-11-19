@@ -1,4 +1,5 @@
-import { Activity, BarChart3, Shield, BookOpen, Settings, TrendingUp, Brain, Zap, Briefcase, History, Star, Bell, Newspaper, AlertTriangle, ClipboardList, LogOut } from 'lucide-react';
+import { Activity, BarChart3, Shield, BookOpen, Settings, TrendingUp, Brain, Zap, Briefcase, History, Star, Bell, Newspaper, AlertTriangle, ClipboardList } from 'lucide-react';
+import SignOutButton from './SignOutButton';
 import type { SidebarTab } from '../lib/routes';
 export type { SidebarTab } from '../lib/routes';
 
@@ -56,7 +57,7 @@ export default function Sidebar({ activeTab, onTabChange, isAdmin, onSignOut }: 
       </nav>
 
       <div className="sidebar-footer">
-        <button type="button" onClick={onSignOut} className="sidebar-sign-out"><LogOut aria-hidden="true" /><span>Sign out</span></button>
+        <SignOutButton onSignOut={onSignOut} />
         <p>Quantum Intelligence <b>v2.0</b></p>
       </div>
     </aside>

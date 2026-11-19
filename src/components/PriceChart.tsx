@@ -4,8 +4,8 @@ import {
   ColorType,
   CrosshairMode,
   type IChartApi,
+  type IPriceLine,
   type ISeriesApi,
-  type LineWidth,
   type Time,
   LineStyle,
 } from 'lightweight-charts';
@@ -14,31 +14,15 @@ import { normalizeCandles } from '../lib/chart-data';
 import { applyCandleUpdate } from '../lib/chart-feed';
 import { recordTiming } from '../lib/perf';
 import { resolveThemeColors } from './price-chart-colors';
-
-interface OverlayLine {
-  type: 'line';
-  data: Array<{ time: number; value: number }>;
-  color?: string;
-  width?: number;
-}
+import { planOverlays, type ChartOverlay } from './price-chart-overlays';
 
 interface Props {
   candles: Candle[];
   theme: 'light' | 'dark';
-  overlays?: OverlayLine[];
+  overlays?: ChartOverlay[];
 }
 
 const ANNOUNCE_INTERVAL_MS = 1000;
-
-const LINE_WIDTHS: readonly LineWidth[] = [1, 2, 3, 4];
-
-/** Lightweight Charts only accepts 1–4; clamp arbitrary overlay widths to the nearest valid value. */
-function toLineWidth(width: number | undefined): LineWidth {
-  if (width === undefined || !Number.isFinite(width)) return 2;
-  return LINE_WIDTHS.reduce((best, candidate) => (
-    Math.abs(candidate - width) < Math.abs(best - width) ? candidate : best
-  ), 2);
-}
 
 function toCandleBar(candle: Candle) {
   return {
@@ -55,6 +39,7 @@ export default function PriceChart({ candles, theme, overlays = [] }: Props) {
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const overlaySeriesRef = useRef<ISeriesApi<'Line'>[]>([]);
+  const priceLinesRef = useRef<IPriceLine[]>([]);
   const appliedCandlesRef = useRef<Candle[]>([]);
 
   const safeCandles = useMemo(() => normalizeCandles(candles), [candles]);
@@ -113,28 +98,43 @@ export default function PriceChart({ candles, theme, overlays = [] }: Props) {
       chart.remove();
       chartRef.current = null;
       overlaySeriesRef.current = [];
+      priceLinesRef.current = [];
       candleSeriesRef.current = null;
     };
   }, [theme]);
 
   useEffect(() => {
     const chart = chartRef.current;
-    if (!chart) return;
+    const candleSeries = candleSeriesRef.current;
+    if (!chart || !candleSeries) return;
     for (const series of overlaySeriesRef.current) chart.removeSeries(series);
     overlaySeriesRef.current = [];
+    for (const line of priceLinesRef.current) candleSeries.removePriceLine(line);
+    priceLinesRef.current = [];
+    candleSeries.setMarkers([]);
+
     const colors = resolveThemeColors(theme);
-    for (const overlay of overlays) {
-      if (overlay.type !== 'line') continue;
+    const plan = planOverlays(overlays, colors);
+    for (const line of plan.lines) {
       const series = chart.addLineSeries({
-        color: overlay.color ?? colors.primary,
-        lineWidth: toLineWidth(overlay.width),
+        color: line.color,
+        lineWidth: line.width,
         lineStyle: LineStyle.Solid,
         lastValueVisible: true,
         priceLineVisible: false,
       });
-      series.setData(overlay.data.map((point) => ({ time: point.time as Time, value: point.value })));
+      series.setData(line.data);
       overlaySeriesRef.current.push(series);
     }
+    if (plan.markers.length) candleSeries.setMarkers(plan.markers);
+    priceLinesRef.current = plan.priceLines.map((line) => candleSeries.createPriceLine({
+      price: line.price,
+      color: line.color,
+      title: line.title,
+      lineWidth: 1,
+      lineStyle: LineStyle.Dashed,
+      axisLabelVisible: true,
+    }));
   }, [overlays, theme]);
 
   useEffect(() => {

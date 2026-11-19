@@ -5,7 +5,8 @@ const intervals: Partial<Record<Timeframe, number>> = {
   '1h': 3_600, '4h': 14_400, '1d': 86_400, '1w': 604_800,
 };
 
-export function candleSeconds(timeframe: Timeframe, startSeconds = Date.now() / 1000): number {
+// Callers supply the clock explicitly; no helper may fall back to the browser clock.
+export function candleSeconds(timeframe: Timeframe, startSeconds: number): number {
   if (timeframe !== '1M') return intervals[timeframe]!;
   const start = new Date(startSeconds * 1000);
   return (Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1) - Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1)) / 1000;
@@ -30,7 +31,7 @@ export function nextBoundary(nowMs: number, timeframe: Timeframe): number {
     const daysUntilMonday = (8 - current.getUTCDay()) % 7 || 7;
     return Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), current.getUTCDate() + daysUntilMonday);
   }
-  const intervalMs = candleSeconds(timeframe) * 1000;
+  const intervalMs = candleSeconds(timeframe, nowMs / 1000) * 1000;
   return (Math.floor(nowMs / intervalMs) + 1) * intervalMs;
 }
 
@@ -45,17 +46,19 @@ export function latestClosedCandleTime(nowMs: number, timeframe: Timeframe, grac
     const daysSinceMonday = (current.getUTCDay() + 6) % 7;
     boundary = Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), current.getUTCDate() - daysSinceMonday);
   } else {
-    const intervalMs = candleSeconds(timeframe) * 1000;
+    const intervalMs = candleSeconds(timeframe, effective / 1000) * 1000;
     boundary = Math.floor(effective / intervalMs) * intervalMs;
   }
   const priorStartMs = boundary - candleSeconds(timeframe, (boundary - 1) / 1000) * 1000;
   return priorStartMs / 1000;
 }
 
-export function isClosed(candle: Candle, timeframe: Timeframe, nowMs = Date.now(), graceMs = 0): boolean {
+// Callers must supply the clock. Browser-driven code uses the backend response's
+// server timestamp; server-side code uses its own clock. No implicit Date.now().
+export function isClosed(candle: Candle, timeframe: Timeframe, nowMs: number, graceMs = 0): boolean {
   return candle.time * 1000 + candleSeconds(timeframe, candle.time) * 1000 <= nowMs - graceMs;
 }
 
-export function selectClosedCandles(candles: Candle[], timeframe: Timeframe, nowMs = Date.now(), graceMs = 0): Candle[] {
+export function selectClosedCandles(candles: Candle[], timeframe: Timeframe, nowMs: number, graceMs = 0): Candle[] {
   return candles.filter((candle) => isClosed(candle, timeframe, nowMs, graceMs));
 }

@@ -429,4 +429,35 @@ describe('backend paper position lifecycle', () => {
     expect(await wasCandleProcessed(accountId, 'BTCUSD', '15m', 900, 'planner')).toBe(false);
     expect(await wasCandleProcessed(accountId, 'BTCUSD', '15m', 900, 'manager')).toBe(false);
   });
+
+  it('rejects a strictly older candle after a newer one was processed', async () => {
+    const accountId = `older-candle-${Date.now()}`;
+    const oldPromotions = traderConfig.PROMOTED_SETUP_TYPES;
+    traderConfig.PROMOTED_SETUP_TYPES = ['trend-pullback'];
+    const newerTime = Math.floor(Date.parse('2026-01-06T00:00:00Z') / 1000 / 900) * 900;
+    const olderTime = newerTime - 900;
+    const plan: TradePlan = {
+      id: `plan-${accountId}`, accountId, symbol: 'BTCUSD', side: 'long', setupType: 'trend-pullback', htfBias: 'bull',
+      zone: { low: 98, high: 100 }, trigger: { kind: 'close_above_level', level: 100 }, invalidation: 95,
+      targets: [{ price: 110, fractionOfPosition: 1 }], minRR: 2, expiresAtBar: newerTime / 900 + 20,
+      thesis: 'older candle test', falsification: 'close below 95', grade: 'A', status: 'WATCHING', contextSnapshot: {},
+      engineVersions: {}, datasetId: 'older-candle-test', createdAt: new Date(olderTime * 1000).toISOString(), updatedAt: new Date(olderTime * 1000).toISOString(),
+    };
+    try {
+      await storeTradePlan(accountId, plan);
+      const newer = { time: newerTime, open: 99, high: 101, low: 98, close: 101, volume: 100 };
+      await advanceStoredTradePlans({ accountId, symbol: plan.symbol, timeframe: '15m', candle: newer, candles: [newer], shadowMode: false });
+      expect((await getAccount(accountId)).processedCandles?.['BTCUSD:executor:15m']).toBe(newerTime);
+
+      const older = { ...newer, time: olderTime };
+      const replay = await advanceStoredTradePlans({ accountId, symbol: plan.symbol, timeframe: '15m', candle: older, candles: [older], shadowMode: false });
+      expect(replay.filled).toBe(0);
+      expect(replay.events).toHaveLength(0);
+      expect((await getAccount(accountId)).processedCandles?.['BTCUSD:executor:15m']).toBe(newerTime);
+      expect(await wasCandleProcessed(accountId, 'BTCUSD', '15m', olderTime, 'executor')).toBe(true);
+
+      await markCandleProcessed(accountId, 'BTCUSD', '15m', olderTime, 'executor');
+      expect((await getAccount(accountId)).processedCandles?.['BTCUSD:executor:15m']).toBe(newerTime);
+    } finally { traderConfig.PROMOTED_SETUP_TYPES = oldPromotions; }
+  });
 });

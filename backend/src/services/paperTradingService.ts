@@ -166,7 +166,8 @@ export async function advanceStoredTradePlans(input: {
   return updateAccount(input.accountId, (startingAccount) => {
     let account = startingAccount;
     const checkpoint = candleCheckpoint(input.symbol, input.timeframe, 'executor');
-    if (account.processedCandles?.[checkpoint] === input.candle.time) {
+    const processedTime = account.processedCandles?.[checkpoint];
+    if (processedTime !== undefined && input.candle.time <= processedTime) {
       return { account, result: { plans: account.tradePlans ?? [], events: [], orders: account.pendingPaperOrders ?? [], filled: 0, shadowSignals: [] } };
     }
     const events: PlanEvent[] = [];
@@ -418,7 +419,8 @@ export async function closeOpenPaperPosition(accountId: string, symbol: string):
 export async function manageOpenPositions(accountId: string, symbol: string, candle: Candle, history: Candle[] = [candle], invalidationCandles: Candle[] = [], timeframe: Timeframe = traderConfig.MGMT_TIMEFRAME as Timeframe, writeFence?: PaperAccountWriteFence): Promise<PaperTrade[]> {
   return updateAccount(accountId, (startingAccount) => {
     const checkpoint = candleCheckpoint(symbol, timeframe, 'manager');
-    if (startingAccount.processedCandles?.[checkpoint] === candle.time) return { account: startingAccount, result: [] };
+    const processedTime = startingAccount.processedCandles?.[checkpoint];
+    if (processedTime !== undefined && candle.time <= processedTime) return { account: startingAccount, result: [] };
     let account = startingAccount;
     const closedTrades: PaperTrade[] = [];
     const openPositions = account.positions.filter((position) => position.status === 'open' && position.symbol === symbol);
@@ -518,13 +520,18 @@ function candleCheckpoint(symbol: string, timeframe: string, role = 'executor'):
 export async function wasCandleProcessed(accountId: string, symbol: string, timeframe: string, time: number, role = 'executor'): Promise<boolean> {
   const { account } = await loadAccount(accountId);
   const checkpoints = account.processedCandles ?? {};
-  return checkpoints[candleCheckpoint(symbol, timeframe, role)] === time
-    || role === 'executor' && checkpoints[`${symbol}:${timeframe}`] === time;
+  const checkpoint = checkpoints[candleCheckpoint(symbol, timeframe, role)];
+  const legacyCheckpoint = role === 'executor' ? checkpoints[`${symbol}:${timeframe}`] : undefined;
+  return (checkpoint !== undefined && time <= checkpoint) || (legacyCheckpoint !== undefined && time <= legacyCheckpoint);
 }
 
 export async function markCandleProcessed(accountId: string, symbol: string, timeframe: string, time: number, role = 'executor'): Promise<void> {
   await updateAccount(accountId, (account) => {
     const key = candleCheckpoint(symbol, timeframe, role);
+    const existing = account.processedCandles?.[key];
+    const legacy = role === 'executor' ? account.processedCandles?.[`${symbol}:${timeframe}`] : undefined;
+    const newest = Math.max(existing ?? -1, legacy ?? -1);
+    if (time <= newest) return { account, result: undefined };
     return {
       account: { ...account, processedCandles: { ...account.processedCandles, [key]: time } },
       result: undefined,

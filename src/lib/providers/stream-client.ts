@@ -135,7 +135,12 @@ class StreamClient {
     const { time, open, high, low, close } = candle;
     if (![time, open, high, low, close].every((value) => typeof value === 'number' && Number.isFinite(value))) return;
     const seconds = STREAM_TIMEFRAME_SECONDS[timeframe as Timeframe];
-    if (seconds === undefined || (time as number) + seconds <= Date.now() / 1000) return;
+    // Use the server-provided tick clock. Without it, trust the server's
+    // forming_candle classification rather than a skewed browser clock.
+    const serverTime = typeof message.serverTime === 'number' && Number.isFinite(message.serverTime)
+      ? message.serverTime
+      : null;
+    if (seconds === undefined || (serverTime !== null && (time as number) + seconds <= serverTime / 1000)) return;
     // Coinbase ticks carry no volume, so the streamed forming bar is zero-volume and must not be drawn as volume.
     const formed: Candle = { time: time as number, open: open as number, high: high as number, low: low as number, close: close as number, volume: 0 };
     for (const listener of this.listeners.get(symbol) ?? []) {

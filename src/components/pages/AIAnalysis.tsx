@@ -25,9 +25,9 @@ export default function AIAnalysis({ symbol, timeframe, serverDecision, signals,
   return (
     <div className="page-frame space-y-6">
       {marketError && <div role="alert" className="text-xs text-warning bg-warning/10 border border-warning/20 rounded-lg p-3">Market data unavailable: {marketError}. Pattern analysis may be stale.</div>}
-      <h2 className="text-sm font-semibold flex items-center gap-2">
+      <h1 className="text-sm font-semibold flex items-center gap-2">
         <Brain className="w-4 h-4 text-primary" /> AI Analysis Panel
-      </h2>
+      </h1>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Canonical decision confidence */}
@@ -64,16 +64,16 @@ export default function AIAnalysis({ symbol, timeframe, serverDecision, signals,
           </div>
           </div>
 
-        {/* Trend Strength Meter */}
+        {/* Combined strategy score, not a calibrated probability */}
         <div className="bg-surface border border-border rounded-xl p-4">
           <h3 className="text-xs font-medium text-muted mb-3 flex items-center gap-1">
-            <Activity className="w-3 h-3" /> Trend Strength
+            <Activity className="w-3 h-3" /> Combined Signal Score
           </h3>
           <div className="space-y-3">
             <div>
               <div className="flex justify-between text-xs mb-1">
-                <span className="text-muted">Strength</span>
-                <span className="tabular-nums">{recommendation ? `${Math.abs(recommendation.score * 100).toFixed(0)}%` : '--'}</span>
+                <span className="text-muted">Score magnitude</span>
+                <span className="tabular-nums">{recommendation ? Math.abs(recommendation.score).toFixed(3) : '--'}</span>
               </div>
               <div className="h-2 bg-border rounded-full overflow-hidden">
                 <div className={`h-full transition-all ${(recommendation?.score ?? 0) >= 0 ? 'bg-success' : 'bg-danger'}`}
@@ -81,7 +81,7 @@ export default function AIAnalysis({ symbol, timeframe, serverDecision, signals,
               </div>
             </div>
             <div className="text-xs text-muted">
-              Signal score: {recommendation?.score.toFixed(3) ?? '--'}
+              Absolute value of the combined strategy score, not a calibrated probability. Signed score: {recommendation?.score.toFixed(3) ?? '--'}
             </div>
           </div>
         </div>
@@ -117,8 +117,8 @@ export default function AIAnalysis({ symbol, timeframe, serverDecision, signals,
         </h3>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
           <div className="bg-bg/50 rounded-lg p-3">
-            <div className="text-muted mb-1">Market Phase</div>
-            <div className="font-medium capitalize">{recommendation ? (Math.abs(recommendation.score) > 0.3 ? 'Trending' : 'Ranging') : '--'}</div>
+            <div className="text-muted mb-1">Score band</div>
+            <div className="font-medium">{recommendation ? (Math.abs(recommendation.score) > 0.3 ? 'Above 0.30' : 'At or below 0.30') : '--'}</div>
           </div>
           <div className="bg-bg/50 rounded-lg p-3">
             <div className="text-muted mb-1">Momentum</div>

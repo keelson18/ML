@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { KeyboardEvent, ReactNode } from 'react';
 import { Activity, Brain, Database, FlaskConical, RefreshCw, ShieldCheck } from 'lucide-react';
 import { authenticatedBackendRequest } from '../../lib/backend-api';
+import PageFrame from '../PageFrame';
 import ResearchBacklogPanel, { type ResearchBacklogItem } from './ResearchBacklogPanel';
 import { filterAndSortResearchBacklog } from './research-backlog-utils';
 
@@ -57,6 +58,19 @@ export default function AILearning() {
   const [throughDate, setThroughDate] = useState('');
   const [page, setPage] = useState(0);
   const requestId = useRef(0);
+  const tabListRef = useRef<HTMLDivElement>(null);
+
+  const onTabKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const current = SECTIONS.indexOf(section);
+    const next = event.key === 'ArrowRight' ? (current + 1) % SECTIONS.length
+      : event.key === 'ArrowLeft' ? (current - 1 + SECTIONS.length) % SECTIONS.length
+        : event.key === 'Home' ? 0 : SECTIONS.length - 1;
+    setSection(SECTIONS[next]);
+    setPage(0);
+    tabListRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
+  };
 
   const load = useCallback(async () => {
     const currentRequest = ++requestId.current;
@@ -131,23 +145,22 @@ export default function AILearning() {
         : section === 'Models & Strategy Versions' ? totalPages(filteredVersions.length + filteredStrategies.length)
           : section === 'Research Backlog' ? totalPages(filteredBacklog.length) : 1;
 
-  return <div className="page-frame space-y-6">
-    <div className="page-heading">
-      <div className="page-heading-copy">
-        <div className="page-eyebrow"><Brain className="w-3.5 h-3.5" /> Research and evidence · Admin</div>
-        <h1>AI Learning</h1>
-        <p>Inspect persistent research, evidence, and paper-analysis context. Hypotheses remain distinct from validated knowledge; research never overrides decision or risk gates.</p>
-        <p className="mt-1 text-xs text-muted">Last refresh: {isoDate(data?.refreshedAt)} · Last recorded event: {isoDate(latestActivity)}</p>
-      </div>
-      <button type="button" onClick={() => void load()} disabled={loading} className="p-2 rounded-lg hover:bg-surface text-muted disabled:opacity-50" title="Refresh AI Learning data" aria-label="Refresh AI Learning data"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /></button>
-    </div>
+  return <PageFrame
+    className="space-y-6"
+    title="AI Learning"
+    eyebrow="Research and evidence · Admin"
+    description={<>Inspect persistent research, evidence, and paper-analysis context. Hypotheses remain distinct from validated knowledge; research never overrides decision or risk gates.
+      <span className="mt-1 block text-xs text-muted">Last refresh: {isoDate(data?.refreshedAt)} · Last recorded event: {isoDate(latestActivity)}</span></>}
+    icon={Brain}
+    actions={<button type="button" onClick={() => void load()} disabled={loading} className="p-2 rounded-lg hover:bg-surface text-muted disabled:opacity-50" title="Refresh AI Learning data" aria-label="Refresh AI Learning data"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /></button>}
+  >
     {error && <div role="alert" className="text-xs text-danger bg-danger/10 border border-danger/20 rounded-lg p-3">{error} Existing records remain unchanged; retry after verifying backend and database access.</div>}
     {loading && !data && <p role="status" className="text-sm text-muted">Loading saved AI Learning records…</p>}
     {!loading && !data && !error && <p className="text-sm text-muted">No AI Learning data response was returned.</p>}
 
-    <div className="flex gap-2 overflow-x-auto border-b border-border pb-2" role="tablist" aria-label="AI Learning sections">
-      {SECTIONS.map((item) => <button key={item} type="button" role="tab" aria-selected={section === item} onClick={() => setSection(item)}
-        className={`shrink-0 rounded-lg px-3 py-2 text-xs font-medium ${section === item ? 'bg-primary text-black' : 'bg-surface text-muted hover:text-text'}`}>{item}</button>)}
+    <div ref={tabListRef} onKeyDown={onTabKeyDown} className="flex gap-2 overflow-x-auto border-b border-border pb-2" role="tablist" aria-label="AI Learning sections">
+      {SECTIONS.map((item) => <button key={item} type="button" role="tab" tabIndex={section === item ? 0 : -1} aria-selected={section === item} onClick={() => { setSection(item); setPage(0); }}
+        className={`shrink-0 rounded-lg px-3 py-2 text-xs font-medium ${section === item ? 'bg-primary text-[rgb(var(--on-primary))]' : 'bg-surface text-muted hover:text-text'}`}>{item}</button>)}
     </div>
 
     <label className="block max-w-xl text-xs font-medium text-muted">Search saved records
@@ -215,7 +228,7 @@ export default function AILearning() {
             const validation = (result?.artifacts.validation ?? {}) as JsonRecord;
             return <div key={run.id} className="mt-3 rounded-lg border border-border/50 p-3">
               <p className="text-xs font-medium">Run {run.run_version} · {run.status} · Started {isoDate(run.started_at)}</p>
-              <p className="mt-1 break-all text-[11px] text-muted">Run ID {run.id} · Seed {run.seed ?? 'not recorded'} · Configuration {recordText(run.configuration)}</p>
+              <p className="mt-1 break-all text-xs text-muted">Run ID {run.id} · Seed {run.seed ?? 'not recorded'} · Configuration {recordText(run.configuration)}</p>
               {result && <p className="mt-1 text-xs text-muted">{result.conclusion ?? 'No conclusion recorded.'} Validation: {recordText(validation)} Metrics: {recordText(result.metrics)}</p>}
             </div>;
           })}
@@ -277,16 +290,16 @@ export default function AILearning() {
       <span>Page {page + 1} of {pageCount} · {PAGE_SIZE} records per page</span>
       <div className="flex gap-2"><button type="button" onClick={() => setPage((value) => Math.max(0, value - 1))} disabled={page === 0} className="rounded border border-border px-3 py-2 disabled:opacity-40">Previous</button><button type="button" onClick={() => setPage((value) => Math.min(pageCount - 1, value + 1))} disabled={page + 1 >= pageCount} className="rounded border border-border px-3 py-2 disabled:opacity-40">Next</button></div>
     </div>}
-    {!error && data && !loading && <p className="text-[11px] text-muted">Data refresh: {isoDate(data.refreshedAt)}. Results are limited to the latest 100 records per source.</p>}
-  </div>;
+    {!error && data && !loading && <p className="text-xs text-muted">Data refresh: {isoDate(data.refreshedAt)}. Results are limited to the latest 100 records per source.</p>}
+  </PageFrame>;
 }
 
 function JournalCard({ event }: { event: { id: string; title: string; detail: string; type: string; status: string; symbol: string; timeframe: string; createdAt: string; source: string; correlationId: string; related: JsonRecord; evidence: JsonRecord; origin: 'system' | 'manual' } }) {
   return <article className="rounded-lg border border-border/60 bg-bg/50 p-3">
-    <div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-xs">{event.title}</strong><time className="text-[11px] text-muted">{isoDate(event.createdAt)}</time></div>
+    <div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-xs">{event.title}</strong><time className="text-xs text-muted">{isoDate(event.createdAt)}</time></div>
     <p className="mt-1 text-xs text-muted">{event.origin === 'system' ? 'System event' : 'Manual note'} · {event.type} · {event.status}{event.symbol ? ` · ${event.symbol}` : ''}{event.timeframe ? ` · ${event.timeframe}` : ''} · {event.source}</p>
     <p className="mt-2 whitespace-pre-wrap text-xs">{event.detail}</p>
-    {event.correlationId && <p className="mt-2 break-all text-[11px] text-muted">Correlation {event.correlationId}</p>}
+    {event.correlationId && <p className="mt-2 break-all text-xs text-muted">Correlation {event.correlationId}</p>}
     {(Object.keys(event.related).length > 0 || Object.keys(event.evidence).length > 0) && <details className="mt-2 text-xs">
       <summary className="cursor-pointer text-primary">Evidence and related records</summary>
       <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-bg p-2 text-xs text-muted">{recordText({ related: event.related, evidence: event.evidence })}</pre>

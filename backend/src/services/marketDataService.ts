@@ -216,6 +216,16 @@ export function fetchMarketData(canonicalSymbol: string, timeframe: Timeframe, l
   }).catch((error: unknown) => returnStaleOrThrow(cacheKey, cached, timeframe, canonicalSymbol, error));
 }
 
+// A slower, older in-flight request must not displace a newer cached series. Prefer the
+// latest candle time (fetchedAt is stamped on completion, so it favours late arrivals)
+// and use fetchedAt only to break ties.
+function isNewerSeries(candidate: MarketDataSeries, incumbent: CacheEntry): boolean {
+  const candidateLatest = candidate.candles.at(-1)?.time ?? -1;
+  const incumbentLatest = incumbent.series.candles.at(-1)?.time ?? -1;
+  if (candidateLatest !== incumbentLatest) return candidateLatest > incumbentLatest;
+  return candidate.fetchedAt >= incumbent.series.fetchedAt;
+}
+
 function returnStaleOrThrow(cacheKey: string, cached: CacheEntry | undefined, timeframe: Timeframe, symbol: string, error: unknown): Promise<MarketDataSeries> {
   if (!cached) return Promise.reject(error);
   const ttl = CACHE_TTL_MS[timeframe] ?? 15_000;
@@ -223,9 +233,12 @@ function returnStaleOrThrow(cacheKey: string, cached: CacheEntry | undefined, ti
   const maxStaleMs = ttl * config.marketDataMaxStaleTtlMultiplier;
   if (ageMs > maxStaleMs) return Promise.reject(error);
 
-  // Keep the fallback in the LRU queue without extending its original age.
+  // Keep the fallback in the LRU queue without extending its original age, but never
+  // replace a newer entry that another request cached while this one was in flight.
+  const current = marketDataCache.get(cacheKey);
+  const fallback = current && isNewerSeries(current.series, cached) ? current : cached;
   marketDataCache.delete(cacheKey);
-  marketDataCache.set(cacheKey, cached);
+  marketDataCache.set(cacheKey, fallback);
   evictOldestCacheEntries();
   console.warn({ symbol, timeframe, ageMs }, 'serving stale market data after provider failure');
   return Promise.resolve({ ...cached.series, fetchedAt: cached.fetchedAt, stale: true });
@@ -308,9 +321,11 @@ async function fetchMarketDataUncoalesced(canonicalSymbol: string, timeframe: Ti
     stale: false,
   };
 
-  // Store in TTL cache
+  // Store in TTL cache, guarding against out-of-order completions writing stale data.
   const ttl = CACHE_TTL_MS[timeframe] ?? 15_000;
   const cacheKey = JSON.stringify([canonicalSymbol, timeframe, limit]);
+  const existing = marketDataCache.get(cacheKey);
+  if (existing && !isNewerSeries(series, existing)) return series;
   marketDataCache.delete(cacheKey);
   marketDataCache.set(cacheKey, { series, fetchedAt, expiresAt: fetchedAt + ttl });
   evictOldestCacheEntries();
@@ -403,8 +418,10 @@ function aggregateThreeMinuteCandles(candles: Candle[], limit: number, nowMs = D
 
   const finish = () => {
     if (!current) return;
-    const intervalIsOpen = (current.time + intervalSeconds) * 1000 > nowMs;
-    if (count === 3 || intervalIsOpen) aggregated.push(current);
+    // A bucket is only complete when all three source minutes arrived AND its boundary
+    // has passed. Returning a forming bucket as a closed Candle lets analysis consume it.
+    const intervalIsClosed = (current.time + intervalSeconds) * 1000 <= nowMs;
+    if (count === 3 && intervalIsClosed) aggregated.push(current);
   };
 
   for (const candle of candles) {

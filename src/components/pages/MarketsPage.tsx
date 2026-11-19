@@ -3,8 +3,9 @@ import { BarChart3, ExternalLink, RefreshCw } from 'lucide-react';
 import type { MarketType } from '../../lib/types';
 import { formatMarketPrice, getSupportedProductMarkets } from '../../lib/markets';
 import { fetchCanonicalMarketData } from '../../lib/backend-api';
+import { selectClosedCandles } from '../../lib/candle-clock';
 
-type Quote = { price: number; change: number; stale: boolean };
+type Quote = { price: number; change: number | null; stale: boolean };
 const MARKET_TYPES: Array<{ value: MarketType; label: string }> = [
   { value: 'crypto', label: 'Crypto' },
   { value: 'commodity', label: 'Commodities' },
@@ -37,11 +38,12 @@ export default function MarketsPage() {
     setError(null);
     Promise.all(visibleMarkets.map(async (market) => {
       try {
-        const response = await fetchCanonicalMarketData(market.symbol, '1d', 2);
-        const latest = response.candles.at(-1);
+        const response = await fetchCanonicalMarketData(market.symbol, '1d', 3);
+        const closed = selectClosedCandles(response.candles, '1d', response.fetchedAt);
+        const latest = closed.at(-1);
         if (!latest) return { symbol: market.symbol, quote: null };
-        const previous = response.candles.at(-2);
-        return { symbol: market.symbol, quote: { price: latest.close, change: previous ? ((latest.close - previous.close) / previous.close) * 100 : 0, stale: response.stale } };
+        const previous = closed.at(-2);
+        return { symbol: market.symbol, quote: { price: latest.close, change: previous ? ((latest.close - previous.close) / previous.close) * 100 : null, stale: response.stale } };
       } catch {
         return { symbol: market.symbol, quote: null };
       }
@@ -64,6 +66,6 @@ export default function MarketsPage() {
       <label className="text-xs text-muted">Search<input type="search" value={search} onChange={(event) => { setSearch(event.target.value); setPage(0); }} placeholder="Symbol or name" className="ml-2 rounded-lg border border-border bg-bg px-2 py-1.5 text-xs text-text" /></label>
     </div>
     {error && <div role="alert" className="rounded-lg border border-warning/20 bg-warning/10 p-3 text-xs text-warning">{error}</div>}
-    <div className="overflow-hidden rounded-xl border border-border bg-surface"><div className="flex items-center justify-between border-b border-border px-4 py-3 text-xs text-muted"><span>{markets.length} supported instruments · Page {page + 1} of {pageCount}</span><div className="flex gap-2"><button type="button" onClick={() => setPage((value) => Math.max(0, value - 1))} disabled={page === 0} className="rounded border border-border px-2 py-1 disabled:opacity-40">Previous</button><button type="button" onClick={() => setPage((value) => Math.min(pageCount - 1, value + 1))} disabled={page >= pageCount - 1} className="rounded border border-border px-2 py-1 disabled:opacity-40">Next</button></div></div><div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr className="border-b border-border text-muted"><th className="px-4 py-3 text-left">Instrument</th><th className="px-4 py-3 text-right">Last price</th><th className="px-4 py-3 text-right">1D</th><th className="px-4 py-3 text-left">Data</th><th className="px-4 py-3 text-right">Chart</th></tr></thead><tbody>{visibleMarkets.map((market) => { const quote = quotes[market.symbol]; return <tr key={market.symbol} className="border-b border-border/50 hover:bg-bg/50"><td className="px-4 py-3"><strong>{market.symbol}</strong><div className="text-muted">{market.label} · {market.marketType}</div></td><td className="px-4 py-3 text-right tabular-nums">{quote ? formatMarketPrice(market.symbol, quote.price, 4) : '--'}</td><td className={`px-4 py-3 text-right tabular-nums ${quote ? quote.change >= 0 ? 'text-success' : 'text-danger' : 'text-muted'}`}>{quote ? `${quote.change >= 0 ? '+' : ''}${quote.change.toFixed(2)}%` : '--'}</td><td className="px-4 py-3">{quote ? <span className={quote.stale ? 'text-warning' : 'text-success'}>{quote.stale ? 'Stale' : 'Available'}</span> : <span className="text-muted">{!checkedSymbols.has(market.symbol) ? 'Checking…' : 'Unavailable'}</span>}<div className="text-[11px] text-muted">{market.provider}</div></td><td className="px-4 py-3 text-right"><button type="button" onClick={() => window.dispatchEvent(new CustomEvent('qi:navigate-market', { detail: { symbol: market.symbol } }))} aria-label={`Open ${market.symbol} chart`} className="rounded p-1 text-muted hover:text-primary"><ExternalLink className="h-4 w-4" /></button></td></tr>; })}</tbody></table></div></div>
+    <div className="overflow-hidden rounded-xl border border-border bg-surface"><div className="flex items-center justify-between border-b border-border px-4 py-3 text-xs text-muted"><span>{markets.length} supported instruments · Page {page + 1} of {pageCount}</span><div className="flex gap-2"><button type="button" onClick={() => setPage((value) => Math.max(0, value - 1))} disabled={page === 0} className="rounded border border-border px-2 py-1 disabled:opacity-40">Previous</button><button type="button" onClick={() => setPage((value) => Math.min(pageCount - 1, value + 1))} disabled={page >= pageCount - 1} className="rounded border border-border px-2 py-1 disabled:opacity-40">Next</button></div></div><div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr className="border-b border-border text-muted"><th className="px-4 py-3 text-left">Instrument</th><th className="px-4 py-3 text-right">Last price</th><th className="px-4 py-3 text-right">1D</th><th className="px-4 py-3 text-left">Data</th><th className="px-4 py-3 text-right">Chart</th></tr></thead><tbody>{visibleMarkets.map((market) => { const quote = quotes[market.symbol]; return <tr key={market.symbol} className="border-b border-border/50 hover:bg-bg/50"><td className="px-4 py-3"><strong>{market.symbol}</strong><div className="text-muted">{market.label} · {market.marketType}</div></td><td className="px-4 py-3 text-right tabular-nums">{quote ? formatMarketPrice(market.symbol, quote.price, 4) : '--'}</td><td className={`px-4 py-3 text-right tabular-nums ${quote && quote.change !== null ? quote.change >= 0 ? 'text-success' : 'text-danger' : 'text-muted'}`}>{quote ? quote.change === null ? 'n/a' : `${quote.change >= 0 ? '+' : ''}${quote.change.toFixed(2)}%` : '--'}</td><td className="px-4 py-3">{quote ? <span className={quote.stale ? 'text-warning' : 'text-success'}>{quote.stale ? 'Stale' : 'Available'}</span> : <span className="text-muted">{!checkedSymbols.has(market.symbol) ? 'Checking…' : 'Unavailable'}</span>}<div className="text-xs text-muted">{market.provider}</div></td><td className="px-4 py-3 text-right"><button type="button" onClick={() => window.dispatchEvent(new CustomEvent('qi:navigate-market', { detail: { symbol: market.symbol } }))} aria-label={`Open ${market.symbol} chart`} className="rounded p-1 text-muted hover:text-primary"><ExternalLink className="h-4 w-4" /></button></td></tr>; })}</tbody></table></div></div>
   </div>;
 }

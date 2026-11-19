@@ -4,15 +4,16 @@ import type { LucideIcon } from 'lucide-react';
 interface Props {
   title: string;
   eyebrow: string;
-  description: string;
+  description: ReactNode;
   icon: LucideIcon;
   actions?: ReactNode;
+  className?: string;
   children: ReactNode;
 }
 
-export default function PageFrame({ title, eyebrow, description, icon: Icon, actions, children }: Props) {
+export default function PageFrame({ title, eyebrow, description, icon: Icon, actions, className, children }: Props) {
   return (
-    <div className="page-frame">
+    <div className={`page-frame${className ? ` ${className}` : ''}`}>
       <header className="page-heading">
         <div className="page-heading-copy"><div className="page-eyebrow"><Icon className="w-3.5 h-3.5" /> {eyebrow}</div><h1>{title}</h1><p>{description}</p></div>
         {actions && <div className="page-heading-actions">{actions}</div>}

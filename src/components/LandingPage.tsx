@@ -17,8 +17,8 @@ export default function LandingPage({ onSignIn, onSignUp }: Props) {
           <span>Quantum <small>INTELLIGENCE</small></span>
         </a>
         <nav className="landing-nav-links" aria-label="Landing page">
-          <a href="#platform">Platform</a>
           <a href="#principles">Principles</a>
+          <a href="#platform">Platform</a>
         </nav>
         <div className="landing-nav-actions">
           <button type="button" className="landing-theme-toggle" onClick={toggle} aria-label="Toggle theme" title="Toggle theme">
@@ -45,7 +45,7 @@ export default function LandingPage({ onSignIn, onSignUp }: Props) {
           </div>
         </div>
 
-        <div className="landing-review" aria-labelledby="landing-review-title">
+        <section id="principles" className="landing-review" aria-labelledby="landing-review-title">
           <p className="landing-review-label">A clear review process</p>
           <h2 id="landing-review-title">From market data to a decision you can inspect.</h2>
           <ol>
@@ -54,7 +54,7 @@ export default function LandingPage({ onSignIn, onSignUp }: Props) {
             <li><span>03</span><div><strong>Evaluate on paper</strong><p>Track a hypothetical decision without placing a live order.</p></div></li>
           </ol>
           <p className="landing-review-note"><ShieldCheck aria-hidden="true" /> Paper trading only. No broker execution.</p>
-        </div>
+        </section>
       </section>
 
       <section id="platform" className="landing-platform">
@@ -66,7 +66,7 @@ export default function LandingPage({ onSignIn, onSignUp }: Props) {
         </div>
       </section>
 
-      <footer id="principles" className="landing-footer"><span>Quantum Intelligence</span><span>Built for deliberate, evidence-led market research.</span><button type="button" onClick={onSignIn}>Open workspace <ArrowRight aria-hidden="true" /></button></footer>
+      <footer className="landing-footer"><span>Quantum Intelligence</span><span>Built for deliberate, evidence-led market research.</span><button type="button" onClick={onSignIn}>Open workspace <ArrowRight aria-hidden="true" /></button></footer>
     </main>
   );
 }

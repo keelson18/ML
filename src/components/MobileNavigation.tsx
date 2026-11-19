@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { Activity, AlertTriangle, BarChart3, Bell, BookOpen, Brain, Briefcase, Check, ClipboardList, History, Newspaper, Settings, Shield, Star, TrendingUp, X, Zap, LogOut } from 'lucide-react';
+import { Activity, AlertTriangle, BarChart3, Bell, BookOpen, Brain, Briefcase, Check, ClipboardList, History, Newspaper, Settings, Shield, Star, TrendingUp, X, Zap } from 'lucide-react';
+import SignOutButton from './SignOutButton';
 import type { SidebarTab } from '../lib/routes';
 
 const PRIMARY: { tab: SidebarTab; label: string; icon: typeof Activity; adminOnly?: boolean }[] = [
-  { tab: 'dashboard', label: 'Chart', icon: Activity },
+  { tab: 'dashboard', label: 'Dashboard', icon: Activity },
   { tab: 'trader-desk', label: 'Trader', icon: ClipboardList },
   { tab: 'portfolio', label: 'Portfolio', icon: Briefcase },
   { tab: 'ai-analysis', label: 'Research', icon: Brain },
@@ -68,7 +69,7 @@ export default function MobileNavigation({ activeTab, isAdmin, onNavigate, onSig
       <div ref={sheetRef} role="dialog" aria-modal="true" aria-labelledby="mobile-more-title" className="mobile-more-sheet" onKeyDown={onSheetKeyDown}>
         <header><div className="mobile-more-heading"><span className="mobile-more-mark"><Activity aria-hidden="true" /></span><div><p>YOUR WORKSPACE</p><h2 id="mobile-more-title">Explore</h2></div></div><button data-sheet-close type="button" onClick={closeMore} aria-label="Close More menu"><X aria-hidden="true" /></button></header>
         <nav aria-label="More pages">{MORE.filter((item) => !item.adminOnly || isAdmin).map(({ tab, label, icon: Icon }) => <button key={tab} type="button" onClick={() => navigate(tab)} aria-current={activeTab === tab ? 'page' : undefined} className={activeTab === tab ? 'mobile-more-link is-active' : 'mobile-more-link'}><Icon aria-hidden="true" /><span>{label}</span>{activeTab === tab && <Check className="mobile-more-check" aria-hidden="true" />}</button>)}</nav>
-        <button type="button" onClick={onSignOut} className="mobile-sign-out"><LogOut aria-hidden="true" /><span>Sign out</span></button>
+        <SignOutButton onSignOut={onSignOut} variant="mobile" />
       </div>
     </div>}
   </>;

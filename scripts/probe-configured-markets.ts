@@ -44,7 +44,7 @@ for (const symbol of autonomySymbols) {
     try {
       // Twelve Data may include the still-forming candle in outputsize; ask for headroom.
       const series = await fetchMarketData(symbol, timeframe, minimumClosedCandles + 10);
-      const closed = selectClosedCandles(series.candles, timeframe);
+      const closed = selectClosedCandles(series.candles, timeframe, Date.now());
       const latestClosed = closed.at(-1);
       const ageMs = latestClosed
         ? Math.max(0, Date.now() - (latestClosed.time + candleSeconds(timeframe, latestClosed.time)) * 1000)

@@ -73,7 +73,7 @@ export default function AutonomousCommandCenter({ symbol, timeframe, candles, ca
 
       <div className="command-center-grid">
         <aside className="command-panel context-panel">
-          <PanelTitle label="WATCHLIST / 4H BIAS" icon={<Activity className="w-3.5 h-3.5" />} />
+          <PanelTitle label={`WATCHLIST / ${timeframe.toUpperCase()} BIAS`} icon={<Activity className="w-3.5 h-3.5" />} />
           <div className="command-watchlist">{markets.slice(0, 6).map((market) => <button key={market.symbol} className={market.symbol === symbol ? 'is-active' : ''} onClick={() => onSymbolChange(market.symbol)}><span>{market.baseAsset}</span><small>{market.symbol === symbol ? 'ACTIVE' : market.label}</small></button>)}</div>
 
           <div className={`bias-badge ${direction === 'buy' ? 'bullish' : direction === 'sell' ? 'bearish' : 'neutral'}`}>{direction === 'buy' ? <TrendingUp className="w-4 h-4" /> : direction === 'sell' ? <TrendingDown className="w-4 h-4" /> : <Target className="w-4 h-4" />} {direction.toUpperCase()}</div>
@@ -98,14 +98,14 @@ export default function AutonomousCommandCenter({ symbol, timeframe, candles, ca
           {(serverDecision?.supportingEvidence ?? evidence.map((signal) => ({ source: signal.strategy, score: signal.confidence, explanation: signal.reason }))).map((item) => <Meter key={item.source} label={item.source} value={Math.round((item.score ?? 0) * 100)} detail={item.explanation} />)}
           {!evidence.length && <div className="command-empty compact">Evidence will appear after analysis.</div>}
           {serverDecision?.researchContext && <div className="mt-3 border-t border-border/60 pt-3" aria-label="AI Learning research context">
-            <p className="text-[11px] font-semibold text-primary">AI Learning · supplementary, non-authoritative</p>
-            <p className="mt-1 text-[11px] text-muted">{serverDecision.researchContext.status.replaceAll('_', ' ')} · {serverDecision.researchContext.note}</p>
+            <p className="text-xs font-semibold text-primary">AI Learning · supplementary, non-authoritative</p>
+            <p className="mt-1 text-xs text-muted">{serverDecision.researchContext.status.replaceAll('_', ' ')} · {serverDecision.researchContext.note}</p>
             {serverDecision.researchContext.items.map((item) => <article key={item.id} className="mt-2 rounded-lg border border-border/50 bg-bg/50 p-2">
-              <p className="text-[11px] font-medium">{item.title} · v{item.version}</p>
-              <p className="mt-1 text-[11px] text-muted">{item.content}</p>
+              <p className="text-xs font-medium">{item.title} · v{item.version}</p>
+              <p className="mt-1 text-xs text-muted">{item.content}</p>
             </article>)}
           </div>}
-          {serverDecision?.journalStatus === 'failed' && <p role="status" className="mt-2 text-[11px] text-warning">Analysis completed, but its AI Learning journal event could not be saved.</p>}
+          {serverDecision?.journalStatus === 'failed' && <p role="status" className="mt-2 text-xs text-warning">Analysis completed, but its AI Learning journal event could not be saved.</p>}
         </aside>
       </div>
 
@@ -121,10 +121,10 @@ export default function AutonomousCommandCenter({ symbol, timeframe, candles, ca
         <div className="decision-risk"><span>Closed trades</span><strong>{botStatus?.closedTradeCount ?? 0}</strong></div>
         {botStatus?.action === 'PAUSED' && <span title="Automatic engine paused after a safety event"><AlertTriangle className="w-4 h-4 text-warning" /></span>}
       </div>
-      <div className="decision-explanation border-t border-border/60 pt-2 text-[11px] text-muted">
+      <div className="decision-explanation border-t border-border/60 pt-2 text-xs text-muted">
         Market bias {botStatus ? describeBotBias(botStatus.analysis.marketBias) : 'unknown'} · Last bot cycle {formatBotTimestamp(botStatus?.scheduler.lastCycleAt ?? null)} · Last processed candle {formatBotTimestamp(botStatus?.lastProcessedCandleAt ?? null)} · Bias is context only and never an approved paper trade.
       </div>
-      {serverDecisionError && <p role="status" className="decision-explanation text-[11px] text-warning">Decision analysis is unavailable: {serverDecisionError.replace(/[.!?]+$/, '')}. This does not change the bot lifecycle state above.</p>}
+      {serverDecisionError && <p role="status" className="decision-explanation text-xs text-warning">Decision analysis is unavailable: {serverDecisionError.replace(/[.!?]+$/, '')}. This does not change the bot lifecycle state above.</p>}
       {serverDecision?.stages && <div className="decision-explanation border-t border-border/50 px-3 py-2 text-xs text-muted" aria-label="Decision stages">
         Setup: {serverDecision.stages.setupDetection.status.replaceAll('_', ' ')} · Entry: {serverDecision.stages.entryConfirmation.status.replaceAll('_', ' ')} · Final: {serverDecision.stages.finalDecision.action.replaceAll('_', ' ')}
       </div>}

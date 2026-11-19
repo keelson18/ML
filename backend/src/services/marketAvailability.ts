@@ -1,6 +1,6 @@
 // Holds server-side provider-verification state for registry instruments with existing adapters.
 import { MARKET_UNIVERSE } from '../../../src/lib/markets';
-import { isProviderSupportedMarket, providerSupport } from '../../../src/lib/marketCapabilities';
+import { isProviderSupportedMarket, providerProbeSpacingMs, providerSupport } from '../../../src/lib/marketCapabilities';
 import type { MarketDataProvider, Timeframe } from '../../../src/lib/types';
 import { config } from '../config';
 import { traderConfig } from '../trader/config';
@@ -29,9 +29,14 @@ export function marketProbeSpacingMs(
   reservedPriorityRequests = config.massiveTraderReservedRequests,
   minimumIntervalMs = config.marketProbeIntervalMs,
 ): number {
-  const reserved = Math.min(reservedPriorityRequests, Math.max(0, requestsPerWindow - 1));
-  const standardRequestSlots = Math.max(1, requestsPerWindow - reserved);
-  return Math.max(minimumIntervalMs, Math.ceil(windowMs / standardRequestSlots));
+  return providerProbeSpacingMs('massive', {
+    marketProbeIntervalMs: minimumIntervalMs,
+    massiveRequestsPerWindow: requestsPerWindow,
+    massiveBudgetWindowMs: windowMs,
+    massiveTraderReservedRequests: reservedPriorityRequests,
+    twelveDataRequestsPerWindow: config.twelveDataRequestsPerWindow,
+    twelveDataBudgetWindowMs: config.twelveDataBudgetWindowMs,
+  });
 }
 
 const supportedMarkets = MARKET_UNIVERSE.filter((market) => market.isActive && isProviderSupportedMarket(market));
@@ -68,11 +73,6 @@ export class MarketProbeInProgressError extends Error {
     super('Another market availability probe is already running.');
     this.name = 'MarketProbeInProgressError';
   }
-}
-
-function providerProbeSpacingMs(provider: MarketDataProvider): number {
-  if (provider === 'massive') return marketProbeSpacingMs();
-  return Math.max(config.marketProbeIntervalMs, Math.ceil(config.twelveDataBudgetWindowMs / config.twelveDataRequestsPerWindow));
 }
 
 export function getMarketAvailability(): MarketAvailability[] {
@@ -196,7 +196,7 @@ export async function probeAllMarkets(
     for (const market of configuredMarkets) {
       const timeframes: TimeframeProbeResult[] = [];
       for (const timeframe of requiredTimeframes) {
-        if (hasRequested) await sleep(providerProbeSpacingMs(market.provider as MarketDataProvider));
+        if (hasRequested) await sleep(providerProbeSpacingMs(market.provider, config));
         hasRequested = true;
         try {
           const result = await probeMarketData(market.symbol, timeframe, 60);

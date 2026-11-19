@@ -148,7 +148,7 @@ Supabase CLI/database, hosted Supabase credentials, provider credentials and aut
 
 **Checks:** `npx vitest run backend/src/middleware/fastify-auth.test.ts backend/src/routes/learning-research.test.ts backend/src/routes/paper.test.ts backend/src/server.test.ts src/lib/vite-env-safety.test.ts` — PASS (4 files, 22 tests; Vitest did not report the frontend env safety test in that invocation, so it is NOT-VERIFIED by that command). Existing route tests cover unauthenticated protected paths and malformed/disabled execution. A source scan for service-key references found them only in backend server config, `.env.example` names/placeholders, and server-side Edge Function env reads; `.env` values were not opened or printed.
 
-**Remaining risks:** no live RLS allow/deny tests, privileged-key bundle artifact inspection, Supabase MFA session or dependency audit was run against a deployed service. The sample `.env.example` keeps admin MFA flags false; deployment policy should require MFA for privileged operations.
+**Remaining risks:** no live RLS allow/deny tests, privileged-key bundle artifact inspection, Supabase MFA session or dependency audit was run against a deployed service. Admin MFA is enforced unconditionally by the server middleware (verified factor plus `aal2`); `.env.example` contains no MFA bypass flag. Deployment must still provide an MFA-enrolled admin account and enforce the matching Supabase policy.
 
 ## Stage 8 report — scheduler ordering and recovery
 

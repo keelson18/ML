@@ -16,6 +16,12 @@ resetMassiveBudgetForTests();
 
 const ALIGNED_HOUR_MS = Math.floor(1_700_000_000 / 3_600) * 3_600 * 1_000;
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 // Build a valid one-candle Massive response with a caller-selected timestamp.
 function massiveResponse(time = ALIGNED_HOUR_MS, status = 200): Response {
   return new Response(JSON.stringify({
@@ -132,6 +138,32 @@ describe('market data instrument mapping', () => {
     expect(result.candles).toEqual([
       { time: start / 1000, open: 100, high: 104, low: 99, close: 103, volume: 6 },
       { time: (start + 180_000) / 1000, open: 103, high: 107, low: 102, close: 106, volume: 15 },
+    ]);
+  });
+
+  it('does not emit a 3m candle while its bucket is still open', async () => {
+    if (!btcMarket) throw new Error('BTCUSD market missing.');
+    btcMarket.provider = 'twelvedata';
+    btcMarket.sourceSymbol = 'BTC/USD';
+    btcMarket.exchange = 'Twelve Data';
+    config.twelveDataApiKey = 'server-twelve-key';
+    const start = Date.parse('2026-10-14T20:00:00Z');
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(start + 90_000));
+    const values = [start - 180_000, start - 120_000, start - 60_000, start, start + 60_000]
+      .map((time, index) => ({
+        datetime: new Date(time).toISOString().replace('T', ' ').slice(0, 19),
+        open: String(100 + index), high: String(102 + index), low: String(99 + index),
+        close: String(101 + index), volume: '1',
+      })).reverse();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      status: 'ok', meta: { symbol: 'BTC/USD' }, values,
+    }), { status: 200 })));
+
+    const result = await fetchMarketData('BTCUSD', '3m', 5);
+
+    expect(result.candles).toEqual([
+      { time: (start - 180_000) / 1000, open: 100, high: 104, low: 99, close: 103, volume: 3 },
     ]);
   });
 
@@ -320,6 +352,26 @@ describe('market data cache freshness and bounds', () => {
     expect(second.stale).toBe(false);
     expect(second.fetchedAt).toBe(first.fetchedAt);
     expect(getCachedCandleFreshness(['BTCUSD'], ['1h'], 3)[0]?.latestClosedPrice).toBe(101);
+  });
+
+  it('does not let an out-of-order older response overwrite a newer cached series', async () => {
+    config.massiveApiKey = 'test-key';
+    const older = deferred<Response>();
+    const newer = deferred<Response>();
+    const fetchMock = vi.fn().mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise);
+    vi.stubGlobal('fetch', fetchMock);
+
+    // Different priorities create separate in-flight requests for the same cache key.
+    const olderRequest = fetchMarketData('BTCUSD', '1h', 100);
+    const newerRequest = fetchMarketData('BTCUSD', '1h', 100, { priority: true });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    newer.resolve(massiveResponse(ALIGNED_HOUR_MS + 3_600_000));
+    older.resolve(massiveResponse(ALIGNED_HOUR_MS));
+    await Promise.all([olderRequest, newerRequest]);
+
+    const cached = await fetchMarketData('BTCUSD', '1h', 100);
+    expect(cached.candles[0]?.time).toBe((ALIGNED_HOUR_MS + 3_600_000) / 1000);
   });
 
   it('refetches after the timeframe TTL expires', async () => {

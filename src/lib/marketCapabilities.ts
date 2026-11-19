@@ -19,6 +19,35 @@ export function hasProviderAdapter(market: Market): boolean {
   return providerAdapterFor(market.provider) !== null;
 }
 
+// Provider budget limits supplied by the caller. The adapter owns the formula, so callers
+// never branch on provider names (and adding an adapter needs no changes in their code).
+export interface ProviderProbeLimits {
+  marketProbeIntervalMs: number;
+  massiveRequestsPerWindow: number;
+  massiveBudgetWindowMs: number;
+  massiveTraderReservedRequests: number;
+  twelveDataRequestsPerWindow: number;
+  twelveDataBudgetWindowMs: number;
+}
+
+type ProbeSpacingRule = (limits: ProviderProbeLimits) => number;
+
+const PROVIDER_PROBE_SPACING: Readonly<Record<ProviderAdapterId, ProbeSpacingRule>> = {
+  massive: ({ marketProbeIntervalMs, massiveRequestsPerWindow, massiveBudgetWindowMs, massiveTraderReservedRequests }) => {
+    const reserved = Math.min(massiveTraderReservedRequests, Math.max(0, massiveRequestsPerWindow - 1));
+    const standardRequestSlots = Math.max(1, massiveRequestsPerWindow - reserved);
+    return Math.max(marketProbeIntervalMs, Math.ceil(massiveBudgetWindowMs / standardRequestSlots));
+  },
+  twelvedata: ({ marketProbeIntervalMs, twelveDataRequestsPerWindow, twelveDataBudgetWindowMs }) =>
+    Math.max(marketProbeIntervalMs, Math.ceil(twelveDataBudgetWindowMs / Math.max(1, twelveDataRequestsPerWindow))),
+};
+
+export function providerProbeSpacingMs(provider: string | undefined, limits: ProviderProbeLimits): number {
+  const adapter = providerAdapterFor(provider);
+  if (!adapter) return limits.marketProbeIntervalMs;
+  return PROVIDER_PROBE_SPACING[adapter](limits);
+}
+
 // Provider-specific ticker resolution. Returns null when the registry cannot supply a real
 // provider symbol; callers must treat that as "unsupported", never invent a mapping.
 export function resolveSourceSymbol(market: Market): string | null {

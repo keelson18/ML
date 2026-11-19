@@ -10,7 +10,7 @@ describe('MobileNavigation', () => {
   it('renders four user primary destinations and More entry', () => {
     const markup = renderNavigation(false);
     expect(markup.match(/class="mobile-tab(?: is-active)?"/g)).toHaveLength(5);
-    for (const label of ['Chart', 'Trader', 'Portfolio', 'Research', 'More']) expect(markup).toContain(`>${label}<`);
+    for (const label of ['Dashboard', 'Trader', 'Portfolio', 'Research', 'More']) expect(markup).toContain(`>${label}<`);
     expect(markup).not.toContain('sidebar-backdrop');
     expect(markup).not.toContain('AI Learning');
   });

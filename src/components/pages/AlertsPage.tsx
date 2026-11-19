@@ -35,7 +35,10 @@ export default function AlertsPage() {
 
   useEffect(() => {
     const symbols = [...new Set(activeAlerts.map((alert) => alert.symbol))];
-    const unsubscribe = symbols.map((trackedSymbol) => getDataProvider(trackedSymbol).subscribeKlines(trackedSymbol, '1m', (candle) => {
+    const unsubscribe = symbols.map((trackedSymbol) => getDataProvider(trackedSymbol).subscribeKlines(trackedSymbol, '1m', (candle, closed) => {
+      // Streaming forming bars are zero-volume and can change before the minute closes.
+      // Only a closed candle may persist a price-alert trigger.
+      if (!closed) return;
       const crossed = activeAlerts.filter((alert) => alert.symbol === trackedSymbol
         && (alert.direction === 'above' ? candle.close >= alert.targetPrice : candle.close <= alert.targetPrice));
       for (const alert of crossed) {

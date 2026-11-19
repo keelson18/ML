@@ -14,10 +14,10 @@ const DEFAULT_NOTIFICATIONS: UserPreferences['notifications'] = { marketAlerts: 
 export default function SettingsPage() {
   const { user, profile, refreshProfile } = useAuth();
   const { theme, syncError, toggle } = useTheme();
-  const passwordLockKey = `password-change-lock-until:${user?.id ?? 'unknown'}`;
-  const passwordFailuresKey = `password-change-failures:${user?.id ?? 'unknown'}`;
   const [notifications, setNotifications] = useState(DEFAULT_NOTIFICATIONS);
   const [loading, setLoading] = useState(true);
+  const [preferencesFailed, setPreferencesFailed] = useState(false);
+  const [preferencesAttempt, setPreferencesAttempt] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -26,13 +26,6 @@ export default function SettingsPage() {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [passwordFailures, setPasswordFailures] = useState(() => Number(localStorage.getItem(passwordFailuresKey)) || 0);
-  const [passwordLocked, setPasswordLocked] = useState(() => {
-    const until = Number(localStorage.getItem(passwordLockKey));
-    if (until > Date.now()) return true;
-    localStorage.removeItem(passwordLockKey);
-    return false;
-  });
   const [accountBusy, setAccountBusy] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
   const [sessionsBusy, setSessionsBusy] = useState(false);
@@ -41,14 +34,24 @@ export default function SettingsPage() {
 
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
+    setPreferencesFailed(false);
+    setError(null);
     workspaceApi.getPreferences()
       .then((preferences) => {
-        if (!cancelled && preferences) setNotifications(preferences.notifications);
+        if (cancelled) return;
+        if (preferences) setNotifications(preferences.notifications);
+        setSaved(false);
       })
-      .catch((loadError) => { if (!cancelled) setError(loadError instanceof Error ? loadError.message : 'Could not load your preferences.'); })
+      .catch((loadError) => {
+        if (cancelled) return;
+        setPreferencesFailed(true);
+        setSaved(false);
+        setError(loadError instanceof Error ? loadError.message : 'Could not load your preferences.');
+      })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [user?.id]);
+  }, [user?.id, preferencesAttempt]);
 
   useEffect(() => { setDisplayName(profile?.displayName ?? ''); }, [profile?.displayName]);
   useEffect(() => { setEmail(user?.email ?? ''); }, [user?.email]);
@@ -96,27 +99,14 @@ export default function SettingsPage() {
 
   const passwordStrong = newPassword.length >= 12 && /[a-z]/.test(newPassword) && /[A-Z]/.test(newPassword) && /[0-9]/.test(newPassword);
   const updatePassword = async () => {
-    if (!user?.email || passwordLocked || passwordFailures >= 5 || !passwordStrong || newPassword !== confirmPassword) return;
+    if (!user?.email || !passwordStrong || newPassword !== confirmPassword) return;
     setAccountBusy(true); setAccountMessage('');
     try {
       await changePasswordWithReauthentication(user.email, currentPassword, newPassword);
-      setCurrentPassword(''); setNewPassword(''); setConfirmPassword(''); setPasswordFailures(0); setPasswordLocked(false);
-      localStorage.removeItem(passwordLockKey); localStorage.removeItem(passwordFailuresKey);
+      setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
       setAccountMessage('Password updated.');
     } catch {
-      const nextFailures = passwordFailures + 1;
-      setPasswordFailures(nextFailures);
-      localStorage.setItem(passwordFailuresKey, String(nextFailures));
-      if (nextFailures >= 5) {
-        localStorage.setItem(passwordLockKey, String(Date.now() + 15 * 60_000));
-        setPasswordLocked(true);
-        setAccountMessage('Too many failed attempts. Password changes are locked for 15 minutes.');
-        window.setTimeout(() => {
-          localStorage.removeItem(passwordLockKey); localStorage.removeItem(passwordFailuresKey);
-          setPasswordFailures(0);
-          setPasswordLocked(false);
-        }, 15 * 60_000);
-      } else setAccountMessage('Password could not be updated. Check your current password and requirements.');
+      setAccountMessage('Password could not be updated. Check your current password and requirements.');
     } finally { setAccountBusy(false); }
   };
 
@@ -141,6 +131,7 @@ export default function SettingsPage() {
   };
 
   const updateNotifications = async (next: UserPreferences['notifications']) => {
+    if (preferencesFailed || loading) return;
     const previous = notifications;
     setNotifications(next);
     setSaving(true);
@@ -172,7 +163,7 @@ export default function SettingsPage() {
 
         <div className="grid gap-3 border-b border-border/60 pb-5 sm:grid-cols-[1fr_auto]"><label className="text-xs font-medium">Change email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} className="mt-1 block w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-text" /></label><button type="button" disabled={accountBusy || !email.trim() || email === user?.email} onClick={() => void updateEmail()} className="self-end rounded-lg border border-border px-3 py-2 text-xs font-medium disabled:opacity-50">Update email</button></div>
 
-        <div className="grid gap-3 border-b border-border/60 pb-5 sm:grid-cols-[1fr_auto]"><div className="space-y-2"><label className="block text-xs font-medium">Current password<input type="password" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} className="mt-1 block w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-text" /></label><label className="block text-xs font-medium">New password<input type="password" autoComplete="new-password" minLength={12} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="12+ chars, upper/lowercase and a number" className="mt-1 block w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-text" /></label><label className="block text-xs font-medium">Confirm new password<input type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className="mt-1 block w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-text" /></label><p className="text-xs text-muted">Your current password is re-verified with Supabase before changing it.</p></div><button type="button" disabled={accountBusy || passwordLocked || passwordFailures >= 5 || !currentPassword || !passwordStrong || newPassword !== confirmPassword} onClick={() => void updatePassword()} className="self-end rounded-lg border border-border px-3 py-2 text-xs font-medium disabled:opacity-50">Update password</button></div>
+        <div className="grid gap-3 border-b border-border/60 pb-5 sm:grid-cols-[1fr_auto]"><div className="space-y-2"><label className="block text-xs font-medium">Current password<input type="password" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} className="mt-1 block w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-text" /></label><label className="block text-xs font-medium">New password<input type="password" autoComplete="new-password" minLength={12} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="12+ chars, upper/lowercase and a number" className="mt-1 block w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-text" /></label><label className="block text-xs font-medium">Confirm new password<input type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className="mt-1 block w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-text" /></label><p className="text-xs text-muted">Your current password is re-verified before changing it. Attempts are limited by the authentication provider.</p></div><button type="button" disabled={accountBusy || !currentPassword || !passwordStrong || newPassword !== confirmPassword} onClick={() => void updatePassword()} className="self-end rounded-lg border border-border px-3 py-2 text-xs font-medium disabled:opacity-50">Update password</button></div>
         {accountMessage && <p role="status" className="text-xs text-muted">{accountMessage}</p>}
 
         <div className="flex items-center justify-between gap-4">
@@ -189,12 +180,16 @@ export default function SettingsPage() {
         <div className="border-t border-border/60 pt-4">
           <div className="flex items-center gap-2 mb-3"><Bell className="w-4 h-4 text-primary" /><h2 className="text-sm font-medium">Notifications</h2></div>
           {loading ? <div className="text-xs text-muted">Loading preferences…</div> : <div className="space-y-3">
-            <PreferenceToggle label="Price alert updates" description="Show when a monitored price level is reached." checked={notifications.marketAlerts} disabled={saving} onChange={(checked) => updateNotifications({ ...notifications, marketAlerts: checked })} />
-            <PreferenceToggle label="News updates" description="Receive updates when new research is published." checked={notifications.news} disabled={saving} onChange={(checked) => updateNotifications({ ...notifications, news: checked })} />
+            <PreferenceToggle label="Price alert updates" description="Show when a monitored price level is reached." checked={notifications.marketAlerts} disabled={saving || preferencesFailed} onChange={(checked) => updateNotifications({ ...notifications, marketAlerts: checked })} />
+            <PreferenceToggle label="News updates" description="Receive updates when new research is published." checked={notifications.news} disabled={saving || preferencesFailed} onChange={(checked) => updateNotifications({ ...notifications, news: checked })} />
           </div>}
           {syncError && <p role="alert" className="text-xs text-danger mt-3">{syncError}</p>}
-          {error && <p role="alert" className="text-xs text-danger mt-3">{error}</p>}
-          {saved && !saving && <p role="status" className="text-xs text-success mt-3">Preferences saved.</p>}
+          {error && !preferencesFailed && <p role="alert" className="text-xs text-danger mt-3">{error}</p>}
+          {preferencesFailed && !loading && <div className="mt-3 flex flex-wrap items-center gap-3">
+            <p role="alert" className="text-xs text-danger">Notification preferences could not be loaded. Default values are shown; changes are disabled until you retry.{error ? ` ${error}` : ''}</p>
+            <button type="button" onClick={() => setPreferencesAttempt((attempt) => attempt + 1)} className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:border-primary/40">Retry loading preferences</button>
+          </div>}
+          {saved && !saving && !preferencesFailed && <p role="status" className="text-xs text-success mt-3">Preferences saved.</p>}
         </div>
       </section>
     </div>

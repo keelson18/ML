@@ -18,6 +18,7 @@ export default function MultiTimeframeTerminal({ symbol, theme }: Props) {
   const [panels, setPanels] = useState<PanelState[]>(DEFAULT_PANELS);
   const [series, setSeries] = useState<Partial<Record<Timeframe, MultiTimeframeSeriesResult>>>({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const dataProvider = useMemo(() => getDataProvider(symbol), [symbol]);
   const timeframeKey = panels.map(({ timeframe }) => timeframe).join(',');
 
@@ -25,9 +26,11 @@ export default function MultiTimeframeTerminal({ symbol, theme }: Props) {
     let cancelled = false;
     setLoading(true);
     setSeries({});
+    setLoadError(null);
     const requests = timeframeKey.split(',').map((timeframe) => ({ timeframe: timeframe as Timeframe, label: timeframe, role: 'CUSTOM', limit: LIMITS[timeframe as Timeframe] }));
     fetchMultiTimeframeAnalysis(dataProvider, symbol, requests)
       .then((results) => { if (!cancelled) setSeries(results); })
+      .catch((fetchError) => { if (!cancelled) setLoadError(fetchError instanceof Error ? fetchError.message : 'Could not load timeframe data.'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [dataProvider, symbol, timeframeKey]);
@@ -40,6 +43,7 @@ export default function MultiTimeframeTerminal({ symbol, theme }: Props) {
       {panels.map((panel, index) => {
         const result = series[panel.timeframe];
         const candles = result?.candles ?? [];
+        const panelError = loadError ?? result?.error;
         return (
           <section id={`terminal-${index}`} className={`mtf-chart-panel mtf-chart-panel-${panel.size} ${panel.timeframe === '15m' ? 'is-execution' : ''}`} key={index}>
             <header className="mtf-chart-header">
@@ -57,10 +61,10 @@ export default function MultiTimeframeTerminal({ symbol, theme }: Props) {
                 </button>
                 <button type="button" onClick={() => updatePanel(index, DEFAULT_PANELS[index])} aria-label={`Reset panel ${index + 1}`} className="rounded p-1 text-muted hover:bg-bg hover:text-text"><RotateCcw className="h-3.5 w-3.5" /></button>
               </div>
-              <small>{candles.length ? `${candles.length} candles` : result?.error ? 'Error' : loading ? 'Loading' : 'No data'}</small>
+              <small>{candles.length ? `${candles.length} candles` : panelError ? 'Error' : loading ? 'Loading' : 'No data'}</small>
             </header>
             <div className="mtf-chart-body">
-              {candles.length > 0 ? <TradingTerminal candles={candles} theme={theme} /> : <span className="command-empty" role={result?.error ? 'alert' : undefined}>{result?.error ? `Request failed: ${result.error}` : loading ? 'Loading timeframe' : 'No data available'}</span>}
+              {candles.length > 0 ? <TradingTerminal candles={candles} theme={theme} /> : <span className="command-empty" role={panelError ? 'alert' : undefined}>{panelError ? `Request failed: ${panelError}` : loading ? 'Loading timeframe' : 'No data available'}</span>}
             </div>
           </section>
         );

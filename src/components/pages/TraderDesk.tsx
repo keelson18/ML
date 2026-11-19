@@ -128,8 +128,7 @@ export default function TraderDesk() {
   const dailyLossUsed = overview && overview.equity > 0 && dailyLossLimitPct > 0 ? Math.max(0, -overview.dailyPnl) / (overview.equity * dailyLossLimitPct / 100) * 100 : 0;
   const weeklyLossUsed = overview && overview.equity > 0 && weeklyLossLimitPct > 0 ? Math.max(0, -overview.weeklyPnl) / (overview.equity * weeklyLossLimitPct / 100) * 100 : 0;
 
-  return <div className="dashboard-page px-4 py-5 lg:px-6">
-    <PageFrame title="Trader Desk" eyebrow="Plan · Execute · Review" description="A paper trading workspace built around written plans, confirmed triggers, and risk limits." icon={ClipboardList}
+  return <PageFrame title="Trader Desk" eyebrow="Plan · Execute · Review" description="A paper trading workspace built around written plans, confirmed triggers, and risk limits." icon={ClipboardList}
       actions={<button type="button" onClick={() => void refresh()} disabled={refreshing} className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-medium text-text hover:border-primary/40 disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />{refreshing ? 'Scanning markets' : 'Refresh plans'}</button>}>
       <div className="mb-5 flex items-start gap-3 rounded-xl border border-warning/30 bg-warning/10 p-4 text-sm text-text">
         <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
@@ -219,8 +218,7 @@ export default function TraderDesk() {
           <p className="text-sm leading-6 text-muted">Small samples are anecdotes. Research needs a locked forward test, costs, buy-and-hold and seeded random baselines, confidence intervals, and a full provider provenance record before trade decisions are trusted.</p>
         </section>
       </div>
-    </PageFrame>
-  </div>;
+  </PageFrame>;
 }
 
 function Metric({ label, value, detail, warning = false }: { label: string; value: string; detail: string; warning?: boolean }) {

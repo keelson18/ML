@@ -109,7 +109,7 @@ export async function buildAdminOverview(): Promise<AdminOverview> {
   const schedulerEnabled = process.env.NODE_ENV !== 'test';
   const schedulerState = paperWorkerState({ enabled: schedulerEnabled, schemaOk: schema.status === 'ok', running: schedulerDiagnostics.running,
     lastCycleAt: schedulerDiagnostics.lastCycleAt, lastError: schedulerDiagnostics.lastError, nowMs: Date.now(),
-    maxCycleAgeMs: (candleSeconds(traderConfig.MGMT_TIMEFRAME as import('../../../src/lib/types').Timeframe) * 3_000) + traderConfig.CLOSE_GRACE_MS + traderConfig.SCHEDULER_JITTER_MS });
+    maxCycleAgeMs: (candleSeconds(traderConfig.MGMT_TIMEFRAME as import('../../../src/lib/types').Timeframe, Date.now() / 1000) * 3_000) + traderConfig.CLOSE_GRACE_MS + traderConfig.SCHEDULER_JITTER_MS });
   const schedulerHealth = paperWorkerHealth(schedulerState);
   const massive = getMassiveBudgetSnapshot();
   const twelveData = getTwelveDataBudgetSnapshot();

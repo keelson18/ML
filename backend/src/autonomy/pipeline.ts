@@ -84,9 +84,10 @@ export class AutonomousPipeline {
       return { ...this.skip(symbol, timeframe, closedCandle, reason), role, closedTrades: [], marketDataStale: true };
     }
     const candleKey = `${symbol}:${role}:${timeframe}`;
-    if (this.processedCandles.get(candleKey) === closedCandle.time) return { role, symbol, timeframe, candle: closedCandle, skipped: 'Closed candle already processed.', closedTrades: [], state: this.state };
+    const processedTime = this.processedCandles.get(candleKey);
+    if (processedTime !== undefined && processedTime >= closedCandle.time) return { role, symbol, timeframe, candle: closedCandle, skipped: 'Closed candle already processed.', closedTrades: [], state: this.state };
     if (await wasCandleProcessed(this.config.accountId, symbol, timeframe, closedCandle.time, role)) {
-      this.processedCandles.set(candleKey, closedCandle.time);
+      this.markProcessedLocally(candleKey, closedCandle.time);
       return { role, symbol, timeframe, candle: closedCandle, skipped: 'Closed candle already processed.', closedTrades: [], state: this.state };
     }
     const closedTrades = role === 'manager'
@@ -96,19 +97,19 @@ export class AutonomousPipeline {
     const session = market ? evaluateMarketSession(market) : undefined;
     if (session && !session.allowed && role !== 'manager') {
       await markCandleProcessed(this.config.accountId, symbol, timeframe, closedCandle.time, role);
-      this.processedCandles.set(candleKey, closedCandle.time);
+      this.markProcessedLocally(candleKey, closedCandle.time);
       return { ...this.skip(symbol, timeframe, closedCandle, session.reason), role, closedTrades };
     }
 
     const candleAgeMs = Date.now() - (closedCandle.time * 1000 + candleDurationMs(timeframe, closedCandle.time * 1000));
     if (role === 'executor' && candleAgeMs > candleDurationMs(timeframe, closedCandle.time * 1000) * traderConfig.MAX_ENTRY_AGE_BARS) {
       await markCandleProcessed(this.config.accountId, symbol, timeframe, closedCandle.time, role);
-      this.processedCandles.set(candleKey, closedCandle.time);
+      this.markProcessedLocally(candleKey, closedCandle.time);
       return { ...this.skip(symbol, timeframe, closedCandle, 'Closed candle is too old for a new entry.'), role, closedTrades };
     }
 
     if (role === 'manager') {
-      this.processedCandles.set(candleKey, closedCandle.time);
+      this.markProcessedLocally(candleKey, closedCandle.time);
       return { role, symbol, timeframe, candle: closedCandle, closedTrades, state: this.state };
     }
 
@@ -136,7 +137,7 @@ export class AutonomousPipeline {
         await generateDailyAccountReview(this.config.accountId, new Date(closedCandle.time * 1000).toISOString().slice(0, 10));
       }
       await markCandleProcessed(this.config.accountId, symbol, timeframe, closedCandle.time, role);
-      this.processedCandles.set(candleKey, closedCandle.time);
+      this.markProcessedLocally(candleKey, closedCandle.time);
       return { role, symbol, timeframe, candle: closedCandle, plan: plannerResult.plan, planReason: plannerResult.reason, closedTrades, state: this.state };
     }
 
@@ -147,7 +148,7 @@ export class AutonomousPipeline {
         entriesAllowed: true,
         shadowMode: !this.config.enableExecution || traderConfig.SHADOW_MODE_ENABLED,
       });
-      this.processedCandles.set(candleKey, closedCandle.time);
+      this.markProcessedLocally(candleKey, closedCandle.time);
       if (result.filled > 0) this.snapshot = { ...this.snapshot, executedOrders: this.snapshot.executedOrders + result.filled };
       return {
         role, symbol, timeframe, candle: closedCandle, closedTrades, state: this.state,
@@ -176,7 +177,7 @@ export class AutonomousPipeline {
 
       const directionalSignal = decision.decision === 'BUY' || decision.decision === 'SELL';
       await markCandleProcessed(this.config.accountId, symbol, timeframe, closedCandle.time, role);
-      this.processedCandles.set(candleKey, closedCandle.time);
+      this.markProcessedLocally(candleKey, closedCandle.time);
       return {
         symbol,
         role,
@@ -198,6 +199,11 @@ export class AutonomousPipeline {
     } finally {
       if (this.state === 'DECIDING') this.transition('MONITORING');
     }
+  }
+
+  private markProcessedLocally(candleKey: string, time: number): void {
+    const existing = this.processedCandles.get(candleKey);
+    if (existing === undefined || time > existing) this.processedCandles.set(candleKey, time);
   }
 
   private skip(symbol: string, timeframe: Timeframe, candle: Candle, reason: string): PipelineResult {

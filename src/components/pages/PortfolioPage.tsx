@@ -47,7 +47,7 @@ export default function PortfolioPage() {
       const entries = await Promise.all(symbols.map(async (symbol) => {
         try {
           const series = await fetchCanonicalMarketData(symbol, '1m', 3);
-          const candle = selectClosedCandles(series.candles, '1m').at(-1);
+          const candle = selectClosedCandles(series.candles, '1m', series.fetchedAt).at(-1);
           if (series.stale || !candle || !Number.isFinite(candle.close) || candle.close <= 0) return { symbol, price: null, stale: true };
           return { symbol, price: candle.close, stale: false };
         } catch {

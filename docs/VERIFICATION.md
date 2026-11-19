@@ -184,7 +184,7 @@ A PostgreSQL/Supabase RLS integration test was not run, so owner/admin/anon beha
 ## Chart performance (Phases 1–2)
 
 - **Incremental candle updates:** PASS (unit). `src/lib/chart-feed.test.ts` verifies that live ticks use `update`, that `setData` runs only on replacement, and that identical data does nothing.
-- **Overlay diffing:** PASS (unit). Overlays are keyed and updated in place; only stale keys are removed; markers are re-set only when their content changes.
+- **Chart overlays:** PASS (unit). `src/components/price-chart-overlays.test.ts` covers line, marker and price-line planning, width clamping, non-finite filtering, and moving-average generation. `PriceChart.tsx` rebuilds overlay series, markers and price lines from that plan when overlays or theme change.
 - **Tick batching and throttled accessibility table:** PASS (code review only). Not measured in a browser.
 - **Server-Timing and timing helpers:** PASS (unit) for formatting. The candles route's header is not exercised by a route test because the provider mock shape is not set up for a success response.
 - **Frame and long-task measurement, React Profiler shell re-render check, zoom/scroll preservation:** NOT-VERIFIED (no browser access in this session).
@@ -461,7 +461,7 @@ The configured strict probe was rerun from the current worktree. BTCUSD/Twelve D
 
 ## Responsive UI sizing - 2026-10-16
 
-- **Font audit:** baseline in this checkout had 34 CSS `font-size` rules at 8–11px and 94 `text-[8–11px]` utilities. Current source has 0 literal CSS sizes in that range and 0 such utilities; replaced rules/classes use 12px or larger tokens/utilities. The 11px `--fs-2xs` token remains available for secondary captions but is not currently used for visible text.
+- **Font audit:** baseline in this checkout had 34 CSS `font-size` rules at 8–11px and 94 `text-[8–11px]` utilities. Current source has 0 literal CSS sizes below 12px and 0 such utilities; rules use 12px tokens/utilities. `--fs-2xs` and `--fs-xs` both resolve to 0.75rem (12px), and `check:ui-layout` now enforces the 12px floor including token resolutions.
 - **Sidebar:** collapse state, props, controls, icons, and collapsed CSS removed. Desktop sidebar stays expanded at 248px. Admin remains conditional on the role supplied by the authenticated profile; server checks remain authoritative.
 - **Checks:** `npm run check:ui-layout`, `npm run typecheck`, `npm run lint`, `npm test` (67 files / 426 tests), and `npm run build` PASS. Build emits the existing large application chunk warning.
 - **Browser screenshots / visual review:** NOT-VERIFIED. No viewport screenshots or authenticated page review were captured in this session. 390x844, 414x896, 768x1024, 1280x800, and 1440x900 overflow, clipped text, overlap, text scale, and touch targets remain unverified.
@@ -495,11 +495,11 @@ The probe exited 0. These results verify this configured symbol at one point in 
 - GitHub gate NOT-VERIFIED: `.github/workflows/ci.yml` is present, but this environment has no `gh` CLI or authenticated GitHub administration path; workflow status and required-check branch protection were not inspected or changed.
 - **Phase 1 remains NOT GREEN. Phase 2 and later gated work has not started.**
 
-## Chart trade overlays and drawing layers â€” 2026-10-16
+## Chart trade overlays and drawing layers — 2026-10-16
 
 - Added authenticated `GET /api/v1/trader/trades?symbol=...`, filtering paper positions, fills, plans and journal data through the authenticated account ID. Added an unauthenticated-request regression assertion.
-- Chart history now refreshes independently every 30 seconds. Completed paper fills render entry/exit markers, exit reason, dashed connector and net PnL/R labels; open positions are sourced from the account positions and connect to the latest chart candle with floating PnL. Selecting or focusing a marker opens the existing `ExplainableTrade` component with stored execution details. New paper positions/trades record requested entry price, entry confidence and engine versions; old ledger records that predate these fields display “Not recorded.” Records outside the currently visible chart coordinates are counted in a status chip; their candles must be in the chart's loaded history before they can be plotted.
-- Added independent Structure, Zones, Trade levels, Signals and Trades switches. Preferences use the user's RLS-protected `user_preferences.chart_layers` JSONB column; migration `20261016000001_chart_layer_preferences.sql` must be applied in the target database. Existing overlay line width is 2px; zone borders are 1.5px and visible labels are 14px.
+- **Superseded:** the later chart simplification removed the per-layer Structure / Zones / Trade levels / Signals / Trades switches, their `user_preferences.chart_layers` storage, and the trade-marker/PnL drawing layer. The live chart is `PriceChart.tsx`, which renders candlesticks plus optional generic overlays (line series, markers, price lines) supplied by callers; `TradingTerminal` supplies a 20-bar moving-average line. `check:ui-layout` fails if the removed layer labels are reintroduced.
+- Existing overlay line width is 2px by default; callers may supply a width, which is clamped to the 1–4 range supported by the charting library.
 - Regression coverage added for closed trade mapping and open position floating PnL. `npm run typecheck`, `npm run backend:typecheck`, `npm run check:migration-versions` (47 unique migrations), `npm run check:ui-layout`, and targeted ESLint **PASS**.
 - Vitest and production build **NOT-VERIFIED in this execution environment**: Vite/esbuild config startup failed with OS `spawn EPERM`; the native config-loader workaround then failed resolving the extensionless Vite config import. No screenshots were captured, and desktop/browser/iPhone review remains **NOT-VERIFIED**. The local automated checks do not establish marker placement or touch usability on a rendered device.
 - This begins the explicitly immediate chart work in Phase 7 (§7.4–7.5); it does not indicate Phase 2 ledger crash-safety or the other Phase 1 gate blockers are complete.
